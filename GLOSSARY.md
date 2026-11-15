@@ -73,3 +73,29 @@ _Avoid_: Ingest time, server time, arrival time
 **Rejected message**:
 A message on a telemetry topic that the platform refused to store as a Reading, kept with the reason it was refused.
 _Avoid_: Dead letter, invalid reading, bad message
+
+### Alerts
+
+**Alert Rule**:
+A condition an Admin sets up for one Asset or every Asset in an Asset Group: leaving or entering a Geofence, a sensor value past a threshold, or no Readings for a set time.
+_Avoid_: Trigger, condition, policy
+
+**Alert**:
+A record that an Alert Rule's condition became true for one Asset; an Asset has at most one Active Alert per Alert Rule.
+_Avoid_: Alarm, incident, notification, event
+
+**Active**:
+Said of an Alert that is Open or Acknowledged, that is, not yet Resolved.
+_Avoid_: Live, current, unresolved
+
+**Acknowledge**:
+To mark an Open Alert as seen by a user without ending it.
+_Avoid_: Ack, accept, claim
+
+**Resolve**:
+To end an Alert, done by the platform when its condition clears or by a user at any time; a Resolved Alert never reopens.
+_Avoid_: Close, dismiss, clear
+
+**Hysteresis**:
+The margin a sensor value must move back past a threshold before a threshold Alert resolves itself, so a value hovering at the threshold does not raise Alert after Alert.
+_Avoid_: Deadband, tolerance, buffer
