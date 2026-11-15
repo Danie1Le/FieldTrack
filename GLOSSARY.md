@@ -99,3 +99,25 @@ _Avoid_: Close, dismiss, clear
 **Hysteresis**:
 The margin a sensor value must move back past a threshold before a threshold Alert resolves itself, so a value hovering at the threshold does not raise Alert after Alert.
 _Avoid_: Deadband, tolerance, buffer
+
+### Simulation
+
+**Scenario**:
+A script for a simulator run that says which Devices suffer which Faults, Power offs, Coverage gaps or clock problems, and when, so a run can be repeated exactly.
+_Avoid_: Script, test plan, playbook
+
+**Fault**:
+A simulated equipment problem that changes a Device's sensor values over time, such as overheating or a fuel leak.
+_Avoid_: Failure, error, anomaly, incident
+
+**Power off**:
+A simulated period when a Device sends nothing and keeps nothing; it starts a new Boot when it comes back.
+_Avoid_: Outage, shutdown, dropout
+
+**Coverage gap**:
+A simulated period when a Device keeps taking Readings but cannot send them, then sends them late in the same Boot when it reconnects.
+_Avoid_: Dropout, signal loss, buffering
+
+**Manifest**:
+The simulator's record of what one run actually published and injected, used as ground truth to score lost Readings, offline detection and false Alerts.
+_Avoid_: Log, report, expected results
