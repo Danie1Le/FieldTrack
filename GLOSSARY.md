@@ -34,6 +34,20 @@ _Avoid_: Deleted, retired, inactive
 A named area on the map; it affects Assets only through an Alert Rule that names it.
 _Avoid_: Zone, area, boundary, fence
 
+### People
+
+**Admin**:
+A user who manages Assets, Devices, Geofences, Alert Rules and users.
+_Avoid_: Administrator, superuser, manager
+
+**Operator**:
+A user who watches the map and acknowledges and resolves Alerts but changes nothing else.
+_Avoid_: Viewer, dispatcher, user
+
+**Demo Operator**:
+The shared Operator account offered to visitors of the cloud demo, reset on every deploy.
+_Avoid_: Guest, demo user, test account
+
 ### Telemetry
 
 **Reading**:
