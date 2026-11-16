@@ -62,9 +62,6 @@ dotnet_naming_style.underscore_camel.capitalization = camel_case
 # Unused usings fail the build (needs GenerateDocumentationFile, set in Directory.Build.props).
 dotnet_diagnostic.IDE0005.severity = warning
 
-# Formatting (the Layout options above) fails the build too.
-dotnet_diagnostic.IDE0055.severity = warning
-
 # EF Core scaffolds migrations in its own style; analyzers skip them.
 [src/FieldTrack.Infrastructure/Persistence/Migrations/*.cs]
 generated_code = true
