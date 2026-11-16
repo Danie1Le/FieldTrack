@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FieldTrack.Domain\FieldTrack.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Shouldly" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- The integration tests own TestImages; compiling the same file here lets a fast test check it against docker-compose. -->
+  <ItemGroup>
+    <Compile Include="..\FieldTrack.IntegrationTests\TestImages.cs" Link="TestImages.cs" />
+    <None Include="..\..\docker-compose.yml" Link="docker-compose.yml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
