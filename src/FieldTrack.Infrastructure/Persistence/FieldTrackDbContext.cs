@@ -23,6 +23,12 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     /// <summary>Named sets of Assets.</summary>
     public DbSet<AssetGroup> AssetGroups => Set<AssetGroup>();
 
+    /// <summary>Registered transmitters, Archived ones included.</summary>
+    public DbSet<Device> Devices => Set<Device>();
+
+    /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
+    public DbSet<Attachment> Attachments => Set<Attachment>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -65,6 +71,24 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                 "ck_assets_type", $"type IN ({string.Join(", ", Enum.GetNames<AssetType>().Select(name => $"'{name}'"))})"));
             // An Asset Group that still has Assets cannot be deleted (#24).
             asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Telemetry names a Device only by serial number, so one serial is one Device, Archived or not.
+        builder.Entity<Device>().HasIndex(device => device.SerialNumber).IsUnique();
+
+        builder.Entity<Attachment>(attachment =>
+        {
+            // Attachments are history: deleting an Asset or Device must decide what happens to them
+            // (#25), so the database refuses to cascade.
+            attachment.HasOne<Device>().WithMany().HasForeignKey(a => a.DeviceId).OnDelete(DeleteBehavior.Restrict);
+            attachment.HasOne<Asset>().WithMany().HasForeignKey(a => a.AssetId).OnDelete(DeleteBehavior.Restrict);
+            // A Device is on at most one Asset, and an Asset has at most one Device, at any time (spec #21).
+            attachment.HasIndex(a => a.DeviceId).IsUnique().HasFilter("detached_at IS NULL").HasDatabaseName("ix_attachments_device_id_open");
+            attachment.HasIndex(a => a.AssetId).IsUnique().HasFilter("detached_at IS NULL").HasDatabaseName("ix_attachments_asset_id_open");
+            // History per Device or Asset in time order; also serves the Restrict checks on delete and
+            // ingest's lookup of the Attachment covering a Reading's Device time.
+            attachment.HasIndex(a => new { a.DeviceId, a.AttachedAt });
+            attachment.HasIndex(a => new { a.AssetId, a.AttachedAt });
         });
     }
 }
