@@ -1,3 +1,4 @@
+using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -15,6 +16,12 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 {
     /// <summary>Refresh tokens, stored hashed (ADR 0002).</summary>
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    /// <summary>Tracked field equipment, Archived ones included.</summary>
+    public DbSet<Asset> Assets => Set<Asset>();
+
+    /// <summary>Named sets of Assets.</summary>
+    public DbSet<AssetGroup> AssetGroups => Set<AssetGroup>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder builder)
@@ -47,6 +54,13 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             refreshToken.HasIndex(token => token.TokenHash).IsUnique();
             // Deleting a user deletes their refresh tokens.
             refreshToken.HasOne<FieldTrackUser>().WithMany().HasForeignKey(token => token.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<Asset>(asset =>
+        {
+            // Stored by name so hand-written SQL and exports read it without a lookup.
+            asset.Property(a => a.Type).HasConversion<string>();
+            asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId);
         });
     }
 }
