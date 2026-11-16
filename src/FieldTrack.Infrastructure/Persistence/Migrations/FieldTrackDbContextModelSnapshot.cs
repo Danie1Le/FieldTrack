@@ -23,6 +23,61 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "postgis");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("FieldTrack.Domain.Assets.Asset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Archived")
+                        .HasColumnType("boolean")
+                        .HasColumnName("archived");
+
+                    b.Property<Guid?>("AssetGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_group_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_assets");
+
+                    b.HasIndex("AssetGroupId")
+                        .HasDatabaseName("ix_assets_asset_group_id");
+
+                    b.ToTable("assets", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_assets_type", "type IN ('Truck', 'Excavator', 'Generator', 'Sensor')");
+                        });
+                });
+
+            modelBuilder.Entity("FieldTrack.Domain.Assets.AssetGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_asset_groups");
+
+                    b.ToTable("asset_groups", (string)null);
+                });
+
             modelBuilder.Entity("FieldTrack.Infrastructure.Identity.FieldTrackUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -309,6 +364,15 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasName("pk_user_tokens");
 
                     b.ToTable("user_tokens", (string)null);
+                });
+
+            modelBuilder.Entity("FieldTrack.Domain.Assets.Asset", b =>
+                {
+                    b.HasOne("FieldTrack.Domain.Assets.AssetGroup", null)
+                        .WithMany()
+                        .HasForeignKey("AssetGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_assets_asset_groups_asset_group_id");
                 });
 
             modelBuilder.Entity("FieldTrack.Infrastructure.Identity.RefreshToken", b =>
