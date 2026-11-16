@@ -1,0 +1,42 @@
+using Npgsql;
+using Respawn;
+
+namespace FieldTrack.IntegrationTests;
+
+public sealed class DatabaseResetTests(FieldTrackFixture fixture) : IntegrationTest(fixture)
+{
+    [Fact]
+    public async Task Reset_deletes_test_rows_and_keeps_the_PostGIS_catalogue_and_migration_history()
+    {
+        await using var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
+        await connection.OpenAsync(CancellationToken);
+        // A table of the test's own, so the test does not depend on which tables the migrations create.
+        await ExecuteAsync(connection, "CREATE TABLE reset_probe (id int); INSERT INTO reset_probe VALUES (1)");
+        try
+        {
+            var respawner = await Respawner.CreateAsync(connection, FieldTrackFixture.RespawnerOptions);
+
+            await respawner.ResetAsync(connection);
+
+            (await CountAsync(connection, "reset_probe")).ShouldBe(0);
+            (await CountAsync(connection, "spatial_ref_sys")).ShouldBeGreaterThan(0);
+            (await CountAsync(connection, "\"__EFMigrationsHistory\"")).ShouldBeGreaterThan(0);
+        }
+        finally
+        {
+            await ExecuteAsync(connection, "DROP TABLE reset_probe");
+        }
+    }
+
+    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(CancellationToken);
+    }
+
+    private static async Task<long> CountAsync(NpgsqlConnection connection, string table)
+    {
+        await using var command = new NpgsqlCommand($"SELECT count(*) FROM {table}", connection);
+        return (long)(await command.ExecuteScalarAsync(CancellationToken))!;
+    }
+}

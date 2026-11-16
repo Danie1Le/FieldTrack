@@ -12,8 +12,9 @@ namespace FieldTrack.IntegrationTests;
 
 /// <summary>
 /// One PostGIS and one Mosquitto container for the whole test run, plus the API host started
-/// against them. Starting the host in Development applies the migrations once; tests then reset
-/// data with Respawn instead of recreating containers.
+/// against them. The shared host applies the migrations on startup in Development; hosts derived
+/// from it with <c>WithWebHostBuilder</c> find nothing pending. Tests reset data with Respawn
+/// instead of recreating containers.
 /// </summary>
 public sealed class FieldTrackFixture : IAsyncLifetime
 {
@@ -22,6 +23,14 @@ public sealed class FieldTrackFixture : IAsyncLifetime
 
     // PostGIS keeps its coordinate system catalogue in spatial_ref_sys; it is not test data.
     private static readonly string[] IgnoredTables = ["__EFMigrationsHistory", "spatial_ref_sys"];
+
+    /// <summary>What a reset deletes: every table in the public schema except the ignored ones.</summary>
+    internal static readonly RespawnerOptions RespawnerOptions = new()
+    {
+        DbAdapter = DbAdapter.Postgres,
+        SchemasToInclude = [Schema],
+        TablesToIgnore = [.. IgnoredTables.Select(table => new Table(table))],
+    };
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder(TestImages.PostGis)
         // Same split as docker-compose: the image's init scripts load extensions into the
@@ -58,16 +67,10 @@ public sealed class FieldTrackFixture : IAsyncLifetime
         await using var connection = new NpgsqlConnection(DatabaseConnectionString);
         await connection.OpenAsync();
 
-        // Respawn refuses a schema with nothing to reset, which is the case while the
-        // migrations create no tables of their own; resetting is then a no-op.
+        // Respawn refuses a schema with no resettable tables; with none, there is nothing to reset.
         if (await CountResettableTablesAsync(connection) > 0)
         {
-            _respawner = await Respawner.CreateAsync(connection, new RespawnerOptions
-            {
-                DbAdapter = DbAdapter.Postgres,
-                SchemasToInclude = [Schema],
-                TablesToIgnore = [.. IgnoredTables.Select(table => new Table(table))],
-            });
+            _respawner = await Respawner.CreateAsync(connection, RespawnerOptions);
         }
     }
 
