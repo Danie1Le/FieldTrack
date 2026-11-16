@@ -1,6 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <!-- Local Auth:SigningKey lives in user-secrets (ADR 0002); Development loads them automatically. -->
+    <!-- Local Auth:SigningKey lives in user-secrets (#23); Development loads them automatically. -->
     <UserSecretsId>bbe4444e-dcdf-41cc-b0a2-6e044370514a</UserSecretsId>
   </PropertyGroup>
 

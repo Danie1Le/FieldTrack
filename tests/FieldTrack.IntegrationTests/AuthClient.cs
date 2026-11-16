@@ -6,7 +6,7 @@ namespace FieldTrack.IntegrationTests;
 /// <summary>Calls the sign-in endpoints the way the dashboard does.</summary>
 internal static class AuthClient
 {
-    /// <summary>The body of a successful sign-in, refresh or password change.</summary>
+    /// <summary>The body of a successful sign-in or refresh.</summary>
     public sealed record Tokens(string AccessToken, DateTimeOffset AccessTokenExpiresAt, string RefreshToken);
 
     public static Task<HttpResponseMessage> PostSignInAsync(HttpClient client, string email, string password) =>

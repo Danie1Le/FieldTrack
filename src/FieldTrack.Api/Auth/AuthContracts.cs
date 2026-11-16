@@ -24,7 +24,7 @@ public sealed record RefreshRequest([Required] string RefreshToken)
 
 /// <summary>
 /// Tokens for a signed-in user. The dashboard keeps the access token in memory and the refresh
-/// token in sessionStorage; both travel in the body, not cookies (ADR 0002).
+/// token in sessionStorage (#23); both travel in the body, not cookies (ADR 0002).
 /// </summary>
 /// <param name="AccessToken">The JWT to send as a bearer token.</param>
 /// <param name="AccessTokenExpiresAt">When the access token expires; refresh before then.</param>

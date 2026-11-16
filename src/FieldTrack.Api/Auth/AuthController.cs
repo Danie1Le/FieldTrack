@@ -15,6 +15,8 @@ public sealed class AuthController(
     SignInManager<FieldTrackUser> signInManager,
     TokenService tokens) : ControllerBase
 {
+    private static readonly string DummyPasswordHash = new PasswordHasher<FieldTrackUser>().HashPassword(new FieldTrackUser(), "unused");
+
     /// <summary>Signs in with email and password.</summary>
     /// <response code="401">Wrong email or password, or the account is locked out after repeated failures.</response>
     [HttpPost("sign-in")]
@@ -24,9 +26,17 @@ public sealed class AuthController(
     public async Task<ActionResult<TokenResponse>> SignIn(SignInRequest request, CancellationToken cancellationToken)
     {
         var user = await users.FindByEmailAsync(request.Email);
+        var result = user is null ? null : await signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
         // One answer for an unknown email, a wrong password and a lockout, so none reveals which accounts exist.
-        if (user is null || !(await signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true)).Succeeded)
+        if (user is null || result is not { Succeeded: true })
         {
+            // Unknown emails and locked-out accounts skip the real hash check; hash anyway so the
+            // response time does not tell them apart from a wrong password.
+            if (result is null or { IsLockedOut: true })
+            {
+                users.PasswordHasher.VerifyHashedPassword(new FieldTrackUser(), DummyPasswordHash, request.Password);
+            }
+
             return Unauthorized();
         }
 
