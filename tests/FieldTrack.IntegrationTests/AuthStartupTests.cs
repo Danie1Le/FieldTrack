@@ -1,6 +1,5 @@
 using System.Net;
 using FieldTrack.Api.Auth;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
