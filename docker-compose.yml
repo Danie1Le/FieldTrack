@@ -1,4 +1,4 @@
-# Local FieldTrack stack: `docker compose up -d`.
+# Local FieldTrack stack: `docker compose up --build -d`.
 services:
   postgres:
     # PostgreSQL 16 everywhere (compose, Testcontainers, Azure) so local and cloud never drift.
@@ -27,6 +27,25 @@ services:
     volumes:
       - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
+
+  api:
+    build:
+      context: .
+      dockerfile: src/FieldTrack.Api/Dockerfile
+    environment:
+      # Development applies EF Core migrations on startup.
+      ASPNETCORE_ENVIRONMENT: Development
+      # The aspnet image has no Kerberos library; without GSS disabled Npgsql logs a libgssapi error on connect.
+      ConnectionStrings__FieldTrack: Host=postgres;Database=fieldtrack;Username=fieldtrack;Password=fieldtrack;Gss Encryption Mode=Disable
+      Broker__Host: mosquitto
+      Broker__Port: "1883"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
 
 volumes:
   postgres-data:
