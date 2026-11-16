@@ -1,7 +1,8 @@
 namespace FieldTrack.IntegrationTests;
 
 /// <summary>
-/// Base for tests against the API host: each test starts from an empty database.
+/// Base for tests against the API host: each test starts from an empty database. Tests share one
+/// database and reset it before each test, so test collections run serially (xunit.runner.json).
 /// </summary>
 public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetime
 {
@@ -12,10 +13,10 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     protected static CancellationToken CancellationToken => TestContext.Current.CancellationToken;
 
     /// <inheritdoc />
-    public virtual async ValueTask InitializeAsync() => await Fixture.ResetDatabaseAsync();
+    public async ValueTask InitializeAsync() => await Fixture.ResetDatabaseAsync();
 
     /// <inheritdoc />
-    public virtual ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;
