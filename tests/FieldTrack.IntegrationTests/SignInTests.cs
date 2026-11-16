@@ -21,7 +21,7 @@ public sealed class SignInTests(FieldTrackFixture fixture) : IntegrationTest(fix
         var accessToken = new JsonWebToken(tokens.AccessToken);
         accessToken.Alg.ShouldBe("HS256");
         (accessToken.ValidTo - accessToken.IssuedAt).ShouldBe(TimeSpan.FromMinutes(15));
-        accessToken.Claims.Where(claim => claim.Type == "role").Select(claim => claim.Value).ShouldBe(["Admin"]);
+        AuthClient.RolesOf(tokens.AccessToken).ShouldBe(["Admin"]);
         accessToken.GetClaim("email").Value.ShouldBe(AdminEmail);
         tokens.AccessTokenExpiresAt.ShouldBe(new DateTimeOffset(accessToken.ValidTo, TimeSpan.Zero));
         tokens.RefreshToken.ShouldNotBeNullOrWhiteSpace();

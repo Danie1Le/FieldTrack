@@ -45,7 +45,7 @@ A user who watches the map and acknowledges and resolves Alerts but changes noth
 _Avoid_: Viewer, dispatcher, user
 
 **Demo Operator**:
-The shared Operator account offered to visitors of the cloud demo, reset on every deploy.
+The shared Operator account offered to visitors of the cloud demo, created and reset on every deploy while demo mode is on. Exempt from lockout; its password cannot be changed (ADR 0002).
 _Avoid_: Guest, demo user, test account
 
 ### Telemetry

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 
 namespace FieldTrack.Api.Auth;
 
@@ -17,7 +18,7 @@ public sealed class AuthController(
     UserManager<FieldTrackUser> users,
     SignInManager<FieldTrackUser> signInManager,
     TokenService tokens,
-    IConfiguration configuration) : ControllerBase
+    IOptions<DemoOperatorOptions> demoOperator) : ControllerBase
 {
     private static readonly string DummyPasswordHash = new PasswordHasher<FieldTrackUser>().HashPassword(new FieldTrackUser(), "unused");
 
@@ -54,9 +55,9 @@ public sealed class AuthController(
 
     /// <summary>
     /// Replaces the user's password and signs them in. This is how a first sign-in with a
-    /// temporary password completes. Every other session of the user ends.
+    /// temporary password completes. All the user's other refresh tokens are revoked.
     /// </summary>
-    /// <response code="400">The new password is too weak.</response>
+    /// <response code="400">The new password is too weak or the same as the current one.</response>
     /// <response code="401">Wrong email or current password, or the account is locked out.</response>
     /// <response code="403">The Demo Operator's password cannot be changed.</response>
     [HttpPost("change-password")]
@@ -72,9 +73,16 @@ public sealed class AuthController(
             return Unauthorized();
         }
 
-        if (UserSeeder.IsDemoOperator(configuration, user))
+        if (demoOperator.Value.IsDemoOperator(user))
         {
             return Problem(statusCode: StatusCodes.Status403Forbidden, title: "The Demo Operator's password cannot be changed.");
+        }
+
+        // Identity accepts the same password again, which would keep a temporary password for good (#23).
+        if (request.NewPassword == request.CurrentPassword)
+        {
+            ModelState.AddModelError(nameof(request.NewPassword), "The new password must differ from the current one.");
+            return ValidationProblem(ModelState);
         }
 
         // ChangePasswordAsync saves the user, the cleared flag included.
@@ -82,7 +90,7 @@ public sealed class AuthController(
         var result = await users.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)
         {
-            return this.ValidationProblem(result);
+            return this.IdentityValidationProblem(result);
         }
 
         await tokens.RevokeAllAsync(user.Id, cancellationToken);

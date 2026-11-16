@@ -15,27 +15,55 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     public async Task New_user_must_replace_the_temporary_password_before_getting_tokens()
     {
         using var admin = await AdminClientAsync();
-        using var created = await AuthClient.PostUserAsync(admin, OperatorEmail, "Operator", "Temporary-pass-1");
+        using var created = await AuthClient.PostUserAsync(admin, OperatorEmail, "Operator", AuthClient.TemporaryPassword);
         using var client = Fixture.Api.CreateClient();
 
-        using var withTemporary = await AuthClient.PostSignInAsync(client, OperatorEmail, "Temporary-pass-1");
-        using var changed = await AuthClient.PostChangePasswordAsync(client, OperatorEmail, "Temporary-pass-1", OperatorPassword);
+        using var withTemporary = await AuthClient.PostSignInAsync(client, OperatorEmail, AuthClient.TemporaryPassword);
+        using var changed = await AuthClient.PostChangePasswordAsync(client, OperatorEmail, AuthClient.TemporaryPassword, OperatorPassword);
         var tokens = await AuthClient.ReadTokensAsync(changed);
         using var withOwn = await AuthClient.PostSignInAsync(client, OperatorEmail, OperatorPassword);
-        using var withTemporaryAgain = await AuthClient.PostSignInAsync(client, OperatorEmail, "Temporary-pass-1");
+        using var withTemporaryAgain = await AuthClient.PostSignInAsync(client, OperatorEmail, AuthClient.TemporaryPassword);
 
         created.StatusCode.ShouldBe(HttpStatusCode.Created);
         withTemporary.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        new JsonWebToken(tokens.AccessToken).Claims.Where(claim => claim.Type == "role").Select(claim => claim.Value).ShouldBe(["Operator"]);
+        AuthClient.RolesOf(tokens.AccessToken).ShouldBe(["Operator"]);
         withOwn.StatusCode.ShouldBe(HttpStatusCode.OK);
         withTemporaryAgain.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData(AuthClient.TemporaryPassword)]
+    [InlineData("short")]
+    public async Task Password_change_to_the_same_or_a_weak_password_is_refused_and_keeps_the_change_required(string newPassword)
+    {
+        using var admin = await AdminClientAsync();
+        using var created = await AuthClient.PostUserAsync(admin, OperatorEmail, "Operator", AuthClient.TemporaryPassword);
+        using var client = Fixture.Api.CreateClient();
+
+        using var changed = await AuthClient.PostChangePasswordAsync(client, OperatorEmail, AuthClient.TemporaryPassword, newPassword);
+        using var signIn = await AuthClient.PostSignInAsync(client, OperatorEmail, AuthClient.TemporaryPassword);
+
+        changed.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        signIn.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Admin_creates_another_Admin()
+    {
+        using var admin = await AdminClientAsync();
+        using var created = await AuthClient.PostUserAsync(admin, OperatorEmail, "Admin", AuthClient.TemporaryPassword);
+        using var client = Fixture.Api.CreateClient();
+
+        using var changed = await AuthClient.PostChangePasswordAsync(client, OperatorEmail, AuthClient.TemporaryPassword, OperatorPassword);
+
+        AuthClient.RolesOf((await AuthClient.ReadTokensAsync(changed)).AccessToken).ShouldBe(["Admin"]);
     }
 
     [Fact]
     public async Task Password_change_with_a_wrong_current_password_is_refused()
     {
         using var admin = await AdminClientAsync();
-        using var created = await AuthClient.PostUserAsync(admin, OperatorEmail, "Operator", "Temporary-pass-1");
+        using var created = await AuthClient.PostUserAsync(admin, OperatorEmail, "Operator", AuthClient.TemporaryPassword);
         using var client = Fixture.Api.CreateClient();
 
         using var response = await AuthClient.PostChangePasswordAsync(client, OperatorEmail, "Wrong-pass-1", OperatorPassword);
@@ -44,7 +72,7 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     }
 
     [Fact]
-    public async Task Password_change_ends_the_users_other_sessions()
+    public async Task Password_change_revokes_the_users_other_refresh_tokens()
     {
         using var client = Fixture.Api.CreateClient();
         var before = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
@@ -57,7 +85,7 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     }
 
     [Theory]
-    [InlineData("Viewer", "Temporary-pass-1")]
+    [InlineData("Viewer", AuthClient.TemporaryPassword)]
     [InlineData("Operator", "short")]
     public async Task Create_user_refuses_an_unknown_role_or_a_weak_password(string role, string temporaryPassword)
     {
@@ -73,22 +101,23 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     {
         using var admin = await AdminClientAsync();
 
-        using var response = await AuthClient.PostUserAsync(admin, AdminEmail, "Operator", "Temporary-pass-1");
+        using var response = await AuthClient.PostUserAsync(admin, AdminEmail, "Operator", AuthClient.TemporaryPassword);
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
-    public async Task Admin_lists_users_with_their_roles()
+    public async Task Admin_lists_users_with_their_roles_and_pending_password_changes()
     {
         using var admin = await AdminClientAsync();
         await AuthClient.CreateUserAsync(admin, OperatorEmail, "Operator", OperatorPassword);
+        using var created = await AuthClient.PostUserAsync(admin, "new@fieldtrack.test", "Operator", AuthClient.TemporaryPassword);
 
         var users = await admin.GetFromJsonAsync<JsonElement[]>("/users", CancellationToken);
 
         users.ShouldNotBeNull()
-            .Select(user => (user.GetProperty("email").GetString(), user.GetProperty("role").GetString()))
-            .ShouldBe([(AdminEmail, "Admin"), (OperatorEmail, "Operator")], ignoreOrder: true);
+            .Select(user => (user.GetProperty("email").GetString(), user.GetProperty("role").GetString(), user.GetProperty("mustChangePassword").GetBoolean()))
+            .ShouldBe([(AdminEmail, "Admin", false), (OperatorEmail, "Operator", false), ("new@fieldtrack.test", "Operator", true)], ignoreOrder: true);
     }
 
     [Fact]
@@ -126,7 +155,7 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
         await AuthClient.AuthorizeAsync(client, OperatorEmail, OperatorPassword);
 
         using var list = await client.GetAsync("/users", CancellationToken);
-        using var create = await AuthClient.PostUserAsync(client, "another@fieldtrack.test", "Admin", "Temporary-pass-1");
+        using var create = await AuthClient.PostUserAsync(client, "another@fieldtrack.test", "Admin", AuthClient.TemporaryPassword);
         using var revoke = await client.DeleteAsync($"/users/{Guid.NewGuid()}/refresh-tokens", CancellationToken);
 
         list.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -139,7 +168,7 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     {
         using var client = Fixture.Api.CreateClient();
 
-        using var response = await AuthClient.PostUserAsync(client, OperatorEmail, "Operator", "Temporary-pass-1");
+        using var response = await AuthClient.PostUserAsync(client, OperatorEmail, "Operator", AuthClient.TemporaryPassword);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }

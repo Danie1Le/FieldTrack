@@ -16,7 +16,7 @@ public sealed class AuthOptions
     [Required]
     public string SigningKey { get; set; } = string.Empty;
 
-    /// <summary>Sign-in attempts allowed per client address per minute.</summary>
+    /// <summary>Sign-in and password-change attempts allowed per client address per minute.</summary>
     [Range(1, int.MaxValue)]
     public int SignInPermitsPerMinute { get; set; } = 10;
 

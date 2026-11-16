@@ -1,5 +1,7 @@
 using FieldTrack.Infrastructure.Identity;
+using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace FieldTrack.Api.Auth;
 
@@ -15,12 +17,6 @@ public static partial class UserSeeder
     /// <summary>Configuration key for the password of the Admin created when no Admin exists.</summary>
     public const string AdminPasswordKey = "FIELDTRACK_ADMIN_PASSWORD";
 
-    /// <summary>Email of the Demo Operator; required in demo mode.</summary>
-    public const string DemoEmailKey = "FIELDTRACK_DEMO_EMAIL";
-
-    /// <summary>The Demo Operator's password, shown on the login page. Setting it turns demo mode on.</summary>
-    public const string DemoPasswordKey = "FIELDTRACK_DEMO_PASSWORD";
-
     /// <summary>
     /// Ensures both roles exist, creates an Admin from configuration when none exists, and in demo
     /// mode creates the Demo Operator or resets it to the configured password.
@@ -32,6 +28,12 @@ public static partial class UserSeeder
         var roles = provider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var users = provider.GetRequiredService<UserManager<FieldTrackUser>>();
         var configuration = provider.GetRequiredService<IConfiguration>();
+        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(UserSeeder));
+        var demoOperator = provider.GetRequiredService<IOptions<DemoOperatorOptions>>().Value;
+
+        // One transaction, so a failed step never leaves a user without a role or the Demo Operator
+        // without a password. Identity's stores share this scope's DbContext.
+        await using var transaction = await provider.GetRequiredService<FieldTrackDbContext>().Database.BeginTransactionAsync();
 
         foreach (var role in Roles.All)
         {
@@ -41,14 +43,10 @@ public static partial class UserSeeder
             }
         }
 
-        await SeedAdminAsync(users, configuration, provider.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(UserSeeder)));
-        await ResetDemoOperatorAsync(users, configuration);
+        await SeedAdminAsync(users, configuration, logger);
+        await ResetDemoOperatorAsync(users, demoOperator);
+        await transaction.CommitAsync();
     }
-
-    /// <summary>True when demo mode is on and <paramref name="user"/> is the Demo Operator.</summary>
-    public static bool IsDemoOperator(IConfiguration configuration, FieldTrackUser user) =>
-        !string.IsNullOrEmpty(configuration[DemoPasswordKey])
-        && string.Equals(user.Email, configuration[DemoEmailKey], StringComparison.OrdinalIgnoreCase);
 
     private static async Task SeedAdminAsync(UserManager<FieldTrackUser> users, IConfiguration configuration, ILogger logger)
     {
@@ -77,20 +75,15 @@ public static partial class UserSeeder
         EnsureSucceeded(await users.AddToRoleAsync(admin, Roles.Admin));
     }
 
-    private static async Task ResetDemoOperatorAsync(UserManager<FieldTrackUser> users, IConfiguration configuration)
+    private static async Task ResetDemoOperatorAsync(UserManager<FieldTrackUser> users, DemoOperatorOptions demoOperator)
     {
-        var password = configuration[DemoPasswordKey];
-        if (string.IsNullOrEmpty(password))
+        if (!demoOperator.Enabled)
         {
             return;
         }
 
-        var email = configuration[DemoEmailKey];
-        if (string.IsNullOrEmpty(email))
-        {
-            throw new InvalidOperationException($"{DemoPasswordKey} turns demo mode on, which needs {DemoEmailKey} too.");
-        }
-
+        var email = demoOperator.Email!;
+        var password = demoOperator.Password!;
         var demo = await users.FindByEmailAsync(email);
         if (demo is null)
         {
@@ -103,14 +96,17 @@ public static partial class UserSeeder
             // Never reset an Admin's password because the demo settings name their email.
             if (!await users.IsInRoleAsync(demo, Roles.Operator))
             {
-                throw new InvalidOperationException($"{DemoEmailKey} names {email}, who is not an Operator.");
+                throw new InvalidOperationException($"{DemoOperatorOptions.EmailKey} names {email}, who is not an Operator.");
             }
 
             EnsureSucceeded(await users.RemovePasswordAsync(demo));
             EnsureSucceeded(await users.AddPasswordAsync(demo, password));
         }
 
-        // The password is public, so a lockout would only let visitors lock each other out.
+        // The password is public and fixed by the deploy, so the Demo Operator never changes it,
+        // and a lockout would only let visitors lock each other out. SetLockoutEnabledAsync saves
+        // the user, the cleared flag included.
+        demo.MustChangePassword = false;
         EnsureSucceeded(await users.SetLockoutEnabledAsync(demo, false));
     }
 

@@ -8,7 +8,7 @@ namespace FieldTrack.Api.Auth;
 internal static class IdentityResultExtensions
 {
     /// <summary>A validation problem listing each Identity error under its code.</summary>
-    public static ActionResult ValidationProblem(this ControllerBase controller, IdentityResult result)
+    public static ActionResult IdentityValidationProblem(this ControllerBase controller, IdentityResult result)
     {
         var errors = new ModelStateDictionary();
         foreach (var error in result.Errors)

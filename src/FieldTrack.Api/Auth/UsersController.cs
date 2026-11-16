@@ -45,14 +45,17 @@ public sealed class UsersController(FieldTrackDbContext db, UserManager<FieldTra
 
         if (!result.Succeeded)
         {
-            return this.ValidationProblem(result);
+            return this.IdentityValidationProblem(result);
         }
 
         await transaction.CommitAsync(cancellationToken);
         return StatusCode(StatusCodes.Status201Created, new UserResponse(user.Id, user.Email, request.Role, user.MustChangePassword));
     }
 
-    /// <summary>Revokes all the user's refresh tokens, cutting them off once their access token expires.</summary>
+    /// <summary>
+    /// Revokes all the user's refresh tokens, cutting them off once their access token expires, at
+    /// most 15 minutes later (ADR 0002).
+    /// </summary>
     /// <response code="404">No user has this id.</response>
     [HttpDelete("{id:guid}/refresh-tokens")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

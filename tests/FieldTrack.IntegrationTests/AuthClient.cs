@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using FieldTrack.Api.Auth;
+using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -11,6 +13,10 @@ internal static class AuthClient
 
     /// <summary>The body of a successful sign-in, refresh or password change.</summary>
     public sealed record Tokens(string AccessToken, DateTimeOffset AccessTokenExpiresAt, string RefreshToken);
+
+    /// <summary>The roles an access token grants.</summary>
+    public static IEnumerable<string> RolesOf(string accessToken) =>
+        new JsonWebToken(accessToken).Claims.Where(claim => claim.Type == TokenService.RoleClaim).Select(claim => claim.Value);
 
     public static Task<HttpResponseMessage> PostSignInAsync(HttpClient client, string email, string password) =>
         client.PostAsJsonAsync("/auth/sign-in", new { email, password }, TestContext.Current.CancellationToken);
