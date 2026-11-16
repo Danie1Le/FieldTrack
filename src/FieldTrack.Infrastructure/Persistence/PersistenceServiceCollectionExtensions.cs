@@ -11,7 +11,8 @@ public static class PersistenceServiceCollectionExtensions
     public const string ConnectionStringName = "FieldTrack";
 
     /// <summary>
-    /// Adds <see cref="FieldTrackDbContext"/> on Npgsql with NetTopologySuite spatial types.
+    /// Adds <see cref="FieldTrackDbContext"/> on Npgsql with NetTopologySuite spatial types and
+    /// snake_case table and column names, the names the hand-written SQL beside EF uses (ADR 0003, ADR 0004).
     /// </summary>
     public static IServiceCollection AddFieldTrackDatabase(this IServiceCollection services, IConfiguration configuration)
     {
@@ -19,6 +20,6 @@ public static class PersistenceServiceCollectionExtensions
             ?? throw new InvalidOperationException($"Connection string '{ConnectionStringName}' is not configured.");
 
         return services.AddDbContext<FieldTrackDbContext>(options =>
-            options.UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite()));
+            options.UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite()).UseSnakeCaseNamingConvention());
     }
 }
