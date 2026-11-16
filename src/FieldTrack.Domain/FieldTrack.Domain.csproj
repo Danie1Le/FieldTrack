@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Entities and the rules engine. No package or project references: Domain stays free of infrastructure. -->
+</Project>
