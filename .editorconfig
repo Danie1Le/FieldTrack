@@ -62,9 +62,6 @@ dotnet_naming_style.underscore_camel.capitalization = camel_case
 # Unused usings fail the build (needs GenerateDocumentationFile, set in Directory.Build.props).
 dotnet_diagnostic.IDE0005.severity = warning
 
-# Formatting (the Layout options above) fails the build too.
-dotnet_diagnostic.IDE0055.severity = warning
-
 # Tests: xUnit test method names use underscores to read as sentences.
 [tests/**.cs]
 dotnet_diagnostic.CA1707.severity = none

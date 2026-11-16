@@ -31,6 +31,11 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      # Formatting per .editorconfig (the Layout options). CI only: a Windows checkout with
+      # core.autocrlf has CRLF line endings, which the end_of_line = lf rule would flag.
+      - name: Check formatting
+        run: dotnet format whitespace --verify-no-changes --no-restore
+
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
