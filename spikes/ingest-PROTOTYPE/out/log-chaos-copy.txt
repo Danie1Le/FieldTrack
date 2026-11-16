@@ -1,0 +1,517 @@
+13:49:52 === copy-b250-f100: Config { Path = copy, Batch = 250, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = copy-b250-f100 }
+13:49:54 worker pid 40208 READY session_present=False
+13:50:04 [worker] STAT batches=81 avg_batch=244 avg_write_ms=57.3 avg_recv_lag_ms=6.6 queued=0
+13:50:14 [worker] STAT batches=83 avg_batch=243 avg_write_ms=57.1 avg_recv_lag_ms=5.8 queued=200
+13:50:24 [worker] STAT batches=83 avg_batch=243 avg_write_ms=53.9 avg_recv_lag_ms=5.5 queued=200
+13:50:34 [worker] STAT batches=83 avg_batch=243 avg_write_ms=54.8 avg_recv_lag_ms=5.2 queued=50
+13:50:44 [worker] STAT batches=82 avg_batch=243 avg_write_ms=55.5 avg_recv_lag_ms=4.6 queued=100
+13:50:54 [worker] STAT batches=82 avg_batch=245 avg_write_ms=57.8 avg_recv_lag_ms=6.1 queued=31
+13:51:04 [worker] STAT batches=82 avg_batch=243 avg_write_ms=54.2 avg_recv_lag_ms=5.2 queued=100
+13:51:14 [worker] STAT batches=84 avg_batch=241 avg_write_ms=56.1 avg_recv_lag_ms=5.1 queued=50
+13:51:24 [worker] STAT batches=82 avg_batch=244 avg_write_ms=57.7 avg_recv_lag_ms=6.4 queued=50
+13:51:34 [worker] STAT batches=83 avg_batch=243 avg_write_ms=54.8 avg_recv_lag_ms=5.7 queued=100
+13:51:44 [worker] STAT batches=83 avg_batch=243 avg_write_ms=57.1 avg_recv_lag_ms=5.3 queued=100
+13:51:54 [worker] STAT batches=82 avg_batch=244 avg_write_ms=54.4 avg_recv_lag_ms=5.8 queued=100
+13:52:04 [worker] STAT batches=83 avg_batch=243 avg_write_ms=55.4 avg_recv_lag_ms=5.3 queued=150
+13:52:14 [worker] STAT batches=83 avg_batch=243 avg_write_ms=55.9 avg_recv_lag_ms=5.0 queued=150
+13:52:24 [worker] STAT batches=83 avg_batch=242 avg_write_ms=55.9 avg_recv_lag_ms=5.7 queued=50
+13:52:35 [worker] STAT batches=83 avg_batch=244 avg_write_ms=57.0 avg_recv_lag_ms=4.9 queued=0
+13:52:45 [worker] STAT batches=83 avg_batch=242 avg_write_ms=56.5 avg_recv_lag_ms=5.1 queued=100
+13:52:56 RESULT | copy-b250-f100 | copy | 250 | 100 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 146 | 175 | 218 | 332 | 2001 | 0.4 |
+13:52:56 === copy-b500-f100: Config { Path = copy, Batch = 500, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = copy-b500-f100 }
+13:52:57 worker pid 39908 READY session_present=False
+13:53:07 [worker] STAT batches=58 avg_batch=341 avg_write_ms=60.0 avg_recv_lag_ms=44.0 queued=200
+13:53:17 [worker] STAT batches=59 avg_batch=339 avg_write_ms=58.2 avg_recv_lag_ms=43.2 queued=200
+13:53:27 [worker] STAT batches=58 avg_batch=348 avg_write_ms=62.3 avg_recv_lag_ms=43.3 queued=0
+13:53:37 [worker] STAT batches=59 avg_batch=342 avg_write_ms=60.0 avg_recv_lag_ms=42.8 queued=200
+13:53:47 [worker] STAT batches=58 avg_batch=348 avg_write_ms=61.8 avg_recv_lag_ms=43.0 queued=200
+13:53:58 [worker] STAT batches=58 avg_batch=348 avg_write_ms=60.6 avg_recv_lag_ms=43.0 queued=19
+13:54:08 [worker] STAT batches=58 avg_batch=345 avg_write_ms=60.0 avg_recv_lag_ms=43.8 queued=0
+13:54:18 [worker] STAT batches=58 avg_batch=345 avg_write_ms=59.1 avg_recv_lag_ms=42.5 queued=1
+13:54:28 [worker] STAT batches=58 avg_batch=345 avg_write_ms=60.9 avg_recv_lag_ms=42.7 queued=204
+13:54:38 [worker] STAT batches=57 avg_batch=354 avg_write_ms=69.6 avg_recv_lag_ms=43.1 queued=1
+13:54:48 [worker] STAT batches=57 avg_batch=357 avg_write_ms=66.4 avg_recv_lag_ms=42.6 queued=27
+13:54:58 [worker] STAT batches=58 avg_batch=345 avg_write_ms=63.8 avg_recv_lag_ms=42.6 queued=206
+13:55:08 [worker] STAT batches=58 avg_batch=349 avg_write_ms=65.5 avg_recv_lag_ms=42.8 queued=132
+13:55:18 [worker] STAT batches=58 avg_batch=351 avg_write_ms=58.6 avg_recv_lag_ms=43.2 queued=0
+13:55:28 [worker] STAT batches=58 avg_batch=345 avg_write_ms=60.5 avg_recv_lag_ms=43.3 queued=200
+13:55:38 [worker] STAT batches=57 avg_batch=354 avg_write_ms=65.9 avg_recv_lag_ms=43.2 queued=200
+13:55:48 [worker] STAT batches=58 avg_batch=348 avg_write_ms=58.7 avg_recv_lag_ms=42.5 queued=5
+13:55:59 RESULT | copy-b500-f100 | copy | 500 | 100 | 2000 | 180 | 0 | 0 | 359874 | 1999 | 359874 | 0 | 0 | 0 | 197 | 280 | 319 | 592 | 2002 | 0.3 |
+13:55:59 === copy-b1000-f100: Config { Path = copy, Batch = 1000, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = copy-b1000-f100 }
+13:56:00 worker pid 37500 READY session_present=False
+13:56:10 [worker] STAT batches=57 avg_batch=347 avg_write_ms=58.8 avg_recv_lag_ms=44.5 queued=202
+13:56:20 [worker] STAT batches=59 avg_batch=342 avg_write_ms=58.2 avg_recv_lag_ms=42.7 queued=26
+13:56:30 [worker] STAT batches=59 avg_batch=342 avg_write_ms=59.3 avg_recv_lag_ms=42.8 queued=200
+13:56:40 [worker] STAT batches=59 avg_batch=340 avg_write_ms=59.0 avg_recv_lag_ms=42.3 queued=161
+13:56:50 [worker] STAT batches=59 avg_batch=345 avg_write_ms=58.9 avg_recv_lag_ms=42.3 queued=199
+13:57:00 [worker] STAT batches=58 avg_batch=348 avg_write_ms=60.0 avg_recv_lag_ms=42.8 queued=0
+13:57:10 [worker] STAT batches=58 avg_batch=345 avg_write_ms=60.6 avg_recv_lag_ms=42.3 queued=4
+13:57:20 [worker] STAT batches=58 avg_batch=345 avg_write_ms=60.8 avg_recv_lag_ms=42.7 queued=194
+13:57:30 [worker] STAT batches=59 avg_batch=346 avg_write_ms=59.6 avg_recv_lag_ms=42.6 queued=2
+13:57:40 [worker] STAT batches=58 avg_batch=345 avg_write_ms=61.0 avg_recv_lag_ms=41.9 queued=0
+13:57:51 [worker] STAT batches=57 avg_batch=351 avg_write_ms=63.8 avg_recv_lag_ms=41.1 queued=200
+13:58:01 [worker] STAT batches=59 avg_batch=342 avg_write_ms=58.7 avg_recv_lag_ms=42.8 queued=0
+13:58:11 [worker] STAT batches=57 avg_batch=351 avg_write_ms=63.8 avg_recv_lag_ms=42.1 queued=198
+13:58:21 [worker] STAT batches=59 avg_batch=346 avg_write_ms=61.7 avg_recv_lag_ms=42.8 queued=200
+13:58:31 [worker] STAT batches=58 avg_batch=352 avg_write_ms=62.9 avg_recv_lag_ms=43.1 queued=120
+13:58:41 [worker] STAT batches=57 avg_batch=351 avg_write_ms=62.3 avg_recv_lag_ms=43.4 queued=200
+13:58:51 [worker] STAT batches=58 avg_batch=345 avg_write_ms=59.7 avg_recv_lag_ms=42.8 queued=200
+13:59:01 RESULT | copy-b1000-f100 | copy | 1000 | 100 | 2000 | 180 | 0 | 0 | 359946 | 1999 | 359946 | 0 | 0 | 0 | 193 | 273 | 292 | 395 | 2002 | 0.3 |
+13:59:01 === copy-b2000-f100: Config { Path = copy, Batch = 2000, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = copy-b2000-f100 }
+13:59:02 worker pid 4884 READY session_present=False
+13:59:12 [worker] STAT batches=58 avg_batch=341 avg_write_ms=57.4 avg_recv_lag_ms=43.8 queued=2
+13:59:23 [worker] STAT batches=61 avg_batch=333 avg_write_ms=56.0 avg_recv_lag_ms=42.6 queued=85
+13:59:33 [worker] STAT batches=60 avg_batch=338 avg_write_ms=58.3 avg_recv_lag_ms=43.8 queued=0
+13:59:43 [worker] STAT batches=59 avg_batch=342 avg_write_ms=60.2 avg_recv_lag_ms=43.3 queued=34
+13:59:53 [worker] STAT batches=58 avg_batch=345 avg_write_ms=61.6 avg_recv_lag_ms=44.1 queued=200
+14:00:03 [worker] STAT batches=59 avg_batch=342 avg_write_ms=59.5 avg_recv_lag_ms=43.4 queued=0
+14:00:13 [worker] STAT batches=59 avg_batch=339 avg_write_ms=60.7 avg_recv_lag_ms=43.9 queued=200
+14:00:23 [worker] STAT batches=59 avg_batch=339 avg_write_ms=59.3 avg_recv_lag_ms=43.7 queued=200
+14:00:33 [worker] STAT batches=58 avg_batch=352 avg_write_ms=62.6 avg_recv_lag_ms=44.3 queued=0
+14:00:43 [worker] STAT batches=59 avg_batch=342 avg_write_ms=59.9 avg_recv_lag_ms=42.6 queued=196
+14:00:53 [worker] STAT batches=60 avg_batch=337 avg_write_ms=58.1 avg_recv_lag_ms=43.8 queued=200
+14:01:04 [worker] STAT batches=58 avg_batch=348 avg_write_ms=62.2 avg_recv_lag_ms=43.3 queued=199
+14:01:14 [worker] STAT batches=59 avg_batch=342 avg_write_ms=60.2 avg_recv_lag_ms=42.7 queued=200
+14:01:24 [worker] STAT batches=59 avg_batch=346 avg_write_ms=60.2 avg_recv_lag_ms=43.4 queued=0
+14:01:34 [worker] STAT batches=59 avg_batch=342 avg_write_ms=58.3 avg_recv_lag_ms=42.9 queued=0
+14:01:44 [worker] STAT batches=59 avg_batch=339 avg_write_ms=59.3 avg_recv_lag_ms=42.8 queued=11
+14:01:54 [worker] STAT batches=59 avg_batch=342 avg_write_ms=59.4 avg_recv_lag_ms=43.0 queued=198
+14:02:04 RESULT | copy-b2000-f100 | copy | 2000 | 100 | 2000 | 180 | 0 | 0 | 359865 | 1999 | 359865 | 0 | 0 | 0 | 192 | 273 | 292 | 342 | 2001 | 0.3 |
+14:02:04 === copy-b1000-f50: Config { Path = copy, Batch = 1000, FlushMs = 50, Rate = 2000, Seconds = 180, Kills = 0, Label = copy-b1000-f50 }
+14:02:05 worker pid 35964 READY session_present=False
+14:02:15 [worker] STAT batches=86 avg_batch=228 avg_write_ms=55.0 avg_recv_lag_ms=43.7 queued=179
+14:02:25 [worker] STAT batches=86 avg_batch=237 avg_write_ms=58.0 avg_recv_lag_ms=42.7 queued=5
+14:02:35 [worker] STAT batches=88 avg_batch=230 avg_write_ms=56.0 avg_recv_lag_ms=42.9 queued=0
+14:02:45 [worker] STAT batches=87 avg_batch=230 avg_write_ms=56.6 avg_recv_lag_ms=42.4 queued=192
+14:02:55 [worker] STAT batches=86 avg_batch=233 avg_write_ms=56.9 avg_recv_lag_ms=41.8 queued=130
+14:03:05 [worker] STAT batches=88 avg_batch=229 avg_write_ms=56.2 avg_recv_lag_ms=41.7 queued=200
+14:03:16 [worker] STAT batches=87 avg_batch=232 avg_write_ms=57.8 avg_recv_lag_ms=42.4 queued=200
+14:03:26 [worker] STAT batches=88 avg_batch=228 avg_write_ms=56.2 avg_recv_lag_ms=42.4 queued=175
+14:03:36 [worker] STAT batches=86 avg_batch=235 avg_write_ms=56.0 avg_recv_lag_ms=42.0 queued=19
+14:03:46 [worker] STAT batches=86 avg_batch=233 avg_write_ms=57.6 avg_recv_lag_ms=41.2 queued=195
+14:03:56 [worker] STAT batches=87 avg_batch=232 avg_write_ms=56.7 avg_recv_lag_ms=42.1 queued=0
+14:04:06 [worker] STAT batches=86 avg_batch=233 avg_write_ms=56.6 avg_recv_lag_ms=42.4 queued=0
+14:04:16 [worker] STAT batches=85 avg_batch=235 avg_write_ms=57.7 avg_recv_lag_ms=42.1 queued=200
+14:04:26 [worker] STAT batches=79 avg_batch=246 avg_write_ms=71.8 avg_recv_lag_ms=42.1 queued=1000
+14:04:36 [worker] STAT batches=85 avg_batch=252 avg_write_ms=59.7 avg_recv_lag_ms=43.2 queued=0
+14:04:46 [worker] STAT batches=84 avg_batch=238 avg_write_ms=58.8 avg_recv_lag_ms=41.8 queued=200
+14:04:56 [worker] STAT batches=85 avg_batch=238 avg_write_ms=58.8 avg_recv_lag_ms=42.0 queued=200
+14:05:07 RESULT | copy-b1000-f50 | copy | 1000 | 50 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 172 | 226 | 271 | 1191 | 2001 | 0.2 |
+14:05:07 === copy-b1000-f25: Config { Path = copy, Batch = 1000, FlushMs = 25, Rate = 2000, Seconds = 180, Kills = 0, Label = copy-b1000-f25 }
+14:05:08 worker pid 24012 READY session_present=False
+14:05:18 [worker] STAT batches=109 avg_batch=180 avg_write_ms=52.9 avg_recv_lag_ms=43.7 queued=200
+14:05:28 [worker] STAT batches=110 avg_batch=182 avg_write_ms=54.5 avg_recv_lag_ms=43.2 queued=199
+14:05:38 [worker] STAT batches=112 avg_batch=180 avg_write_ms=54.0 avg_recv_lag_ms=42.7 queued=0
+14:05:48 [worker] STAT batches=109 avg_batch=183 avg_write_ms=53.8 avg_recv_lag_ms=43.2 queued=198
+14:05:58 [worker] STAT batches=110 avg_batch=184 avg_write_ms=55.0 avg_recv_lag_ms=43.9 queued=0
+14:06:08 [worker] STAT batches=109 avg_batch=183 avg_write_ms=55.1 avg_recv_lag_ms=43.0 queued=200
+14:06:18 [worker] STAT batches=110 avg_batch=182 avg_write_ms=53.9 avg_recv_lag_ms=42.7 queued=200
+14:06:28 [worker] STAT batches=109 avg_batch=185 avg_write_ms=54.7 avg_recv_lag_ms=43.4 queued=138
+14:06:38 [worker] STAT batches=110 avg_batch=182 avg_write_ms=54.3 avg_recv_lag_ms=42.7 queued=200
+14:06:48 [worker] STAT batches=111 avg_batch=180 avg_write_ms=53.7 avg_recv_lag_ms=43.7 queued=202
+14:06:58 [worker] STAT batches=111 avg_batch=182 avg_write_ms=54.6 avg_recv_lag_ms=43.1 queued=0
+14:07:08 [worker] STAT batches=108 avg_batch=185 avg_write_ms=56.3 avg_recv_lag_ms=42.7 queued=0
+14:07:18 [worker] STAT batches=110 avg_batch=182 avg_write_ms=54.6 avg_recv_lag_ms=43.0 queued=200
+14:07:28 [worker] STAT batches=109 avg_batch=183 avg_write_ms=54.8 avg_recv_lag_ms=43.8 queued=201
+14:07:38 [worker] STAT batches=108 avg_batch=185 avg_write_ms=55.7 avg_recv_lag_ms=43.0 queued=200
+14:07:49 [worker] STAT batches=109 avg_batch=185 avg_write_ms=53.8 avg_recv_lag_ms=43.9 queued=200
+14:07:59 [worker] STAT batches=110 avg_batch=184 avg_write_ms=54.0 avg_recv_lag_ms=43.8 queued=0
+14:08:10 RESULT | copy-b1000-f25 | copy | 1000 | 25 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 132 | 184 | 200 | 263 | 2001 | 0.3 |
+14:08:10 === copy-b1000-f250: Config { Path = copy, Batch = 1000, FlushMs = 250, Rate = 2000, Seconds = 180, Kills = 0, Label = copy-b1000-f250 }
+14:08:11 worker pid 41748 READY session_present=False
+14:08:21 [worker] STAT batches=31 avg_batch=639 avg_write_ms=52.5 avg_recv_lag_ms=5.9 queued=200
+14:08:31 [worker] STAT batches=33 avg_batch=624 avg_write_ms=43.9 avg_recv_lag_ms=6.2 queued=200
+14:08:41 [worker] STAT batches=33 avg_batch=624 avg_write_ms=46.5 avg_recv_lag_ms=5.8 queued=200
+14:08:52 [worker] STAT batches=33 avg_batch=624 avg_write_ms=44.0 avg_recv_lag_ms=6.7 queued=0
+14:09:02 [worker] STAT batches=32 avg_batch=638 avg_write_ms=54.6 avg_recv_lag_ms=6.9 queued=200
+14:09:12 [worker] STAT batches=32 avg_batch=631 avg_write_ms=50.2 avg_recv_lag_ms=6.7 queued=0
+14:09:22 [worker] STAT batches=32 avg_batch=638 avg_write_ms=55.0 avg_recv_lag_ms=6.0 queued=200
+14:09:32 [worker] STAT batches=32 avg_batch=631 avg_write_ms=49.6 avg_recv_lag_ms=5.9 queued=200
+14:09:42 [worker] STAT batches=32 avg_batch=638 avg_write_ms=52.1 avg_recv_lag_ms=6.6 queued=200
+14:09:53 [worker] STAT batches=32 avg_batch=638 avg_write_ms=53.0 avg_recv_lag_ms=6.2 queued=0
+14:10:03 [worker] STAT batches=32 avg_batch=635 avg_write_ms=55.2 avg_recv_lag_ms=6.1 queued=89
+14:10:13 [worker] STAT batches=32 avg_batch=634 avg_write_ms=48.2 avg_recv_lag_ms=6.9 queued=0
+14:10:23 [worker] STAT batches=33 avg_batch=624 avg_write_ms=42.5 avg_recv_lag_ms=5.7 queued=22
+14:10:33 [worker] STAT batches=32 avg_batch=632 avg_write_ms=53.4 avg_recv_lag_ms=6.0 queued=0
+14:10:44 [worker] STAT batches=33 avg_batch=624 avg_write_ms=46.5 avg_recv_lag_ms=6.6 queued=197
+14:10:54 [worker] STAT batches=32 avg_batch=631 avg_write_ms=51.8 avg_recv_lag_ms=7.0 queued=200
+14:11:04 [worker] STAT batches=32 avg_batch=631 avg_write_ms=51.5 avg_recv_lag_ms=6.4 queued=200
+14:11:12 RESULT | copy-b1000-f250 | copy | 1000 | 250 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 223 | 373 | 410 | 469 | 2002 | 0.5 |
+14:11:12 === ef-b250-f100: Config { Path = ef, Batch = 250, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = ef-b250-f100 }
+14:11:13 worker pid 12268 READY session_present=False
+14:11:23 [worker] STAT batches=80 avg_batch=245 avg_write_ms=75.5 avg_recv_lag_ms=227.1 queued=0
+14:11:34 [worker] STAT batches=83 avg_batch=242 avg_write_ms=37.7 avg_recv_lag_ms=43.8 queued=145
+14:11:44 [worker] STAT batches=83 avg_batch=243 avg_write_ms=38.5 avg_recv_lag_ms=43.4 queued=3
+14:11:54 [worker] STAT batches=82 avg_batch=244 avg_write_ms=37.6 avg_recv_lag_ms=43.9 queued=3
+14:12:04 [worker] STAT batches=82 avg_batch=244 avg_write_ms=43.0 avg_recv_lag_ms=45.8 queued=1
+14:12:14 [worker] STAT batches=83 avg_batch=243 avg_write_ms=42.1 avg_recv_lag_ms=44.1 queued=46
+14:12:24 [worker] STAT batches=82 avg_batch=243 avg_write_ms=38.7 avg_recv_lag_ms=44.1 queued=150
+14:12:34 [worker] STAT batches=83 avg_batch=243 avg_write_ms=39.1 avg_recv_lag_ms=44.4 queued=5
+14:12:44 [worker] STAT batches=83 avg_batch=242 avg_write_ms=43.2 avg_recv_lag_ms=43.8 queued=100
+14:12:54 [worker] STAT batches=83 avg_batch=242 avg_write_ms=36.5 avg_recv_lag_ms=43.8 queued=199
+14:13:04 [worker] STAT batches=83 avg_batch=244 avg_write_ms=38.0 avg_recv_lag_ms=43.9 queued=150
+14:13:14 [worker] STAT batches=82 avg_batch=244 avg_write_ms=36.8 avg_recv_lag_ms=44.4 queued=150
+14:13:24 [worker] STAT batches=83 avg_batch=241 avg_write_ms=35.8 avg_recv_lag_ms=44.5 queued=150
+14:13:34 [worker] STAT batches=83 avg_batch=243 avg_write_ms=36.7 avg_recv_lag_ms=44.4 queued=148
+14:13:44 [worker] STAT batches=83 avg_batch=243 avg_write_ms=35.1 avg_recv_lag_ms=44.4 queued=147
+14:13:54 [worker] STAT batches=83 avg_batch=243 avg_write_ms=36.4 avg_recv_lag_ms=44.1 queued=200
+14:14:04 [worker] STAT batches=83 avg_batch=243 avg_write_ms=34.1 avg_recv_lag_ms=43.4 queued=200
+14:14:15 RESULT | ef-b250-f100 | ef | 250 | 100 | 2000 | 180 | 0 | 0 | 359892 | 1999 | 359892 | 0 | 0 | 0 | 161 | 213 | 245 | 458 | 2015 | 0.3 |
+14:14:15 === ef-b500-f100: Config { Path = ef, Batch = 500, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = ef-b500-f100 }
+14:14:16 worker pid 26020 READY session_present=False
+14:14:26 [worker] STAT batches=50 avg_batch=396 avg_write_ms=95.9 avg_recv_lag_ms=116.2 queued=0
+14:14:36 [worker] STAT batches=63 avg_batch=318 avg_write_ms=42.7 avg_recv_lag_ms=43.6 queued=197
+14:14:46 [worker] STAT batches=59 avg_batch=342 avg_write_ms=53.2 avg_recv_lag_ms=44.0 queued=5
+14:14:56 [worker] STAT batches=63 avg_batch=321 avg_write_ms=41.1 avg_recv_lag_ms=43.4 queued=0
+14:15:07 [worker] STAT batches=61 avg_batch=331 avg_write_ms=54.6 avg_recv_lag_ms=44.9 queued=197
+14:15:17 [worker] STAT batches=59 avg_batch=342 avg_write_ms=54.3 avg_recv_lag_ms=48.1 queued=0
+14:15:27 [worker] STAT batches=57 avg_batch=354 avg_write_ms=64.7 avg_recv_lag_ms=45.3 queued=312
+14:15:37 [worker] STAT batches=60 avg_batch=343 avg_write_ms=50.0 avg_recv_lag_ms=43.3 queued=0
+14:15:47 [worker] STAT batches=62 avg_batch=323 avg_write_ms=44.2 avg_recv_lag_ms=43.5 queued=1
+14:15:57 [worker] STAT batches=60 avg_batch=333 avg_write_ms=44.8 avg_recv_lag_ms=42.8 queued=200
+14:16:07 [worker] STAT batches=63 avg_batch=321 avg_write_ms=46.2 avg_recv_lag_ms=43.8 queued=197
+14:16:17 [worker] STAT batches=60 avg_batch=333 avg_write_ms=46.9 avg_recv_lag_ms=43.6 queued=200
+14:16:27 [worker] STAT batches=59 avg_batch=342 avg_write_ms=46.0 avg_recv_lag_ms=43.6 queued=170
+14:16:37 [worker] STAT batches=63 avg_batch=318 avg_write_ms=42.8 avg_recv_lag_ms=44.1 queued=171
+14:16:47 [worker] STAT batches=62 avg_batch=325 avg_write_ms=51.2 avg_recv_lag_ms=43.4 queued=195
+14:16:57 [worker] STAT batches=61 avg_batch=331 avg_write_ms=50.0 avg_recv_lag_ms=43.2 queued=0
+14:17:08 [worker] STAT batches=63 avg_batch=321 avg_write_ms=47.7 avg_recv_lag_ms=43.2 queued=0
+14:17:18 RESULT | ef-b500-f100 | ef | 500 | 100 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 176 | 260 | 347 | 519 | 2014 | 0.3 |
+14:17:18 === ef-b1000-f100: Config { Path = ef, Batch = 1000, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = ef-b1000-f100 }
+14:17:19 worker pid 30192 READY session_present=False
+14:17:29 [worker] STAT batches=30 avg_batch=653 avg_write_ms=223.7 avg_recv_lag_ms=69.2 queued=0
+14:17:39 [worker] STAT batches=58 avg_batch=348 avg_write_ms=48.9 avg_recv_lag_ms=42.9 queued=197
+14:17:49 [worker] STAT batches=60 avg_batch=337 avg_write_ms=50.4 avg_recv_lag_ms=42.9 queued=0
+14:17:59 [worker] STAT batches=63 avg_batch=321 avg_write_ms=45.9 avg_recv_lag_ms=42.6 queued=0
+14:18:09 [worker] STAT batches=63 avg_batch=321 avg_write_ms=46.3 avg_recv_lag_ms=42.4 queued=200
+14:18:20 [worker] STAT batches=62 avg_batch=326 avg_write_ms=47.0 avg_recv_lag_ms=42.7 queued=199
+14:18:30 [worker] STAT batches=57 avg_batch=358 avg_write_ms=65.1 avg_recv_lag_ms=43.7 queued=80
+14:18:40 [worker] STAT batches=60 avg_batch=334 avg_write_ms=43.7 avg_recv_lag_ms=42.4 queued=183
+14:18:50 [worker] STAT batches=57 avg_batch=361 avg_write_ms=61.5 avg_recv_lag_ms=42.3 queued=8
+14:19:00 [worker] STAT batches=58 avg_batch=347 avg_write_ms=60.8 avg_recv_lag_ms=43.2 queued=98
+14:19:10 [worker] STAT batches=55 avg_batch=369 avg_write_ms=74.6 avg_recv_lag_ms=42.9 queued=0
+14:19:20 [worker] STAT batches=59 avg_batch=342 avg_write_ms=59.1 avg_recv_lag_ms=43.5 queued=200
+14:19:30 [worker] STAT batches=62 avg_batch=326 avg_write_ms=42.4 avg_recv_lag_ms=42.9 queued=0
+14:19:40 [worker] STAT batches=60 avg_batch=333 avg_write_ms=46.8 avg_recv_lag_ms=42.4 queued=200
+14:19:51 [worker] STAT batches=60 avg_batch=337 avg_write_ms=53.0 avg_recv_lag_ms=43.3 queued=199
+14:20:01 [worker] STAT batches=63 avg_batch=322 avg_write_ms=45.1 avg_recv_lag_ms=42.3 queued=136
+14:20:11 [worker] STAT batches=62 avg_batch=325 avg_write_ms=44.2 avg_recv_lag_ms=41.9 queued=200
+14:20:21 RESULT | ef-b1000-f100 | ef | 1000 | 100 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 179 | 277 | 426 | 1073 | 2014 | 0.3 |
+14:20:21 === ef-b2000-f100: Config { Path = ef, Batch = 2000, FlushMs = 100, Rate = 2000, Seconds = 180, Kills = 0, Label = ef-b2000-f100 }
+14:20:22 worker pid 44392 READY session_present=False
+14:20:32 [worker] STAT batches=42 avg_batch=471 avg_write_ms=125.7 avg_recv_lag_ms=5.4 queued=200
+14:20:42 [worker] STAT batches=63 avg_batch=318 avg_write_ms=42.8 avg_recv_lag_ms=5.1 queued=188
+14:20:52 [worker] STAT batches=63 avg_batch=324 avg_write_ms=46.2 avg_recv_lag_ms=5.4 queued=5
+14:21:02 [worker] STAT batches=61 avg_batch=331 avg_write_ms=46.5 avg_recv_lag_ms=5.5 queued=0
+14:21:12 [worker] STAT batches=62 avg_batch=323 avg_write_ms=44.8 avg_recv_lag_ms=5.3 queued=200
+14:21:22 [worker] STAT batches=59 avg_batch=346 avg_write_ms=48.8 avg_recv_lag_ms=6.0 queued=0
+14:21:32 [worker] STAT batches=63 avg_batch=321 avg_write_ms=43.0 avg_recv_lag_ms=5.2 queued=0
+14:21:43 [worker] STAT batches=66 avg_batch=306 avg_write_ms=40.0 avg_recv_lag_ms=5.2 queued=200
+14:21:53 [worker] STAT batches=59 avg_batch=340 avg_write_ms=46.1 avg_recv_lag_ms=5.1 queued=158
+14:22:03 [worker] STAT batches=58 avg_batch=351 avg_write_ms=56.9 avg_recv_lag_ms=6.2 queued=200
+14:22:13 [worker] STAT batches=63 avg_batch=317 avg_write_ms=45.1 avg_recv_lag_ms=5.1 queued=200
+14:22:23 [worker] STAT batches=64 avg_batch=319 avg_write_ms=44.4 avg_recv_lag_ms=5.4 queued=0
+14:22:33 [worker] STAT batches=56 avg_batch=357 avg_write_ms=61.4 avg_recv_lag_ms=5.9 queued=0
+14:22:43 [worker] STAT batches=64 avg_batch=316 avg_write_ms=42.3 avg_recv_lag_ms=4.8 queued=0
+14:22:53 [worker] STAT batches=59 avg_batch=342 avg_write_ms=45.8 avg_recv_lag_ms=4.8 queued=0
+14:23:03 [worker] STAT batches=59 avg_batch=339 avg_write_ms=43.3 avg_recv_lag_ms=5.0 queued=200
+14:23:13 [worker] STAT batches=59 avg_batch=339 avg_write_ms=42.7 avg_recv_lag_ms=5.2 queued=200
+14:23:23 RESULT | ef-b2000-f100 | ef | 2000 | 100 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 136 | 215 | 281 | 795 | 2015 | 0.2 |
+14:23:23 === ef-b1000-f50: Config { Path = ef, Batch = 1000, FlushMs = 50, Rate = 2000, Seconds = 180, Kills = 0, Label = ef-b1000-f50 }
+14:23:24 worker pid 43652 READY session_present=False
+14:23:34 [worker] STAT batches=70 avg_batch=283 avg_write_ms=82.2 avg_recv_lag_ms=61.3 queued=3
+14:23:44 [worker] STAT batches=103 avg_batch=194 avg_write_ms=32.5 avg_recv_lag_ms=42.7 queued=0
+14:23:54 [worker] STAT batches=104 avg_batch=192 avg_write_ms=30.3 avg_recv_lag_ms=42.6 queued=180
+14:24:04 [worker] STAT batches=103 avg_batch=196 avg_write_ms=30.2 avg_recv_lag_ms=43.2 queued=0
+14:24:15 [worker] STAT batches=105 avg_batch=192 avg_write_ms=30.1 avg_recv_lag_ms=42.7 queued=5
+14:24:25 [worker] STAT batches=103 avg_batch=194 avg_write_ms=32.5 avg_recv_lag_ms=43.1 queued=0
+14:24:35 [worker] STAT batches=101 avg_batch=198 avg_write_ms=30.1 avg_recv_lag_ms=43.1 queued=0
+14:24:45 [worker] STAT batches=103 avg_batch=196 avg_write_ms=31.6 avg_recv_lag_ms=43.3 queued=0
+14:24:55 [worker] STAT batches=106 avg_batch=191 avg_write_ms=25.1 avg_recv_lag_ms=44.1 queued=0
+14:25:05 [worker] STAT batches=102 avg_batch=198 avg_write_ms=32.2 avg_recv_lag_ms=43.4 queued=0
+14:25:15 [worker] STAT batches=106 avg_batch=191 avg_write_ms=26.6 avg_recv_lag_ms=43.3 queued=0
+14:25:25 [worker] STAT batches=102 avg_batch=196 avg_write_ms=27.9 avg_recv_lag_ms=43.2 queued=20
+14:25:35 [worker] STAT batches=103 avg_batch=196 avg_write_ms=27.7 avg_recv_lag_ms=43.2 queued=0
+14:25:45 [worker] STAT batches=109 avg_batch=185 avg_write_ms=27.7 avg_recv_lag_ms=43.6 queued=1
+14:25:55 [worker] STAT batches=100 avg_batch=202 avg_write_ms=33.1 avg_recv_lag_ms=43.3 queued=0
+14:26:05 [worker] STAT batches=99 avg_batch=202 avg_write_ms=35.4 avg_recv_lag_ms=43.6 queued=0
+14:26:15 [worker] STAT batches=97 avg_batch=208 avg_write_ms=38.1 avg_recv_lag_ms=43.7 queued=0
+14:26:26 RESULT | ef-b1000-f50 | ef | 1000 | 50 | 2000 | 180 | 0 | 0 | 359991 | 1999 | 359991 | 0 | 0 | 0 | 126 | 162 | 210 | 653 | 2013 | 0.2 |
+14:26:26 === ef-b1000-f25: Config { Path = ef, Batch = 1000, FlushMs = 25, Rate = 2000, Seconds = 180, Kills = 0, Label = ef-b1000-f25 }
+14:26:27 worker pid 36952 READY session_present=False
+14:26:37 [worker] STAT batches=87 avg_batch=225 avg_write_ms=68.0 avg_recv_lag_ms=62.1 queued=170
+14:26:47 [worker] STAT batches=145 avg_batch=138 avg_write_ms=24.5 avg_recv_lag_ms=43.4 queued=191
+14:26:57 [worker] STAT batches=139 avg_batch=145 avg_write_ms=25.4 avg_recv_lag_ms=44.1 queued=1
+14:27:07 [worker] STAT batches=143 avg_batch=140 avg_write_ms=23.3 avg_recv_lag_ms=43.8 queued=0
+14:27:17 [worker] STAT batches=138 avg_batch=145 avg_write_ms=28.1 avg_recv_lag_ms=43.9 queued=196
+14:27:27 [worker] STAT batches=140 avg_batch=144 avg_write_ms=25.9 avg_recv_lag_ms=43.0 queued=5
+14:27:37 [worker] STAT batches=143 avg_batch=140 avg_write_ms=23.0 avg_recv_lag_ms=43.7 queued=0
+14:27:47 [worker] STAT batches=143 avg_batch=141 avg_write_ms=24.0 avg_recv_lag_ms=43.5 queued=2
+14:27:57 [worker] STAT batches=140 avg_batch=143 avg_write_ms=24.5 avg_recv_lag_ms=43.5 queued=166
+14:28:07 [worker] STAT batches=143 avg_batch=141 avg_write_ms=24.4 avg_recv_lag_ms=43.3 queued=0
+14:28:17 [worker] STAT batches=127 avg_batch=157 avg_write_ms=26.5 avg_recv_lag_ms=43.3 queued=0
+14:28:27 [worker] STAT batches=121 avg_batch=165 avg_write_ms=27.9 avg_recv_lag_ms=43.8 queued=195
+14:28:37 [worker] STAT batches=115 avg_batch=174 avg_write_ms=35.6 avg_recv_lag_ms=43.8 queued=198
+14:28:47 [worker] STAT batches=123 avg_batch=164 avg_write_ms=27.7 avg_recv_lag_ms=43.2 queued=1
+14:28:57 [worker] STAT batches=133 avg_batch=152 avg_write_ms=28.5 avg_recv_lag_ms=43.4 queued=0
+14:29:08 [worker] STAT batches=135 avg_batch=148 avg_write_ms=25.7 avg_recv_lag_ms=43.4 queued=177
+14:29:18 [worker] STAT batches=133 avg_batch=152 avg_write_ms=25.6 avg_recv_lag_ms=43.4 queued=2
+14:29:28 RESULT | ef-b1000-f25 | ef | 1000 | 25 | 2000 | 180 | 0 | 0 | 359901 | 1999 | 359901 | 0 | 0 | 0 | 103 | 141 | 540 | 1135 | 2013 | 0.2 |
+14:29:28 === ef-b1000-f250: Config { Path = ef, Batch = 1000, FlushMs = 250, Rate = 2000, Seconds = 180, Kills = 0, Label = ef-b1000-f250 }
+14:29:30 worker pid 44636 READY session_present=False
+14:29:40 [worker] STAT batches=24 avg_batch=825 avg_write_ms=221.2 avg_recv_lag_ms=90.8 queued=200
+14:29:50 [worker] STAT batches=28 avg_batch=736 avg_write_ms=105.9 avg_recv_lag_ms=43.4 queued=200
+14:30:00 [worker] STAT batches=28 avg_batch=729 avg_write_ms=108.1 avg_recv_lag_ms=43.6 queued=400
+14:30:11 [worker] STAT batches=28 avg_batch=743 avg_write_ms=110.4 avg_recv_lag_ms=43.2 queued=200
+14:30:21 [worker] STAT batches=27 avg_batch=748 avg_write_ms=112.8 avg_recv_lag_ms=43.4 queued=203
+14:30:31 [worker] STAT batches=28 avg_batch=729 avg_write_ms=103.0 avg_recv_lag_ms=42.9 queued=200
+14:30:41 [worker] STAT batches=28 avg_batch=714 avg_write_ms=99.8 avg_recv_lag_ms=43.0 queued=200
+14:30:51 [worker] STAT batches=28 avg_batch=729 avg_write_ms=106.8 avg_recv_lag_ms=43.7 queued=399
+14:31:01 [worker] STAT batches=28 avg_batch=736 avg_write_ms=102.5 avg_recv_lag_ms=43.9 queued=200
+14:31:12 [worker] STAT batches=28 avg_batch=729 avg_write_ms=105.0 avg_recv_lag_ms=43.2 queued=200
+14:31:22 [worker] STAT batches=28 avg_batch=725 avg_write_ms=103.6 avg_recv_lag_ms=43.5 queued=308
+14:31:32 [worker] STAT batches=28 avg_batch=725 avg_write_ms=103.0 avg_recv_lag_ms=43.1 queued=199
+14:31:42 [worker] STAT batches=28 avg_batch=736 avg_write_ms=104.7 avg_recv_lag_ms=43.4 queued=200
+14:31:52 [worker] STAT batches=28 avg_batch=729 avg_write_ms=106.0 avg_recv_lag_ms=43.9 queued=200
+14:32:03 [worker] STAT batches=28 avg_batch=729 avg_write_ms=103.3 avg_recv_lag_ms=43.4 queued=200
+14:32:13 [worker] STAT batches=28 avg_batch=736 avg_write_ms=106.0 avg_recv_lag_ms=44.2 queued=200
+14:32:23 [worker] STAT batches=28 avg_batch=722 avg_write_ms=104.9 avg_recv_lag_ms=44.3 queued=390
+14:32:31 RESULT | ef-b1000-f250 | ef | 1000 | 250 | 2000 | 180 | 0 | 0 | 360000 | 1999 | 360000 | 0 | 0 | 0 | 341 | 505 | 538 | 613 | 2015 | 0.5 |
+14:32:31 === copy-flood-b250-f100: Config { Path = copy, Batch = 250, FlushMs = 100, Rate = 0, Seconds = 60, Kills = 0, Label = copy-flood-b250-f100 }
+14:32:33 worker pid 22944 READY session_present=False
+14:32:43 [worker] STAT batches=144 avg_batch=250 avg_write_ms=65.5 avg_recv_lag_ms=4457.2 queued=250
+14:32:53 [worker] STAT batches=152 avg_batch=250 avg_write_ms=64.0 avg_recv_lag_ms=13183.3 queued=250
+14:33:03 [worker] STAT batches=150 avg_batch=250 avg_write_ms=64.8 avg_recv_lag_ms=21917.1 queued=250
+14:33:13 [worker] STAT batches=151 avg_batch=250 avg_write_ms=64.6 avg_recv_lag_ms=30742.8 queued=250
+14:33:23 [worker] STAT batches=137 avg_batch=250 avg_write_ms=71.5 avg_recv_lag_ms=39340.1 queued=247
+14:33:33 [worker] STAT batches=147 avg_batch=250 avg_write_ms=66.2 avg_recv_lag_ms=48661.9 queued=250
+14:33:43 [worker] STAT batches=180 avg_batch=250 avg_write_ms=54.2 avg_recv_lag_ms=57350.2 queued=250
+14:33:53 [worker] STAT batches=166 avg_batch=250 avg_write_ms=58.2 avg_recv_lag_ms=66051.4 queued=250
+14:34:03 [worker] STAT batches=166 avg_batch=250 avg_write_ms=58.3 avg_recv_lag_ms=74847.1 queued=250
+14:34:13 [worker] STAT batches=120 avg_batch=250 avg_write_ms=81.3 avg_recv_lag_ms=83926.1 queued=250
+14:34:23 [worker] STAT batches=125 avg_batch=250 avg_write_ms=78.0 avg_recv_lag_ms=93072.6 queued=250
+14:34:33 [worker] STAT batches=116 avg_batch=250 avg_write_ms=84.6 avg_recv_lag_ms=103009.7 queued=250
+14:34:43 [worker] STAT batches=188 avg_batch=250 avg_write_ms=51.8 avg_recv_lag_ms=110683.3 queued=250
+14:34:53 [worker] STAT batches=189 avg_batch=250 avg_write_ms=51.6 avg_recv_lag_ms=119352.0 queued=250
+14:35:03 [worker] STAT batches=184 avg_batch=250 avg_write_ms=52.8 avg_recv_lag_ms=128053.6 queued=250
+14:35:13 [worker] STAT batches=190 avg_batch=250 avg_write_ms=51.3 avg_recv_lag_ms=136698.9 queued=250
+14:35:23 [worker] STAT batches=188 avg_batch=250 avg_write_ms=51.7 avg_recv_lag_ms=145329.5 queued=250
+14:35:33 [worker] STAT batches=189 avg_batch=250 avg_write_ms=51.6 avg_recv_lag_ms=153922.2 queued=250
+14:35:43 [worker] STAT batches=189 avg_batch=250 avg_write_ms=51.7 avg_recv_lag_ms=162571.7 queued=250
+14:35:53 [worker] STAT batches=187 avg_batch=250 avg_write_ms=52.2 avg_recv_lag_ms=171210.1 queued=250
+14:36:03 [worker] STAT batches=185 avg_batch=250 avg_write_ms=52.3 avg_recv_lag_ms=179806.8 queued=250
+14:36:13 [worker] STAT batches=169 avg_batch=250 avg_write_ms=57.5 avg_recv_lag_ms=188701.5 queued=250
+14:36:23 [worker] STAT batches=153 avg_batch=250 avg_write_ms=63.8 avg_recv_lag_ms=197971.4 queued=250
+14:36:33 [worker] STAT batches=176 avg_batch=250 avg_write_ms=55.3 avg_recv_lag_ms=206286.9 queued=250
+14:36:43 [worker] STAT batches=168 avg_batch=250 avg_write_ms=57.8 avg_recv_lag_ms=214850.9 queued=250
+14:36:53 [worker] STAT batches=165 avg_batch=250 avg_write_ms=58.9 avg_recv_lag_ms=224062.6 queued=250
+14:37:03 [worker] STAT batches=172 avg_batch=250 avg_write_ms=56.6 avg_recv_lag_ms=232587.4 queued=250
+14:37:13 [worker] STAT batches=172 avg_batch=250 avg_write_ms=56.2 avg_recv_lag_ms=241158.5 queued=250
+14:37:24 [worker] STAT batches=164 avg_batch=250 avg_write_ms=58.7 avg_recv_lag_ms=249949.0 queued=250
+14:37:34 [worker] STAT batches=170 avg_batch=250 avg_write_ms=57.2 avg_recv_lag_ms=258737.4 queued=250
+14:37:44 [worker] STAT batches=166 avg_batch=250 avg_write_ms=58.3 avg_recv_lag_ms=267563.4 queued=250
+14:37:54 [worker] STAT batches=152 avg_batch=250 avg_write_ms=63.8 avg_recv_lag_ms=276716.5 queued=250
+14:38:04 [worker] STAT batches=170 avg_batch=250 avg_write_ms=57.0 avg_recv_lag_ms=285282.1 queued=250
+14:38:14 [worker] STAT batches=162 avg_batch=250 avg_write_ms=59.2 avg_recv_lag_ms=294358.8 queued=250
+14:38:24 [worker] STAT batches=169 avg_batch=250 avg_write_ms=57.0 avg_recv_lag_ms=302691.2 queued=250
+14:38:34 [worker] STAT batches=105 avg_batch=250 avg_write_ms=93.3 avg_recv_lag_ms=312148.8 queued=250
+14:38:44 [worker] STAT batches=152 avg_batch=250 avg_write_ms=63.5 avg_recv_lag_ms=320917.2 queued=250
+14:38:54 [worker] STAT batches=119 avg_batch=250 avg_write_ms=81.8 avg_recv_lag_ms=330720.6 queued=250
+14:39:04 [worker] STAT batches=149 avg_batch=250 avg_write_ms=65.1 avg_recv_lag_ms=339161.9 queued=250
+14:39:14 [worker] STAT batches=152 avg_batch=250 avg_write_ms=64.8 avg_recv_lag_ms=348219.1 queued=250
+14:39:24 [worker] STAT batches=168 avg_batch=250 avg_write_ms=57.2 avg_recv_lag_ms=357501.3 queued=250
+14:39:34 [worker] STAT batches=159 avg_batch=250 avg_write_ms=60.5 avg_recv_lag_ms=366315.4 queued=250
+14:39:44 [worker] STAT batches=172 avg_batch=250 avg_write_ms=55.5 avg_recv_lag_ms=374937.4 queued=250
+14:39:54 [worker] STAT batches=173 avg_batch=250 avg_write_ms=55.5 avg_recv_lag_ms=383786.6 queued=250
+14:40:04 [worker] STAT batches=178 avg_batch=250 avg_write_ms=54.1 avg_recv_lag_ms=392386.6 queued=250
+14:40:14 [worker] STAT batches=179 avg_batch=250 avg_write_ms=53.8 avg_recv_lag_ms=401197.2 queued=250
+14:40:24 [worker] STAT batches=179 avg_batch=250 avg_write_ms=53.8 avg_recv_lag_ms=409720.9 queued=250
+14:40:34 [worker] STAT batches=169 avg_batch=250 avg_write_ms=57.0 avg_recv_lag_ms=418380.3 queued=250
+14:40:44 [worker] STAT batches=161 avg_batch=250 avg_write_ms=59.9 avg_recv_lag_ms=427481.1 queued=250
+14:40:51 RESULT | copy-flood-b250-f100 | copy | 250 | 100 | flood | 60 | 0 | 0 | 1999615 | 33300 | 1999615 | 0 | 0 | 0 | 246279 | 414556 | 429021 | 432727 | 4061 | 432.9 |
+14:40:51 === ef-flood-b1000-f25: Config { Path = ef, Batch = 1000, FlushMs = 25, Rate = 0, Seconds = 60, Kills = 0, Label = ef-flood-b1000-f25 }
+14:40:53 worker pid 23816 READY session_present=False
+14:41:03 [worker] STAT batches=33 avg_batch=994 avg_write_ms=294.8 avg_recv_lag_ms=5422.8 queued=1000
+14:41:13 [worker] STAT batches=44 avg_batch=1000 avg_write_ms=221.5 avg_recv_lag_ms=12950.2 queued=1000
+14:41:23 [worker] STAT batches=49 avg_batch=1000 avg_write_ms=200.5 avg_recv_lag_ms=21591.5 queued=1000
+14:41:33 [worker] STAT batches=53 avg_batch=1000 avg_write_ms=185.4 avg_recv_lag_ms=30167.4 queued=1000
+14:41:43 [worker] STAT batches=53 avg_batch=1000 avg_write_ms=184.5 avg_recv_lag_ms=38550.8 queued=1000
+14:41:53 [worker] STAT batches=56 avg_batch=1000 avg_write_ms=172.2 avg_recv_lag_ms=47284.0 queued=1000
+14:42:04 [worker] STAT batches=93 avg_batch=1000 avg_write_ms=101.4 avg_recv_lag_ms=54693.6 queued=1000
+14:42:14 [worker] STAT batches=91 avg_batch=1000 avg_write_ms=102.7 avg_recv_lag_ms=61878.7 queued=1000
+14:42:24 [worker] STAT batches=94 avg_batch=1000 avg_write_ms=100.1 avg_recv_lag_ms=68970.6 queued=1000
+14:42:35 [worker] STAT batches=75 avg_batch=1000 avg_write_ms=151.4 avg_recv_lag_ms=76144.8 queued=1000
+14:42:46 [worker] STAT batches=86 avg_batch=1000 avg_write_ms=109.3 avg_recv_lag_ms=85286.9 queued=1000
+14:42:56 [worker] STAT batches=86 avg_batch=1000 avg_write_ms=110.5 avg_recv_lag_ms=92558.7 queued=1000
+14:43:06 [worker] STAT batches=79 avg_batch=1000 avg_write_ms=119.6 avg_recv_lag_ms=99718.2 queued=1000
+14:43:16 [worker] STAT batches=85 avg_batch=1000 avg_write_ms=112.0 avg_recv_lag_ms=107706.8 queued=1000
+14:43:26 [worker] STAT batches=93 avg_batch=1000 avg_write_ms=101.3 avg_recv_lag_ms=114832.9 queued=1000
+14:43:36 [worker] STAT batches=91 avg_batch=1000 avg_write_ms=103.0 avg_recv_lag_ms=121956.0 queued=1000
+14:43:46 [worker] STAT batches=93 avg_batch=1000 avg_write_ms=104.3 avg_recv_lag_ms=129115.6 queued=1000
+14:43:56 [worker] STAT batches=77 avg_batch=1000 avg_write_ms=122.8 avg_recv_lag_ms=136562.1 queued=1000
+14:44:06 [worker] STAT batches=67 avg_batch=1000 avg_write_ms=141.3 avg_recv_lag_ms=143976.8 queued=1000
+14:44:16 [worker] STAT batches=70 avg_batch=1000 avg_write_ms=135.0 avg_recv_lag_ms=151826.4 queued=1000
+14:44:26 [worker] STAT batches=81 avg_batch=1000 avg_write_ms=116.4 avg_recv_lag_ms=160048.2 queued=1000
+14:44:37 [worker] STAT batches=69 avg_batch=1000 avg_write_ms=148.6 avg_recv_lag_ms=166247.0 queued=1000
+14:44:47 [worker] STAT batches=85 avg_batch=1000 avg_write_ms=110.8 avg_recv_lag_ms=175631.5 queued=1000
+14:44:57 [worker] STAT batches=84 avg_batch=1000 avg_write_ms=112.2 avg_recv_lag_ms=182912.3 queued=1000
+14:45:11 RESULT | ef-flood-b1000-f25 | ef | 1000 | 25 | flood | 60 | 0 | 0 | 1852995 | 30860 | 1852995 | 0 | 0 | 0 | 119255 | 185764 | 191266 | 193359 | 7374 | 193.3 |
+14:45:11 === chaos-ef-b1000-f25: Config { Path = ef, Batch = 1000, FlushMs = 25, Rate = 2000, Seconds = 600, Kills = 10, Label = chaos-ef-b1000-f25 }
+14:45:13 worker pid 45788 READY session_present=False
+14:45:23 [worker] STAT batches=100 avg_batch=198 avg_write_ms=59.6 avg_recv_lag_ms=56.0 queued=1
+14:45:33 [worker] STAT batches=131 avg_batch=154 avg_write_ms=28.6 avg_recv_lag_ms=43.3 queued=0
+14:45:43 [worker] STAT batches=139 avg_batch=144 avg_write_ms=26.7 avg_recv_lag_ms=42.9 queued=0
+14:45:48 killed worker #1 at 35s
+14:45:49 worker pid 2644 READY session_present=True
+14:45:59 [worker] STAT batches=92 avg_batch=248 avg_write_ms=65.9 avg_recv_lag_ms=343.1 queued=2
+14:46:09 [worker] STAT batches=132 avg_batch=152 avg_write_ms=26.5 avg_recv_lag_ms=43.5 queued=0
+14:46:19 [worker] STAT batches=127 avg_batch=157 avg_write_ms=26.7 avg_recv_lag_ms=43.0 queued=0
+14:46:29 [worker] STAT batches=126 avg_batch=160 avg_write_ms=28.3 avg_recv_lag_ms=43.9 queued=0
+14:46:32 killed worker #2 at 79s
+14:46:33 worker pid 15476 READY session_present=True
+14:46:43 [worker] STAT batches=96 avg_batch=234 avg_write_ms=62.8 avg_recv_lag_ms=314.1 queued=5
+14:46:53 [worker] STAT batches=139 avg_batch=145 avg_write_ms=26.4 avg_recv_lag_ms=43.4 queued=1
+14:47:03 [worker] STAT batches=130 avg_batch=154 avg_write_ms=27.6 avg_recv_lag_ms=43.1 queued=0
+14:47:13 [worker] STAT batches=128 avg_batch=156 avg_write_ms=29.7 avg_recv_lag_ms=42.8 queued=0
+14:47:24 [worker] STAT batches=132 avg_batch=153 avg_write_ms=27.5 avg_recv_lag_ms=42.6 queued=2
+14:47:32 killed worker #3 at 139s
+14:47:33 worker pid 43112 READY session_present=True
+14:47:43 [worker] STAT batches=89 avg_batch=254 avg_write_ms=64.4 avg_recv_lag_ms=332.0 queued=0
+14:47:53 [worker] STAT batches=118 avg_batch=169 avg_write_ms=30.4 avg_recv_lag_ms=44.1 queued=200
+14:48:03 [worker] STAT batches=121 avg_batch=167 avg_write_ms=39.6 avg_recv_lag_ms=43.5 queued=0
+14:48:13 [worker] STAT batches=118 avg_batch=171 avg_write_ms=40.9 avg_recv_lag_ms=44.9 queued=0
+14:48:23 [worker] STAT batches=123 avg_batch=163 avg_write_ms=30.2 avg_recv_lag_ms=44.1 queued=0
+14:48:33 [worker] STAT batches=121 avg_batch=167 avg_write_ms=37.1 avg_recv_lag_ms=43.8 queued=0
+14:48:43 [worker] STAT batches=129 avg_batch=155 avg_write_ms=29.0 avg_recv_lag_ms=43.1 queued=0
+14:48:44 killed worker #4 at 211s
+14:48:45 worker pid 2196 READY session_present=True
+14:48:55 [worker] STAT batches=70 avg_batch=331 avg_write_ms=105.0 avg_recv_lag_ms=559.4 queued=0
+14:49:05 [worker] STAT batches=132 avg_batch=151 avg_write_ms=30.4 avg_recv_lag_ms=43.3 queued=4
+14:49:15 [worker] STAT batches=96 avg_batch=210 avg_write_ms=59.6 avg_recv_lag_ms=47.5 queued=0
+14:49:25 [worker] STAT batches=114 avg_batch=177 avg_write_ms=41.3 avg_recv_lag_ms=43.7 queued=0
+14:49:35 killed worker #5 at 262s
+14:49:36 worker pid 47652 READY session_present=True
+14:49:46 [worker] STAT batches=85 avg_batch=310 avg_write_ms=78.4 avg_recv_lag_ms=1267.2 queued=197
+14:49:56 [worker] STAT batches=101 avg_batch=200 avg_write_ms=52.2 avg_recv_lag_ms=46.8 queued=0
+14:50:06 [worker] STAT batches=119 avg_batch=167 avg_write_ms=34.6 avg_recv_lag_ms=43.6 queued=284
+14:50:16 [worker] STAT batches=118 avg_batch=172 avg_write_ms=39.3 avg_recv_lag_ms=45.7 queued=0
+14:50:26 [worker] STAT batches=133 avg_batch=150 avg_write_ms=27.8 avg_recv_lag_ms=43.2 queued=0
+14:50:36 killed worker #6 at 323s
+14:50:37 worker pid 50552 READY session_present=True
+14:50:47 [worker] STAT batches=48 avg_batch=474 avg_write_ms=178.7 avg_recv_lag_ms=1126.8 queued=2
+14:50:57 [worker] STAT batches=118 avg_batch=170 avg_write_ms=42.8 avg_recv_lag_ms=43.6 queued=0
+14:51:07 [worker] STAT batches=124 avg_batch=161 avg_write_ms=33.2 avg_recv_lag_ms=43.7 queued=194
+14:51:17 [worker] STAT batches=124 avg_batch=163 avg_write_ms=34.4 avg_recv_lag_ms=43.4 queued=0
+14:51:27 [worker] STAT batches=125 avg_batch=160 avg_write_ms=32.7 avg_recv_lag_ms=44.2 queued=3
+14:51:37 [worker] STAT batches=125 avg_batch=160 avg_write_ms=33.7 avg_recv_lag_ms=44.3 queued=4
+14:51:47 [worker] STAT batches=90 avg_batch=222 avg_write_ms=73.6 avg_recv_lag_ms=45.1 queued=200
+14:51:50 killed worker #7 at 397s
+14:51:51 worker pid 49336 READY session_present=True
+14:52:01 [worker] STAT batches=22 avg_batch=1000 avg_write_ms=446.9 avg_recv_lag_ms=2221.3 queued=1000
+14:52:11 [worker] STAT batches=80 avg_batch=264 avg_write_ms=87.0 avg_recv_lag_ms=98.2 queued=200
+14:52:21 [worker] STAT batches=104 avg_batch=192 avg_write_ms=56.4 avg_recv_lag_ms=43.0 queued=200
+14:52:31 [worker] STAT batches=82 avg_batch=246 avg_write_ms=83.2 avg_recv_lag_ms=68.9 queued=3
+14:52:41 [worker] STAT batches=104 avg_batch=192 avg_write_ms=53.6 avg_recv_lag_ms=43.2 queued=199
+14:52:43 killed worker #8 at 450s
+14:52:45 worker pid 48992 READY session_present=True
+14:52:55 [worker] STAT batches=23 avg_batch=1000 avg_write_ms=401.4 avg_recv_lag_ms=1412.4 queued=989
+14:53:06 [worker] STAT batches=10 avg_batch=999 avg_write_ms=1085.6 avg_recv_lag_ms=1117.5 queued=1000
+14:53:16 [worker] STAT batches=24 avg_batch=1000 avg_write_ms=415.4 avg_recv_lag_ms=4551.7 queued=1000
+14:53:26 [worker] STAT batches=23 avg_batch=1000 avg_write_ms=431.5 avg_recv_lag_ms=2852.6 queued=1000
+14:53:33 killed worker #9 at 500s
+14:53:36 worker pid 49112 READY session_present=True
+14:53:47 [worker] STAT batches=10 avg_batch=1000 avg_write_ms=1024.2 avg_recv_lag_ms=11754.5 queued=1000
+14:53:57 [worker] STAT batches=17 avg_batch=1000 avg_write_ms=597.5 avg_recv_lag_ms=13040.7 queued=1000
+14:54:07 [worker] STAT batches=15 avg_batch=1000 avg_write_ms=658.1 avg_recv_lag_ms=15859.8 queued=1000
+14:54:18 [worker] STAT batches=13 avg_batch=1000 avg_write_ms=808.8 avg_recv_lag_ms=17616.7 queued=1000
+14:54:29 [worker] STAT batches=13 avg_batch=155 avg_write_ms=619.5 avg_recv_lag_ms=20480.1 queued=0
+14:54:39 [worker] STAT batches=75 avg_batch=2 avg_write_ms=27.2 avg_recv_lag_ms=37396.7 queued=0
+14:54:50 [worker] STAT batches=9 avg_batch=187 avg_write_ms=895.6 avg_recv_lag_ms=44553.9 queued=1000
+14:54:51 killed worker #10 at 578s
+14:54:53 worker pid 36288 READY session_present=True
+14:55:03 [worker] STAT batches=15 avg_batch=135 avg_write_ms=563.0 avg_recv_lag_ms=55088.6 queued=0
+14:55:13 [worker] STAT batches=68 avg_batch=2 avg_write_ms=67.7 avg_recv_lag_ms=69276.9 queued=2
+14:55:24 [worker] STAT batches=12 avg_batch=357 avg_write_ms=808.5 avg_recv_lag_ms=77726.4 queued=1000
+14:55:36 [worker] STAT batches=7 avg_batch=1000 avg_write_ms=1677.7 avg_recv_lag_ms=84672.6 queued=1000
+14:55:47 [worker] STAT batches=4 avg_batch=1000 avg_write_ms=2760.6 avg_recv_lag_ms=92184.6 queued=1000
+14:55:58 [worker] STAT batches=6 avg_batch=1000 avg_write_ms=1847.6 avg_recv_lag_ms=102784.5 queued=1000
+14:56:09 [worker] STAT batches=5 avg_batch=1000 avg_write_ms=2185.8 avg_recv_lag_ms=110295.2 queued=1000
+14:56:21 [worker] STAT batches=5 avg_batch=1000 avg_write_ms=2252.3 avg_recv_lag_ms=119405.0 queued=1000
+14:56:31 [worker] STAT batches=15 avg_batch=1000 avg_write_ms=663.1 avg_recv_lag_ms=115916.0 queued=1000
+15:08:33 === chaos-copy-b1000-f25: Config { Path = copy, Batch = 1000, FlushMs = 25, Rate = 2000, Seconds = 600, Kills = 10, Label = chaos-copy-b1000-f25 }
+15:08:35 worker pid 25876 READY session_present=False
+15:08:45 [worker] STAT batches=107 avg_batch=181 avg_write_ms=53.9 avg_recv_lag_ms=44.2 queued=10
+15:08:55 [worker] STAT batches=111 avg_batch=180 avg_write_ms=53.4 avg_recv_lag_ms=44.0 queued=195
+15:09:05 [worker] STAT batches=108 avg_batch=187 avg_write_ms=56.2 avg_recv_lag_ms=42.8 queued=1
+15:09:10 killed worker #1 at 35s
+15:09:11 worker pid 48024 READY session_present=True
+15:09:21 [worker] STAT batches=109 avg_batch=213 avg_write_ms=55.5 avg_recv_lag_ms=156.0 queued=2
+15:09:31 [worker] STAT batches=113 avg_batch=177 avg_write_ms=51.9 avg_recv_lag_ms=43.5 queued=199
+15:09:41 [worker] STAT batches=98 avg_batch=202 avg_write_ms=64.4 avg_recv_lag_ms=46.1 queued=195
+15:09:51 [worker] STAT batches=74 avg_batch=270 avg_write_ms=102.2 avg_recv_lag_ms=44.2 queued=197
+15:09:54 killed worker #2 at 79s
+15:09:56 worker pid 32424 READY session_present=True
+15:10:06 [worker] STAT batches=97 avg_batch=243 avg_write_ms=67.3 avg_recv_lag_ms=212.6 queued=0
+15:10:16 [worker] STAT batches=83 avg_batch=237 avg_write_ms=86.9 avg_recv_lag_ms=73.6 queued=195
+15:10:26 [worker] STAT batches=42 avg_batch=443 avg_write_ms=214.5 avg_recv_lag_ms=159.4 queued=1000
+15:10:36 [worker] STAT batches=19 avg_batch=966 avg_write_ms=521.9 avg_recv_lag_ms=1360.0 queued=1000
+15:10:46 [worker] STAT batches=71 avg_batch=312 avg_write_ms=108.4 avg_recv_lag_ms=194.4 queued=200
+15:10:54 killed worker #3 at 139s
+15:10:55 worker pid 50544 READY session_present=True
+15:11:05 [worker] STAT batches=94 avg_batch=245 avg_write_ms=72.6 avg_recv_lag_ms=158.8 queued=0
+15:11:15 [worker] STAT batches=108 avg_batch=185 avg_write_ms=55.7 avg_recv_lag_ms=43.7 queued=3
+15:11:25 [worker] STAT batches=108 avg_batch=185 avg_write_ms=54.4 avg_recv_lag_ms=44.0 queued=34
+15:11:35 [worker] STAT batches=108 avg_batch=187 avg_write_ms=55.4 avg_recv_lag_ms=43.9 queued=0
+15:11:45 [worker] STAT batches=110 avg_batch=182 avg_write_ms=54.4 avg_recv_lag_ms=43.2 queued=1
+15:11:55 [worker] STAT batches=108 avg_batch=185 avg_write_ms=57.1 avg_recv_lag_ms=44.3 queued=205
+15:12:05 [worker] STAT batches=107 avg_batch=187 avg_write_ms=57.0 avg_recv_lag_ms=44.0 queued=193
+15:12:05 killed worker #4 at 211s
+15:12:07 worker pid 47400 READY session_present=True
+15:12:17 [worker] STAT batches=112 avg_batch=205 avg_write_ms=53.5 avg_recv_lag_ms=155.7 queued=200
+15:12:27 [worker] STAT batches=111 avg_batch=182 avg_write_ms=52.0 avg_recv_lag_ms=43.6 queued=2
+15:12:37 [worker] STAT batches=111 avg_batch=180 avg_write_ms=52.9 avg_recv_lag_ms=43.6 queued=0
+15:12:47 [worker] STAT batches=108 avg_batch=185 avg_write_ms=55.0 avg_recv_lag_ms=43.1 queued=6
+15:12:55 killed worker #5 at 260s
+15:12:56 worker pid 47432 READY session_present=True
+15:13:06 [worker] STAT batches=113 avg_batch=202 avg_write_ms=53.5 avg_recv_lag_ms=145.3 queued=198
+15:13:16 [worker] STAT batches=109 avg_batch=185 avg_write_ms=58.5 avg_recv_lag_ms=43.7 queued=200
+15:13:26 [worker] STAT batches=101 avg_batch=198 avg_write_ms=65.4 avg_recv_lag_ms=43.9 queued=200
+15:13:36 [worker] STAT batches=107 avg_batch=189 avg_write_ms=59.3 avg_recv_lag_ms=44.0 queued=0
+15:13:46 [worker] STAT batches=101 avg_batch=198 avg_write_ms=63.2 avg_recv_lag_ms=44.3 queued=200
+15:13:56 [worker] STAT batches=98 avg_batch=206 avg_write_ms=68.1 avg_recv_lag_ms=44.5 queued=35
+15:13:58 killed worker #6 at 323s
+15:13:59 worker pid 23776 READY session_present=True
+15:14:09 [worker] STAT batches=100 avg_batch=230 avg_write_ms=62.2 avg_recv_lag_ms=155.6 queued=72
+15:14:19 [worker] STAT batches=110 avg_batch=183 avg_write_ms=55.2 avg_recv_lag_ms=44.7 queued=86
+15:14:29 [worker] STAT batches=105 avg_batch=191 avg_write_ms=58.9 avg_recv_lag_ms=43.3 queued=198
+15:14:39 [worker] STAT batches=110 avg_batch=184 avg_write_ms=52.2 avg_recv_lag_ms=44.0 queued=0
+15:14:49 [worker] STAT batches=104 avg_batch=194 avg_write_ms=55.9 avg_recv_lag_ms=43.8 queued=26
+15:14:59 [worker] STAT batches=111 avg_batch=182 avg_write_ms=54.3 avg_recv_lag_ms=44.2 queued=0
+15:15:10 [worker] STAT batches=103 avg_batch=189 avg_write_ms=57.7 avg_recv_lag_ms=48.8 queued=204
+15:15:12 killed worker #7 at 397s
+15:15:13 worker pid 49328 READY session_present=True
+15:15:23 [worker] STAT batches=106 avg_batch=219 avg_write_ms=56.6 avg_recv_lag_ms=170.6 queued=196
+15:15:33 [worker] STAT batches=112 avg_batch=180 avg_write_ms=53.7 avg_recv_lag_ms=44.2 queued=1
+15:15:43 [worker] STAT batches=105 avg_batch=190 avg_write_ms=58.2 avg_recv_lag_ms=43.2 queued=198
+15:15:53 [worker] STAT batches=102 avg_batch=198 avg_write_ms=61.8 avg_recv_lag_ms=43.9 queued=195
+15:16:03 [worker] STAT batches=110 avg_batch=184 avg_write_ms=55.1 avg_recv_lag_ms=43.5 queued=0
+15:16:05 killed worker #8 at 450s
+15:16:07 worker pid 44616 READY session_present=True
+15:16:17 [worker] STAT batches=107 avg_batch=217 avg_write_ms=57.9 avg_recv_lag_ms=161.6 queued=3
+15:16:27 [worker] STAT batches=101 avg_batch=198 avg_write_ms=61.2 avg_recv_lag_ms=43.5 queued=0
+15:16:37 [worker] STAT batches=103 avg_batch=194 avg_write_ms=58.8 avg_recv_lag_ms=44.0 queued=0
+15:16:47 [worker] STAT batches=111 avg_batch=182 avg_write_ms=54.4 avg_recv_lag_ms=43.8 queued=8
+15:16:55 killed worker #9 at 500s
+15:16:56 worker pid 40680 READY session_present=True
+15:17:06 [worker] STAT batches=103 avg_batch=203 avg_write_ms=59.6 avg_recv_lag_ms=160.8 queued=140
+15:17:16 [worker] STAT batches=113 avg_batch=125 avg_write_ms=51.3 avg_recv_lag_ms=43.9 queued=0
+15:17:26 [worker] STAT batches=115 avg_batch=122 avg_write_ms=51.9 avg_recv_lag_ms=43.9 queued=140
+15:17:36 [worker] STAT batches=111 avg_batch=127 avg_write_ms=51.0 avg_recv_lag_ms=44.1 queued=0
+15:17:47 [worker] STAT batches=113 avg_batch=124 avg_write_ms=51.0 avg_recv_lag_ms=44.1 queued=140
+15:17:57 [worker] STAT batches=105 avg_batch=133 avg_write_ms=59.5 avg_recv_lag_ms=44.2 queued=135
+15:18:07 [worker] STAT batches=115 avg_batch=122 avg_write_ms=50.8 avg_recv_lag_ms=44.3 queued=138
+15:18:13 killed worker #10 at 578s
+15:18:14 worker pid 48620 READY session_present=True
+15:18:24 [worker] STAT batches=111 avg_batch=145 avg_write_ms=53.0 avg_recv_lag_ms=147.1 queued=12
+15:18:34 [worker] STAT batches=112 avg_batch=126 avg_write_ms=51.4 avg_recv_lag_ms=44.0 queued=0
