@@ -1,9 +1,15 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <!-- Local Auth:SigningKey lives in user-secrets (ADR 0002); Development loads them automatically. -->
+    <UserSecretsId>bbe4444e-dcdf-41cc-b0a2-6e044370514a</UserSecretsId>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\FieldTrack.Infrastructure\FieldTrack.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <!-- Needed in the startup project for dotnet ef; build-time only. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
