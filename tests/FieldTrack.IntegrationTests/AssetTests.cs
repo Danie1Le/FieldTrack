@@ -89,7 +89,7 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         // Readings arrive with #26, which also tests this with a real Reading; until then the
         // "Asset has Readings" seam answers yes.
         await using var api = Fixture.Api.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EveryAssetHasReadings>()));
+            builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EverythingHasReadings>()));
         using var admin = api.CreateClient();
         await AuthClient.AuthorizeAsync(admin, AdminEmail, AdminPassword);
         var asset = await CreateAssetAsync(admin, new { name = "Haul truck 7", type = "Truck" });
@@ -208,10 +208,5 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         var client = Fixture.Api.CreateClient();
         await AuthClient.AuthorizeAsync(client, AdminEmail, AdminPassword);
         return client;
-    }
-
-    private sealed class EveryAssetHasReadings : IReadingHistory
-    {
-        public Task<bool> AssetHasReadingsAsync(Guid assetId, CancellationToken cancellationToken) => Task.FromResult(true);
     }
 }
