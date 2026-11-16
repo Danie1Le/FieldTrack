@@ -14,8 +14,8 @@
 
   <ItemGroup>
     <Using Include="Shouldly" />
-    <Using Include="Xunit" />
-  </ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
 
   <!-- DomainDependencyTests reads Domain's project file to catch references before code uses them. -->
   <ItemGroup>
