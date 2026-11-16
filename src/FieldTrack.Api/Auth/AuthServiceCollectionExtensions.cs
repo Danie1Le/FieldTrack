@@ -31,6 +31,15 @@ public static class AuthServiceCollectionExtensions
             .Validate(options => options.HasStrongSigningKey(), $"{AuthOptions.SectionName}:{nameof(AuthOptions.SigningKey)} must be base64 of at least 256 bits.")
             .ValidateOnStart();
 
+        services.AddOptions<DemoOperatorOptions>()
+            .Configure<IConfiguration>((demo, configuration) =>
+            {
+                demo.Email = configuration[DemoOperatorOptions.EmailKey];
+                demo.Password = configuration[DemoOperatorOptions.PasswordKey];
+            })
+            .Validate(demo => !demo.Enabled || !string.IsNullOrEmpty(demo.Email), $"{DemoOperatorOptions.PasswordKey} turns demo mode on, which needs {DemoOperatorOptions.EmailKey} too.")
+            .ValidateOnStart();
+
         services.AddIdentityCore<FieldTrackUser>(options =>
             {
                 options.User.RequireUniqueEmail = true;

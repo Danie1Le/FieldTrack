@@ -23,9 +23,14 @@ public sealed class TokenLoggingTests(FieldTrackFixture fixture) : IntegrationTe
         using var refreshed = await AuthClient.PostRefreshAsync(client, signedIn.RefreshToken);
         var tokens = await AuthClient.ReadTokensAsync(refreshed);
         using var hub = await client.GetAsync($"/hubs/fleet?access_token={tokens.AccessToken}", CancellationToken);
+        await AuthClient.CreateUserAsync(client, "operator@fieldtrack.test", "Operator", "Operator-pass-1");
 
         logs.Entries.ShouldNotBeEmpty();
-        string[] secrets = [AdminPassword, signedIn.AccessToken, signedIn.RefreshToken, tokens.AccessToken, tokens.RefreshToken];
+        string[] secrets =
+        [
+            AdminPassword, signedIn.AccessToken, signedIn.RefreshToken, tokens.AccessToken, tokens.RefreshToken,
+            AuthClient.TemporaryPassword, "Operator-pass-1",
+        ];
         foreach (var secret in secrets)
         {
             logs.Entries.Where(entry => entry.Contains(secret, StringComparison.Ordinal)).ShouldBeEmpty();
