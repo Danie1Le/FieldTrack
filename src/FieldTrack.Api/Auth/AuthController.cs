@@ -6,28 +6,38 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace FieldTrack.Api.Auth;
 
-/// <summary>Sign-in and token refresh: the only endpoints a signed-out client may call besides health and docs.</summary>
+/// <summary>
+/// Sign-in, token refresh and password change: the only endpoints a signed-out client may call
+/// besides health and docs.
+/// </summary>
 [ApiController]
 [Route("auth")]
 [AllowAnonymous]
 public sealed class AuthController(
     UserManager<FieldTrackUser> users,
     SignInManager<FieldTrackUser> signInManager,
-    TokenService tokens) : ControllerBase
+    TokenService tokens,
+    IConfiguration configuration) : ControllerBase
 {
     /// <summary>Signs in with email and password.</summary>
     /// <response code="401">Wrong email or password, or the account is locked out after repeated failures.</response>
+    /// <response code="403">The password is temporary: change it with <c>POST /auth/change-password</c> to get tokens.</response>
     [HttpPost("sign-in")]
     [EnableRateLimiting(AuthServiceCollectionExtensions.SignInRateLimit)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<TokenResponse>> SignIn(SignInRequest request, CancellationToken cancellationToken)
     {
-        var user = await users.FindByEmailAsync(request.Email);
-        // One answer for an unknown email, a wrong password and a lockout, so none reveals which accounts exist.
-        if (user is null || !(await signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true)).Succeeded)
+        if (await CheckPasswordAsync(request.Email, request.Password) is not { } user)
         {
             return Unauthorized();
+        }
+
+        if (user.MustChangePassword)
+        {
+            return Problem(statusCode: StatusCodes.Status403Forbidden, title: "Password change required",
+                detail: "This password is temporary. Choose a new one with POST /auth/change-password.");
         }
 
         return await tokens.IssueAsync(user, cancellationToken);
@@ -39,4 +49,53 @@ public sealed class AuthController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<TokenResponse>> Refresh(RefreshRequest request, CancellationToken cancellationToken) =>
         await tokens.RefreshAsync(request.RefreshToken, cancellationToken) is { } response ? response : Unauthorized();
+
+    /// <summary>
+    /// Replaces the user's password and signs them in. This is how a first sign-in with a
+    /// temporary password completes. Every other session of the user ends.
+    /// </summary>
+    /// <response code="400">The new password is too weak.</response>
+    /// <response code="401">Wrong email or current password, or the account is locked out.</response>
+    /// <response code="403">The Demo Operator's password cannot be changed.</response>
+    [HttpPost("change-password")]
+    [EnableRateLimiting(AuthServiceCollectionExtensions.SignInRateLimit)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<TokenResponse>> ChangePassword(ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        if (await CheckPasswordAsync(request.Email, request.CurrentPassword) is not { } user)
+        {
+            return Unauthorized();
+        }
+
+        if (UserSeeder.IsDemoOperator(configuration, user))
+        {
+            return Problem(statusCode: StatusCodes.Status403Forbidden, title: "The Demo Operator's password cannot be changed.");
+        }
+
+        // ChangePasswordAsync saves the user, the cleared flag included.
+        user.MustChangePassword = false;
+        var result = await users.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
+        if (!result.Succeeded)
+        {
+            return this.ValidationProblem(result);
+        }
+
+        await tokens.RevokeAllAsync(user.Id, cancellationToken);
+        return await tokens.IssueAsync(user, cancellationToken);
+    }
+
+    /// <summary>
+    /// The user with this email and password, or null. Failures count towards lockout, and an
+    /// unknown email, a wrong password and a lockout look the same so none reveals which accounts exist.
+    /// </summary>
+    private async Task<FieldTrackUser?> CheckPasswordAsync(string email, string password)
+    {
+        var user = await users.FindByEmailAsync(email);
+        return user is not null && (await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true)).Succeeded
+            ? user
+            : null;
+    }
 }

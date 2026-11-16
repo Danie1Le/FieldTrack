@@ -6,6 +6,9 @@ namespace FieldTrack.IntegrationTests;
 /// <summary>Calls the sign-in endpoints the way the dashboard does.</summary>
 internal static class AuthClient
 {
+    /// <summary>The temporary password <see cref="CreateUserAsync"/> gives new users.</summary>
+    public const string TemporaryPassword = "Temporary-pass-1";
+
     /// <summary>The body of a successful sign-in, refresh or password change.</summary>
     public sealed record Tokens(string AccessToken, DateTimeOffset AccessTokenExpiresAt, string RefreshToken);
 
@@ -14,6 +17,24 @@ internal static class AuthClient
 
     public static Task<HttpResponseMessage> PostRefreshAsync(HttpClient client, string refreshToken) =>
         client.PostAsJsonAsync("/auth/refresh", new { refreshToken }, TestContext.Current.CancellationToken);
+
+    public static Task<HttpResponseMessage> PostChangePasswordAsync(HttpClient client, string email, string currentPassword, string newPassword) =>
+        client.PostAsJsonAsync("/auth/change-password", new { email, currentPassword, newPassword }, TestContext.Current.CancellationToken);
+
+    public static Task<HttpResponseMessage> PostUserAsync(HttpClient adminClient, string email, string role, string temporaryPassword) =>
+        adminClient.PostAsJsonAsync("/users", new { email, role, temporaryPassword }, TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// Has the Admin behind <paramref name="adminClient"/> create a user, then replaces the temporary
+    /// password with <paramref name="password"/> as the user's first sign-in requires.
+    /// </summary>
+    public static async Task CreateUserAsync(HttpClient adminClient, string email, string role, string password)
+    {
+        using var created = await PostUserAsync(adminClient, email, role, TemporaryPassword);
+        created.EnsureSuccessStatusCode();
+        using var changed = await PostChangePasswordAsync(adminClient, email, TemporaryPassword, password);
+        changed.EnsureSuccessStatusCode();
+    }
 
     public static async Task<Tokens> SignInAsync(HttpClient client, string email, string password)
     {

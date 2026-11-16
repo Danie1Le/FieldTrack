@@ -22,6 +22,16 @@ public sealed record RefreshRequest([Required] string RefreshToken)
     public override string ToString() => nameof(RefreshRequest);
 }
 
+/// <summary>A password change, which also completes a first sign-in with a temporary password.</summary>
+/// <param name="Email">The user's email address.</param>
+/// <param name="CurrentPassword">The password the user has now, temporary or not.</param>
+/// <param name="NewPassword">The password to replace it with.</param>
+public sealed record ChangePasswordRequest([Required] string Email, [Required] string CurrentPassword, [Required] string NewPassword)
+{
+    /// <inheritdoc />
+    public override string ToString() => $"{nameof(ChangePasswordRequest)} {{ {nameof(Email)} = {Email} }}";
+}
+
 /// <summary>
 /// Tokens for a signed-in user. The dashboard keeps the access token in memory and the refresh
 /// token in sessionStorage; both travel in the body, not cookies (ADR 0002).
