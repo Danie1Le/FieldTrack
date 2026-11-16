@@ -36,7 +36,7 @@ dotnet_style_qualification_for_property = false:warning
 dotnet_style_qualification_for_method = false:warning
 dotnet_style_predefined_type_for_locals_parameters_members = true:warning
 
-# Naming: PascalCase types and members, _camelCase private fields, IPascalCase interfaces
+# Naming: IPascalCase interfaces, PascalCase constants, _camelCase private fields
 dotnet_naming_rule.interfaces_start_with_i.symbols = interfaces
 dotnet_naming_rule.interfaces_start_with_i.style = prefix_i
 dotnet_naming_rule.interfaces_start_with_i.severity = warning
@@ -61,6 +61,9 @@ dotnet_naming_style.underscore_camel.capitalization = camel_case
 
 # Unused usings fail the build (needs GenerateDocumentationFile, set in Directory.Build.props).
 dotnet_diagnostic.IDE0005.severity = warning
+
+# Formatting (the Layout options above) fails the build too.
+dotnet_diagnostic.IDE0055.severity = warning
 
 # EF Core scaffolds migrations in its own style; analyzers skip them.
 [src/FieldTrack.Infrastructure/Persistence/Migrations/*.cs]

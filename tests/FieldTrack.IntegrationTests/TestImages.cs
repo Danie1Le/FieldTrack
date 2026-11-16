@@ -3,7 +3,8 @@ namespace FieldTrack.IntegrationTests;
 /// <summary>
 /// The container images the integration tests start. They must equal the images in
 /// docker-compose.yml so tests and local runs use the same PostgreSQL, PostGIS and Mosquitto;
-/// a unit test fails when the two drift apart.
+/// a unit test fails when the two drift apart. Every public constant here is an image and must
+/// appear in docker-compose.yml, and every <c>image:</c> line there must appear here.
 /// </summary>
 internal static class TestImages
 {

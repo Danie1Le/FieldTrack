@@ -1,7 +1,9 @@
 using FieldTrack.Api.Health;
+using FieldTrack.Infrastructure.Messaging;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,7 +15,16 @@ builder.Services.AddOptions<BrokerOptions>()
     .ValidateOnStart();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<FieldTrackDbContext>("database")
-    .AddCheck<BrokerHealthCheck>("broker", timeout: TimeSpan.FromSeconds(5));
+    .AddCheck<BrokerHealthCheck>("broker");
+// Bound every check so an unreachable dependency reports Unhealthy before a probe gives up.
+// AddDbContextCheck takes no timeout, so set it on the registrations.
+builder.Services.PostConfigure<HealthCheckServiceOptions>(options =>
+{
+    foreach (var registration in options.Registrations)
+    {
+        registration.Timeout = TimeSpan.FromSeconds(5);
+    }
+});
 builder.Services.AddOpenApi();
 
 var app = builder.Build();

@@ -17,6 +17,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- DomainDependencyTests reads Domain's project file to catch references before code uses them. -->
+  <ItemGroup>
+    <None Include="..\..\src\FieldTrack.Domain\FieldTrack.Domain.csproj" Link="FieldTrack.Domain.csproj" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- The integration tests own TestImages; compiling the same file here lets a fast test check it against docker-compose. -->
   <ItemGroup>
     <Compile Include="..\FieldTrack.IntegrationTests\TestImages.cs" Link="TestImages.cs" />

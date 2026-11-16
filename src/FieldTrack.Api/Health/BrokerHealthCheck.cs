@@ -1,3 +1,4 @@
+using FieldTrack.Infrastructure.Messaging;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using MQTTnet;
@@ -13,7 +14,7 @@ namespace FieldTrack.Api.Health;
 /// </summary>
 public sealed class BrokerHealthCheck(IOptions<BrokerOptions> options) : IHealthCheck
 {
-    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan _connectTimeout = TimeSpan.FromSeconds(3);
 
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
@@ -24,7 +25,7 @@ public sealed class BrokerHealthCheck(IOptions<BrokerOptions> options) : IHealth
             .WithProtocolVersion(MqttProtocolVersion.V500)
             .WithClientId($"fieldtrack-health-{Guid.NewGuid():N}")
             .WithCleanStart()
-            .WithTimeout(ConnectTimeout)
+            .WithTimeout(_connectTimeout)
             .Build();
 
         using var client = new MqttClientFactory().CreateMqttClient();

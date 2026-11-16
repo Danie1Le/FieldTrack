@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
@@ -23,8 +24,14 @@ public sealed class HealthTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Health_reports_unhealthy_when_the_broker_is_unreachable()
     {
-        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
-            builder.UseSetting("Broker:Port", ClosedPort().ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        // A bound socket that never listens: connections to its port are refused, and no other process can take the port.
+        using var closedPort = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        closedPort.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var port = ((IPEndPoint)closedPort.LocalEndPoint!).Port;
+
+        await using var api = Fixture.Api.WithWebHostBuilder(builder => builder
+            .UseSetting(FieldTrackApiFactory.BrokerHostKey, IPAddress.Loopback.ToString())
+            .UseSetting(FieldTrackApiFactory.BrokerPortKey, port.ToString(CultureInfo.InvariantCulture)));
         using var client = api.CreateClient();
 
         using var response = await client.GetAsync("/health", CancellationToken);
@@ -40,13 +47,5 @@ public sealed class HealthTests(FieldTrackFixture fixture) : IntegrationTest(fix
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(CancellationToken));
         return document.RootElement.Clone();
-    }
-
-    /// <summary>A local port nothing listens on: reserved by the OS, then released.</summary>
-    private static int ClosedPort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 }

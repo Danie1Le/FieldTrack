@@ -13,6 +13,7 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
 
         var version = (string?)await command.ExecuteScalarAsync(CancellationToken);
 
+        // Spec #21 guard (PostGIS 3.6 everywhere), deliberately not derived from TestImages.
         version.ShouldNotBeNull().ShouldStartWith("3.6");
     }
 }

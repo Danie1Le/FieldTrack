@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace FieldTrack.Api.Health;
+namespace FieldTrack.Infrastructure.Messaging;
 
 /// <summary>Where the MQTT broker listens (configuration section <c>Broker</c>).</summary>
 public sealed class BrokerOptions

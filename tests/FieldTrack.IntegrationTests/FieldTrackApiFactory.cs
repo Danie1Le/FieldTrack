@@ -1,3 +1,6 @@
+using System.Globalization;
+using FieldTrack.Infrastructure.Messaging;
+using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -10,12 +13,18 @@ namespace FieldTrack.IntegrationTests;
 public sealed class FieldTrackApiFactory(string databaseConnectionString, string brokerHost, int brokerPort)
     : WebApplicationFactory<Program>
 {
+    /// <summary>Configuration key for the broker port, for tests that point a derived host elsewhere.</summary>
+    public const string BrokerPortKey = $"{BrokerOptions.SectionName}:{nameof(BrokerOptions.Port)}";
+
+    /// <summary>Configuration key for the broker host.</summary>
+    public const string BrokerHostKey = $"{BrokerOptions.SectionName}:{nameof(BrokerOptions.Host)}";
+
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:FieldTrack", databaseConnectionString);
-        builder.UseSetting("Broker:Host", brokerHost);
-        builder.UseSetting("Broker:Port", brokerPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.UseSetting($"ConnectionStrings:{PersistenceServiceCollectionExtensions.ConnectionStringName}", databaseConnectionString);
+        builder.UseSetting(BrokerHostKey, brokerHost);
+        builder.UseSetting(BrokerPortKey, brokerPort.ToString(CultureInfo.InvariantCulture));
     }
 }
