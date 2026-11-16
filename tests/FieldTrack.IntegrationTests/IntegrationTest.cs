@@ -1,4 +1,7 @@
 using FieldTrack.Api.Auth;
+using FieldTrack.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -21,6 +24,14 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
         // The reset also deletes the users the host seeded at startup; seed them again so every
         // test starts where a freshly started host does.
         await UserSeeder.SeedAsync(Fixture.Api.Services);
+
+        // Tests sign in as the Admin with the configured password; the first-sign-in password
+        // change has its own test (AuthStartupTests).
+        await using var scope = Fixture.Api.Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<FieldTrackUser>>();
+        var admin = (await users.FindByEmailAsync(FieldTrackApiFactory.AdminEmail)).ShouldNotBeNull();
+        admin.MustChangePassword = false;
+        (await users.UpdateAsync(admin)).Succeeded.ShouldBeTrue();
     }
 
     /// <inheritdoc />

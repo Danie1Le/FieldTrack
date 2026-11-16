@@ -18,7 +18,8 @@ public static partial class UserSeeder
     public const string AdminPasswordKey = "FIELDTRACK_ADMIN_PASSWORD";
 
     /// <summary>
-    /// Ensures both roles exist, creates an Admin from configuration when none exists, and in demo
+    /// Ensures both roles exist, creates an Admin from configuration when none exists (it must change
+    /// the configured password at first sign-in, like any user with a temporary password), and in demo
     /// mode creates the Demo Operator or resets it to the configured password.
     /// </summary>
     public static async Task SeedAsync(IServiceProvider services)
@@ -70,7 +71,8 @@ public static partial class UserSeeder
             return;
         }
 
-        var admin = new FieldTrackUser { UserName = email, Email = email };
+        // The bootstrap password sits in .env or deployment settings: the Admin replaces it at first sign-in.
+        var admin = new FieldTrackUser { UserName = email, Email = email, MustChangePassword = true };
         EnsureSucceeded(await users.CreateAsync(admin, password));
         EnsureSucceeded(await users.AddToRoleAsync(admin, Roles.Admin));
     }
