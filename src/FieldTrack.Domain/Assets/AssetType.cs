@@ -9,12 +9,15 @@ public enum AssetType
     /// <summary>A haul or service truck.</summary>
     Truck,
 
-    /// <summary>An excavator.</summary>
+    /// <summary>A tracked or wheeled excavator working a site.</summary>
     Excavator,
 
-    /// <summary>A generator.</summary>
+    /// <summary>A mobile or standby generator powering a site.</summary>
     Generator,
 
-    /// <summary>A fixed sensor, such as one at a substation.</summary>
+    /// <summary>
+    /// A fixed monitored installation, such as a substation sensor; an Asset, not the Device that
+    /// reports for it.
+    /// </summary>
     Sensor,
 }

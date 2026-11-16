@@ -54,7 +54,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.HasIndex("AssetGroupId")
                         .HasDatabaseName("ix_assets_asset_group_id");
 
-                    b.ToTable("assets", (string)null);
+                    b.ToTable("assets", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_assets_type", "type IN ('Truck', 'Excavator', 'Generator', 'Sensor')");
+                        });
                 });
 
             modelBuilder.Entity("FieldTrack.Domain.Assets.AssetGroup", b =>
@@ -368,6 +371,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.HasOne("FieldTrack.Domain.Assets.AssetGroup", null)
                         .WithMany()
                         .HasForeignKey("AssetGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_assets_asset_groups_asset_group_id");
                 });
 

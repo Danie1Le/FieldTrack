@@ -58,9 +58,13 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
         builder.Entity<Asset>(asset =>
         {
-            // Stored by name so hand-written SQL and exports read it without a lookup.
+            // Stored by name so hand-written SQL and exports read it without a lookup. The check keeps
+            // hand-written SQL to the same names; renaming an AssetType member needs a data migration.
             asset.Property(a => a.Type).HasConversion<string>();
-            asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId);
+            asset.ToTable(table => table.HasCheckConstraint(
+                "ck_assets_type", $"type IN ({string.Join(", ", Enum.GetNames<AssetType>().Select(name => $"'{name}'"))})"));
+            // An Asset Group that still has Assets cannot be deleted (#24).
+            asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }
