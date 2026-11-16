@@ -1,8 +1,5 @@
 using System.Net;
 using FieldTrack.Api.Auth;
-using FieldTrack.Infrastructure.Identity;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
@@ -28,15 +25,32 @@ public sealed class AuthStartupTests(FieldTrackFixture fixture) : IntegrationTes
     [Fact]
     public async Task Startup_leaves_an_Operator_alone_when_no_Admin_exists_and_the_Admin_email_is_theirs()
     {
-        await using var scope = Fixture.Api.Services.CreateAsyncScope();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<FieldTrackUser>>();
-        var demoted = (await users.FindByEmailAsync(AdminEmail)).ShouldNotBeNull();
-        await users.RemoveFromRoleAsync(demoted, Roles.Admin);
-        await users.AddToRoleAsync(demoted, Roles.Operator);
+        await WithUsersAsync(async users =>
+        {
+            var demoted = (await users.FindByEmailAsync(AdminEmail)).ShouldNotBeNull();
+            await users.RemoveFromRoleAsync(demoted, Roles.Admin);
+            await users.AddToRoleAsync(demoted, Roles.Operator);
 
+            await UserSeeder.SeedAsync(Fixture.Api.Services);
+
+            (await users.GetRolesAsync(demoted)).ShouldBe([Roles.Operator]);
+        });
+    }
+
+    [Fact]
+    public async Task Seeded_Admin_must_replace_the_temporary_password_at_first_sign_in()
+    {
+        await WithUsersAsync(async users => await users.DeleteAsync((await users.FindByEmailAsync(AdminEmail)).ShouldNotBeNull()));
         await UserSeeder.SeedAsync(Fixture.Api.Services);
+        using var client = Fixture.Api.CreateClient();
 
-        (await users.GetRolesAsync(demoted)).ShouldBe([Roles.Operator]);
+        using var temporary = await AuthClient.PostSignInAsync(client, AdminEmail, AdminPassword);
+        using var changed = await AuthClient.PostChangePasswordAsync(client, AdminEmail, AdminPassword, "Replaced-admin-pass-1");
+        using var replaced = await AuthClient.PostSignInAsync(client, AdminEmail, "Replaced-admin-pass-1");
+
+        temporary.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        changed.StatusCode.ShouldBe(HttpStatusCode.OK);
+        replaced.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Theory]

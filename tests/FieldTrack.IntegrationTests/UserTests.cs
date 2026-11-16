@@ -115,6 +115,7 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
 
         var users = await admin.GetFromJsonAsync<JsonElement[]>("/users", CancellationToken);
 
+        // The seeded Admin's false comes from IntegrationTest, which completes their first-sign-in change.
         users.ShouldNotBeNull()
             .Select(user => (user.GetProperty("email").GetString(), user.GetProperty("role").GetString(), user.GetProperty("mustChangePassword").GetBoolean()))
             .ShouldBe([(AdminEmail, "Admin", false), (OperatorEmail, "Operator", false), ("new@fieldtrack.test", "Operator", true)], ignoreOrder: true);

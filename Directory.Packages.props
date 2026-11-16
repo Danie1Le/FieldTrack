@@ -34,5 +34,6 @@
     <PackageVersion Include="Testcontainers" Version="4.16.0" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 </Project>
