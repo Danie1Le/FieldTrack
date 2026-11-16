@@ -1,4 +1,5 @@
 # Local FieldTrack stack: `docker compose up --build -d`.
+# Image tags must match tests/FieldTrack.IntegrationTests/TestImages.cs (a unit test checks).
 services:
   postgres:
     # PostgreSQL 16 + PostGIS 3.6 everywhere (compose, Testcontainers, Azure) so local and cloud never drift.

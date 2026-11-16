@@ -6,6 +6,7 @@
     <Project Path="src/FieldTrack.Simulator/FieldTrack.Simulator.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/FieldTrack.IntegrationTests/FieldTrack.IntegrationTests.csproj" />
     <Project Path="tests/FieldTrack.UnitTests/FieldTrack.UnitTests.csproj" />
   </Folder>
 </Solution>
