@@ -36,11 +36,13 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_assets", x => x.id);
+                    table.CheckConstraint("ck_assets_type", "type IN ('Truck', 'Excavator', 'Generator', 'Sensor')");
                     table.ForeignKey(
                         name: "fk_assets_asset_groups_asset_group_id",
                         column: x => x.asset_group_id,
                         principalTable: "asset_groups",
-                        principalColumn: "id");
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateIndex(

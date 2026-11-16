@@ -9,7 +9,7 @@ public sealed class Asset
     /// <summary>The name people know the Asset by, such as "Haul truck 7".</summary>
     public required string Name { get; set; }
 
-    /// <summary>The kind of equipment.</summary>
+    /// <summary>The kind of equipment, which picks the kind letter drawn in its map marker (spec #21).</summary>
     public AssetType Type { get; set; }
 
     /// <summary>The Asset Group it belongs to, if any; an Asset belongs to at most one.</summary>
