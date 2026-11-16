@@ -46,7 +46,7 @@ services:
       # The API refuses to start without a signing key: base64 of 32 random bytes.
       Auth__SigningKey: ${FIELDTRACK_AUTH_SIGNING_KEY:-}
       FIELDTRACK_ADMIN_EMAIL: ${FIELDTRACK_ADMIN_EMAIL:-}
-      # Bootstrap password only: the first Admin must replace it at first sign-in (POST /auth/change-password).
+      # Temporary password only: the first Admin must replace it at first sign-in (POST /auth/change-password, #61).
       FIELDTRACK_ADMIN_PASSWORD: ${FIELDTRACK_ADMIN_PASSWORD:-}
     ports:
       # Loopback only: Development serves the developer exception page over plain HTTP.

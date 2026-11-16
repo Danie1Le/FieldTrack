@@ -71,7 +71,8 @@ public static partial class UserSeeder
             return;
         }
 
-        // The bootstrap password sits in .env or deployment settings: the Admin replaces it at first sign-in.
+        // The configured password sits in .env or deployment settings, so it is only a temporary
+        // password: the Admin replaces it at first sign-in (#61).
         var admin = new FieldTrackUser { UserName = email, Email = email, MustChangePassword = true };
         EnsureSucceeded(await users.CreateAsync(admin, password));
         EnsureSucceeded(await users.AddToRoleAsync(admin, Roles.Admin));
