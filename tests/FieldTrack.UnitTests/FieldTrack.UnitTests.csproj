@@ -16,4 +16,9 @@
     <Using Include="Shouldly" />
     <Using Include="Xunit" />
   </ItemGroup>
+
+  <!-- DomainDependencyTests reads Domain's project file to catch references before code uses them. -->
+  <ItemGroup>
+    <None Include="..\..\src\FieldTrack.Domain\FieldTrack.Domain.csproj" Link="FieldTrack.Domain.csproj" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

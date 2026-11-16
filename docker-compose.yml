@@ -1,7 +1,7 @@
 # Local FieldTrack stack: `docker compose up --build -d`.
 services:
   postgres:
-    # PostgreSQL 16 everywhere (compose, Testcontainers, Azure) so local and cloud never drift.
+    # PostgreSQL 16 + PostGIS 3.6 everywhere (compose, Testcontainers, Azure) so local and cloud never drift.
     image: postgis/postgis:16-3.6
     environment:
       POSTGRES_USER: fieldtrack
@@ -10,7 +10,8 @@ services:
       # maintenance database: the API creates the fieldtrack database and its migration enables PostGIS.
       POSTGRES_DB: postgres
     ports:
-      - "5432:5432"
+      # Loopback only: the credentials are well known.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +24,8 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.1.2-alpine
     ports:
-      - "1883:1883"
+      # Loopback only: the broker allows anonymous clients.
+      - "127.0.0.1:1883:1883"
     volumes:
       - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
