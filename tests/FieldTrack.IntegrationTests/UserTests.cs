@@ -112,7 +112,7 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     {
         using var admin = await AdminClientAsync();
 
-        using var response = await admin.DeleteAsync("/users/no-such-user/refresh-tokens", CancellationToken);
+        using var response = await admin.DeleteAsync($"/users/{Guid.NewGuid()}/refresh-tokens", CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
@@ -127,7 +127,7 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
 
         using var list = await client.GetAsync("/users", CancellationToken);
         using var create = await AuthClient.PostUserAsync(client, "another@fieldtrack.test", "Admin", "Temporary-pass-1");
-        using var revoke = await client.DeleteAsync("/users/any/refresh-tokens", CancellationToken);
+        using var revoke = await client.DeleteAsync($"/users/{Guid.NewGuid()}/refresh-tokens", CancellationToken);
 
         list.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         create.StatusCode.ShouldBe(HttpStatusCode.Forbidden);

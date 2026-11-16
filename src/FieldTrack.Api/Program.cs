@@ -29,7 +29,15 @@ builder.Services.PostConfigure<HealthCheckServiceOptions>(options =>
 builder.Services.AddFieldTrackAuth();
 // The request-start and request-finished lines include the query string, where SignalR clients
 // send their access token. Silence them whatever the configured levels say (#23: no tokens in logs).
-builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+// A provider-specific level outranks a provider-less filter, so pin the category for every provider
+// that configuration names too.
+builder.Services.PostConfigure<LoggerFilterOptions>(options =>
+{
+    foreach (var provider in options.Rules.Select(rule => rule.ProviderName).Append(null).Distinct().ToList())
+    {
+        options.Rules.Add(new LoggerFilterRule(provider, "Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning, filter: null));
+    }
+});
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 

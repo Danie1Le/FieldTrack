@@ -1,19 +1,24 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
 namespace FieldTrack.IntegrationTests;
 
-// No endpoint exists yet behind these paths, so a signed-in request gets 404 and a signed-out one 401:
+// Nothing is ever mapped at these paths, so a signed-in request gets 404 and a signed-out one 401:
 // the fallback policy requires a signed-in user even where nothing is mapped.
 public sealed class BearerTokenTests(FieldTrackFixture fixture) : IntegrationTest(fixture)
 {
+    private const string UnmappedPath = "/unmapped";
+    private const string UnmappedHubPath = "/hubs/unmapped";
+
     [Fact]
     public async Task Requests_without_a_token_are_refused()
     {
         using var client = Fixture.Api.CreateClient();
 
-        using var response = await client.GetAsync("/assets", CancellationToken);
+        using var response = await client.GetAsync(UnmappedPath, CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
@@ -24,9 +29,25 @@ public sealed class BearerTokenTests(FieldTrackFixture fixture) : IntegrationTes
         using var client = Fixture.Api.CreateClient();
         await AuthClient.AuthorizeAsync(client, AdminEmail, AdminPassword);
 
-        using var response = await client.GetAsync("/assets", CancellationToken);
+        using var response = await client.GetAsync(UnmappedPath, CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Theory]
+    [InlineData(-5, HttpStatusCode.NotFound)]
+    [InlineData(1, HttpStatusCode.Unauthorized)]
+    public async Task Access_token_expires_after_15_minutes_with_no_clock_skew(int secondsPastExpiry, HttpStatusCode expected)
+    {
+        var time = new AdjustableTimeProvider { Offset = -(TimeSpan.FromMinutes(15) + TimeSpan.FromSeconds(secondsPastExpiry)) };
+        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(time)));
+        using var client = api.CreateClient();
+        await AuthClient.AuthorizeAsync(client, AdminEmail, AdminPassword);
+
+        using var response = await client.GetAsync(UnmappedPath, CancellationToken);
+
+        response.StatusCode.ShouldBe(expected);
     }
 
     [Fact]
@@ -39,7 +60,7 @@ public sealed class BearerTokenTests(FieldTrackFixture fixture) : IntegrationTes
         var foreign = await AuthClient.SignInAsync(otherClient, AdminEmail, AdminPassword);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", foreign.AccessToken);
 
-        using var response = await client.GetAsync("/assets", CancellationToken);
+        using var response = await client.GetAsync(UnmappedPath, CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
@@ -50,8 +71,8 @@ public sealed class BearerTokenTests(FieldTrackFixture fixture) : IntegrationTes
         using var client = Fixture.Api.CreateClient();
         var tokens = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
 
-        using var signedOut = await client.GetAsync("/hubs/fleet", CancellationToken);
-        using var signedIn = await client.GetAsync($"/hubs/fleet?access_token={tokens.AccessToken}", CancellationToken);
+        using var signedOut = await client.GetAsync(UnmappedHubPath, CancellationToken);
+        using var signedIn = await client.GetAsync($"{UnmappedHubPath}?access_token={tokens.AccessToken}", CancellationToken);
 
         signedOut.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         signedIn.StatusCode.ShouldBe(HttpStatusCode.NotFound);
@@ -63,7 +84,7 @@ public sealed class BearerTokenTests(FieldTrackFixture fixture) : IntegrationTes
         using var client = Fixture.Api.CreateClient();
         var tokens = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
 
-        using var response = await client.GetAsync($"/assets?access_token={tokens.AccessToken}", CancellationToken);
+        using var response = await client.GetAsync($"{UnmappedPath}?access_token={tokens.AccessToken}", CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }

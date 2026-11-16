@@ -2,7 +2,7 @@ namespace FieldTrack.Infrastructure.Identity;
 
 /// <summary>
 /// One refresh token issued to a user. Only its SHA-256 hash is stored, so a database leak does
-/// not hand out sessions. Each refresh revokes the token it used and issues a new one (ADR 0002).
+/// not let anyone refresh as the user. Each refresh revokes the token it used and issues a new one (ADR 0002).
 /// </summary>
 public sealed class RefreshToken
 {
@@ -10,7 +10,7 @@ public sealed class RefreshToken
     public Guid Id { get; set; }
 
     /// <summary>The user the token signs in.</summary>
-    public required string UserId { get; set; }
+    public Guid UserId { get; set; }
 
     /// <summary>SHA-256 of the token the client holds.</summary>
     public required byte[] TokenHash { get; set; }

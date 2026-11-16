@@ -14,6 +14,8 @@ public sealed class TokenLoggingTests(FieldTrackFixture fixture) : IntegrationTe
         await using var api = Fixture.Api.WithWebHostBuilder(builder => builder
             .UseSetting("Logging:LogLevel:Default", "Trace")
             .UseSetting("Logging:LogLevel:Microsoft.AspNetCore", "Trace")
+            // A provider-specific level outranks every provider-less rule, so it must not bring the token back.
+            .UseSetting($"Logging:{CapturingLoggerProvider.Alias}:LogLevel:Default", "Trace")
             .ConfigureLogging(logging => logging.AddProvider(logs)));
         using var client = api.CreateClient();
 
@@ -36,8 +38,11 @@ public sealed class TokenLoggingTests(FieldTrackFixture fixture) : IntegrationTe
     }
 
     /// <summary>Keeps every log message, its structured values and exception as text.</summary>
+    [ProviderAlias(Alias)]
     private sealed class CapturingLoggerProvider : ILoggerProvider, ILogger
     {
+        public const string Alias = "Capture";
+
         public ConcurrentQueue<string> Entries { get; } = new();
 
         public ILogger CreateLogger(string categoryName) => this;

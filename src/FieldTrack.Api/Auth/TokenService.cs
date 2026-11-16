@@ -22,10 +22,13 @@ public sealed class TokenService(
     /// <summary>The issuer and audience of every access token: the API signs tokens only for itself.</summary>
     public const string Issuer = "fieldtrack";
 
-    /// <summary>How long an access token is valid (ADR 0002).</summary>
+    /// <summary>The access token claim that carries the user's roles; JWT validation reads roles from it.</summary>
+    public const string RoleClaim = "role";
+
+    /// <summary>How long an access token is valid (#23).</summary>
     public static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
 
-    /// <summary>How long a refresh token is valid. Each refresh issues a fresh one, so an active session never expires.</summary>
+    /// <summary>How long a refresh token is valid. Each refresh issues a fresh one, so a user who keeps refreshing stays signed in.</summary>
     public static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(7);
 
     /// <summary>Issues a new access token and refresh token for <paramref name="user"/>.</summary>
@@ -43,9 +46,9 @@ public sealed class TokenService(
             Expires = expiresAt.UtcDateTime,
             Claims = new Dictionary<string, object>
             {
-                [JwtRegisteredClaimNames.Sub] = user.Id,
+                [JwtRegisteredClaimNames.Sub] = user.Id.ToString(),
                 [JwtRegisteredClaimNames.Email] = user.Email!,
-                ["role"] = (await users.GetRolesAsync(user)).ToArray(),
+                [RoleClaim] = (await users.GetRolesAsync(user)).ToArray(),
             },
             SigningCredentials = new SigningCredentials(options.Value.CreateSigningKey(), SecurityAlgorithms.HmacSha256),
         });
@@ -76,6 +79,9 @@ public sealed class TokenService(
 
         var hash = SHA256.HashData(Base64Url.DecodeFromChars(refreshToken));
         var now = time.GetUtcNow();
+        // Spend and reissue in one transaction: a replay racing with this refresh waits on the row
+        // lock until the new token is committed, so its RevokeAllAsync revokes that token too.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // A conditional update, so two refreshes racing with one token cannot both succeed.
         var spent = await db.RefreshTokens
             .Where(token => token.TokenHash == hash && token.RevokedAt == null && token.ExpiresAt > now)
@@ -90,19 +96,27 @@ public sealed class TokenService(
         {
             if (stored.RevokedAt is not null)
             {
-                // A spent token presented again means it was copied: end every session of that user.
+                // A spent token presented again means it was copied: revoke every refresh token of that user.
                 await RevokeAllAsync(stored.UserId, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
             }
 
             return null;
         }
 
-        var user = await users.FindByIdAsync(stored.UserId);
-        return user is null ? null : await IssueAsync(user, cancellationToken);
+        var user = await users.FindByIdAsync(stored.UserId.ToString());
+        if (user is null)
+        {
+            return null;
+        }
+
+        var response = await IssueAsync(user, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return response;
     }
 
     /// <summary>Revokes every refresh token of the user, so they must sign in again within one access token lifetime.</summary>
-    public async Task RevokeAllAsync(string userId, CancellationToken cancellationToken)
+    public async Task RevokeAllAsync(Guid userId, CancellationToken cancellationToken)
     {
         var now = time.GetUtcNow();
         await db.RefreshTokens

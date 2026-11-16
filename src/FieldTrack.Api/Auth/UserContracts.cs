@@ -21,4 +21,4 @@ public sealed record CreateUserRequest(
 /// <param name="Email">The user's email address.</param>
 /// <param name="Role"><c>Admin</c> or <c>Operator</c>.</param>
 /// <param name="MustChangePassword">True until the user replaces their temporary password.</param>
-public sealed record UserResponse(string Id, string Email, string Role, bool MustChangePassword);
+public sealed record UserResponse(Guid Id, string Email, string Role, bool MustChangePassword);

@@ -19,6 +19,8 @@ public sealed class AuthController(
     TokenService tokens,
     IConfiguration configuration) : ControllerBase
 {
+    private static readonly string DummyPasswordHash = new PasswordHasher<FieldTrackUser>().HashPassword(new FieldTrackUser(), "unused");
+
     /// <summary>Signs in with email and password.</summary>
     /// <response code="401">Wrong email or password, or the account is locked out after repeated failures.</response>
     /// <response code="403">The password is temporary: change it with <c>POST /auth/change-password</c> to get tokens.</response>
@@ -94,8 +96,14 @@ public sealed class AuthController(
     private async Task<FieldTrackUser?> CheckPasswordAsync(string email, string password)
     {
         var user = await users.FindByEmailAsync(email);
-        return user is not null && (await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true)).Succeeded
-            ? user
-            : null;
+        var result = user is null ? null : await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true);
+        if (result is null or { IsLockedOut: true })
+        {
+            // Unknown emails and locked-out accounts skip the real hash check; hash anyway so the
+            // response time does not tell them apart from a wrong password.
+            users.PasswordHasher.VerifyHashedPassword(new FieldTrackUser(), DummyPasswordHash, password);
+        }
+
+        return result is { Succeeded: true } ? user : null;
     }
 }

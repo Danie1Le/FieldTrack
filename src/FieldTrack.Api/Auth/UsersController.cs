@@ -54,12 +54,12 @@ public sealed class UsersController(FieldTrackDbContext db, UserManager<FieldTra
 
     /// <summary>Revokes all the user's refresh tokens, cutting them off once their access token expires.</summary>
     /// <response code="404">No user has this id.</response>
-    [HttpDelete("{id}/refresh-tokens")]
+    [HttpDelete("{id:guid}/refresh-tokens")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> RevokeRefreshTokens(string id, CancellationToken cancellationToken)
+    public async Task<IActionResult> RevokeRefreshTokens(Guid id, CancellationToken cancellationToken)
     {
-        if (await users.FindByIdAsync(id) is null)
+        if (await users.FindByIdAsync(id.ToString()) is null)
         {
             return NotFound();
         }

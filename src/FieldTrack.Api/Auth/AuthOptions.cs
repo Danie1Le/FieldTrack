@@ -10,13 +10,13 @@ public sealed class AuthOptions
     public const string SectionName = "Auth";
 
     /// <summary>
-    /// Base64 of the HS256 signing secret, at least 256 bits (ADR 0002). It comes from user-secrets
+    /// Base64 of the HS256 signing secret, at least 256 bits (#23). It comes from user-secrets
     /// locally and from Key Vault when deployed, never from a committed file.
     /// </summary>
     [Required]
     public string SigningKey { get; set; } = string.Empty;
 
-    /// <summary>Sign-in and password-change attempts allowed per client address per minute.</summary>
+    /// <summary>Sign-in attempts allowed per client address per minute.</summary>
     [Range(1, int.MaxValue)]
     public int SignInPermitsPerMinute { get; set; } = 10;
 

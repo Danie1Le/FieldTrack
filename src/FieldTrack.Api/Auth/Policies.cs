@@ -6,7 +6,7 @@ namespace FieldTrack.Api.Auth;
 /// </summary>
 public static class Policies
 {
-    /// <summary>Any signed-in user: every read. Also the fallback for endpoints that name no policy.</summary>
+    /// <summary>Any signed-in user: every read. The fallback policy for endpoints that name none requires the same.</summary>
     public const string Read = "Read";
 
     /// <summary>Admins only: changes to Assets, Devices, Geofences, Alert Rules and users.</summary>

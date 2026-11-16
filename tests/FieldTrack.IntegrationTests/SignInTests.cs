@@ -1,5 +1,9 @@
 using System.Net;
 using FieldTrack.Api.Auth;
+using FieldTrack.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
@@ -85,5 +89,45 @@ public sealed class SignInTests(FieldTrackFixture fixture) : IntegrationTest(fix
         using var response = await AuthClient.PostSignInAsync(client, "nobody@fieldtrack.test", AdminPassword);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Unknown_email_and_locked_out_account_cost_a_password_hash_like_a_wrong_password()
+    {
+        var hasher = new CountingPasswordHasher();
+        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<IPasswordHasher<FieldTrackUser>>(hasher)));
+        using var client = api.CreateClient();
+
+        using var unknown = await AuthClient.PostSignInAsync(client, "nobody@fieldtrack.test", AdminPassword);
+        var afterUnknown = hasher.Verifications;
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            using var failed = await AuthClient.PostSignInAsync(client, AdminEmail, "Wrong-pass-1");
+        }
+
+        var afterLockout = hasher.Verifications;
+        using var lockedOut = await AuthClient.PostSignInAsync(client, AdminEmail, AdminPassword);
+
+        afterUnknown.ShouldBe(1);
+        lockedOut.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (hasher.Verifications - afterLockout).ShouldBe(1);
+    }
+
+    /// <summary>Identity's hasher, counting how often a password is checked.</summary>
+    private sealed class CountingPasswordHasher : IPasswordHasher<FieldTrackUser>
+    {
+        private readonly PasswordHasher<FieldTrackUser> _hasher = new();
+        private int _verifications;
+
+        public int Verifications => _verifications;
+
+        public string HashPassword(FieldTrackUser user, string password) => _hasher.HashPassword(user, password);
+
+        public PasswordVerificationResult VerifyHashedPassword(FieldTrackUser user, string hashedPassword, string providedPassword)
+        {
+            Interlocked.Increment(ref _verifications);
+            return _hasher.VerifyHashedPassword(user, hashedPassword, providedPassword);
+        }
     }
 }

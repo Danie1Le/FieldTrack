@@ -9,10 +9,10 @@ namespace FieldTrack.Api.Auth;
 /// </summary>
 public static partial class UserSeeder
 {
-    /// <summary>Email of the Admin created when no Admin exists.</summary>
+    /// <summary>Configuration key for the email of the Admin created when no Admin exists.</summary>
     public const string AdminEmailKey = "FIELDTRACK_ADMIN_EMAIL";
 
-    /// <summary>Password of the Admin created when no Admin exists.</summary>
+    /// <summary>Configuration key for the password of the Admin created when no Admin exists.</summary>
     public const string AdminPasswordKey = "FIELDTRACK_ADMIN_PASSWORD";
 
     /// <summary>Email of the Demo Operator; required in demo mode.</summary>
@@ -29,7 +29,7 @@ public static partial class UserSeeder
     {
         await using var scope = services.CreateAsyncScope();
         var provider = scope.ServiceProvider;
-        var roles = provider.GetRequiredService<RoleManager<IdentityRole>>();
+        var roles = provider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var users = provider.GetRequiredService<UserManager<FieldTrackUser>>();
         var configuration = provider.GetRequiredService<IConfiguration>();
 
@@ -37,7 +37,7 @@ public static partial class UserSeeder
         {
             if (!await roles.RoleExistsAsync(role))
             {
-                EnsureSucceeded(await roles.CreateAsync(new IdentityRole(role)));
+                EnsureSucceeded(await roles.CreateAsync(new IdentityRole<Guid>(role)));
             }
         }
 
@@ -62,6 +62,13 @@ public static partial class UserSeeder
         if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
         {
             LogNoAdmin(logger, AdminEmailKey, AdminPasswordKey);
+            return;
+        }
+
+        // Never promote or overwrite an existing user because the Admin settings name their email.
+        if (await users.FindByEmailAsync(email) is not null)
+        {
+            LogAdminEmailTaken(logger, AdminEmailKey);
             return;
         }
 
@@ -117,4 +124,7 @@ public static partial class UserSeeder
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No Admin exists and {EmailKey} or {PasswordKey} is not set, so nobody can manage users.")]
     private static partial void LogNoAdmin(ILogger logger, string emailKey, string passwordKey);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "No Admin exists and the user {EmailKey} names is not an Admin, so nobody can manage users.")]
+    private static partial void LogAdminEmailTaken(ILogger logger, string emailKey);
 }

@@ -7,3 +7,8 @@ The spec allowed either ASP.NET Core Identity issuing JWTs or Microsoft Entra ID
 - **Microsoft Entra ID**: no password storage of our own, but student tenants often block app registrations and local tests would need a mock identity provider.
 - **Identity's built-in bearer tokens (`MapIdentityApi`)**: less code, but the tokens are opaque rather than JWTs.
 - **Refresh token in an httpOnly cookie**: safer against script injection, but needs `SameSite=None` across two sites and breaks where third-party cookies are blocked, unless both apps share a custom domain.
+
+## Consequences
+
+- Refresh tokens are single-use with no grace window. A refresh token presented a second time counts as copied, whether a thief, a retry after a lost response or a duplicated browser tab sent it, and every refresh token of that user is revoked, so they sign in again. The dashboard therefore runs one refresh at a time. Spending a token and issuing its successor share one transaction, so a replay racing with the refresh revokes the successor too.
+- Lockout is per account: 5 wrong passwords lock it for 15 minutes. Anyone who knows an account's email can keep it locked out. Sign-in answers an unknown email, a wrong password and a lockout alike, and spends a password hash on each, so emails are hard to discover. To unlock an account early, clear its `lockout_end` in the `users` table.

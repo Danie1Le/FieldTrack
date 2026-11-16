@@ -1,5 +1,8 @@
 using System.Net;
 using FieldTrack.Api.Auth;
+using FieldTrack.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
@@ -20,6 +23,20 @@ public sealed class AuthStartupTests(FieldTrackFixture fixture) : IntegrationTes
 
         second.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         first.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Startup_leaves_an_Operator_alone_when_no_Admin_exists_and_the_Admin_email_is_theirs()
+    {
+        await using var scope = Fixture.Api.Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<FieldTrackUser>>();
+        var demoted = (await users.FindByEmailAsync(AdminEmail)).ShouldNotBeNull();
+        await users.RemoveFromRoleAsync(demoted, Roles.Admin);
+        await users.AddToRoleAsync(demoted, Roles.Operator);
+
+        await UserSeeder.SeedAsync(Fixture.Api.Services);
+
+        (await users.GetRolesAsync(demoted)).ShouldBe([Roles.Operator]);
     }
 
     [Theory]

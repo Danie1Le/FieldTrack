@@ -37,7 +37,7 @@ public static class AuthServiceCollectionExtensions
                 options.Lockout.MaxFailedAccessAttempts = 5;
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             })
-            .AddRoles<IdentityRole>()
+            .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<FieldTrackDbContext>()
             .AddSignInManager();
         services.AddScoped<TokenService>();
@@ -55,7 +55,7 @@ public static class AuthServiceCollectionExtensions
                     IssuerSigningKey = auth.Value.CreateSigningKey(),
                     ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
                     NameClaimType = JwtRegisteredClaimNames.Email,
-                    RoleClaimType = "role",
+                    RoleClaimType = TokenService.RoleClaim,
                     // The API issues and checks its own tokens on one clock, so expiry is exact.
                     ClockSkew = TimeSpan.Zero,
                 };
