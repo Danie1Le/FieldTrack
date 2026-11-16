@@ -4,7 +4,6 @@ using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace FieldTrack.Api.Assets;
 
@@ -14,7 +13,7 @@ namespace FieldTrack.Api.Assets;
 [ApiController]
 [Route("assets")]
 [Authorize(Policy = Policies.Read)]
-public sealed class AssetsController(FieldTrackDbContext db) : ControllerBase
+public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory readingHistory) : ControllerBase
 {
     /// <summary>Lists Assets by name, leaving out Archived ones unless <paramref name="includeArchived"/> is true.</summary>
     [HttpGet]
@@ -22,7 +21,7 @@ public sealed class AssetsController(FieldTrackDbContext db) : ControllerBase
         await db.Assets
             .Where(asset => includeArchived || !asset.Archived)
             .OrderBy(asset => asset.Name)
-            .Select(asset => new AssetResponse(asset.Id, asset.Name, asset.Type, asset.AssetGroupId, asset.Archived))
+            .Select(asset => ToResponse(asset))
             .ToListAsync(cancellationToken);
 
     /// <summary>Creates an Asset.</summary>
@@ -82,20 +81,27 @@ public sealed class AssetsController(FieldTrackDbContext db) : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var assets = db.Assets.Where(asset => asset.Id == id);
-        int found;
-        try
+        // One transaction with the Asset row locked, so the decision and everything archiving
+        // changes commit together, and a concurrent delete or edit waits for it.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var asset = await db.Assets.FromSql($"SELECT * FROM assets WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        if (asset is null)
         {
-            found = await assets.ExecuteDeleteAsync(cancellationToken);
-        }
-        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.ForeignKeyViolation)
-        {
-            // History tables reference assets without ON DELETE, so the database itself says
-            // whether history exists, and no Reading can slip in between a check and the delete.
-            found = await assets.ExecuteUpdateAsync(setters => setters.SetProperty(asset => asset.Archived, true), cancellationToken);
+            return NotFound();
         }
 
-        return found == 0 ? NotFound() : NoContent();
+        if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken))
+        {
+            asset.Archived = true;
+        }
+        else
+        {
+            db.Assets.Remove(asset);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return NoContent();
     }
 
     private async Task<bool> IsUnknownAssetGroupAsync(Guid? assetGroupId, CancellationToken cancellationToken) =>

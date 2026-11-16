@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Npgsql;
+using FieldTrack.Infrastructure.Persistence;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
 namespace FieldTrack.IntegrationTests;
@@ -82,30 +84,24 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
-    public async Task Deleting_an_Asset_with_history_Archives_it_and_lists_hide_it_unless_asked()
+    public async Task Deleting_an_Asset_with_Readings_Archives_it_and_lists_hide_it_unless_asked()
     {
-        using var admin = await AdminClientAsync();
+        // Readings arrive with #26, which also tests this with a real Reading; until then the
+        // "Asset has Readings" seam answers yes.
+        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EveryAssetHasReadings>()));
+        using var admin = api.CreateClient();
+        await AuthClient.AuthorizeAsync(admin, AdminEmail, AdminPassword);
         var asset = await CreateAssetAsync(admin, new { name = "Haul truck 7", type = "Truck" });
         await CreateAssetAsync(admin, new { name = "Generator 1", type = "Generator" });
-        await using var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
-        await connection.OpenAsync(CancellationToken);
-        // Stands in for Readings, which refer to their Asset the same way: a table of the test's own,
-        // so the rule is tested before ingest exists.
-        await ExecuteAsync(connection, $"CREATE TABLE history_probe (asset_id uuid NOT NULL REFERENCES assets (id)); INSERT INTO history_probe VALUES ('{asset}')");
-        try
-        {
-            using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
-            var listed = await ListAssetsAsync(admin);
-            var withArchived = await ListAssetsAsync(admin, "?includeArchived=true");
 
-            deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-            listed.Select(Describe).ShouldBe([("Generator 1", "Generator", null, false)]);
-            withArchived.Select(Describe).ShouldBe([("Generator 1", "Generator", null, false), ("Haul truck 7", "Truck", null, true)]);
-        }
-        finally
-        {
-            await ExecuteAsync(connection, "DROP TABLE history_probe");
-        }
+        using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
+        var listed = await ListAssetsAsync(admin);
+        var withArchived = await ListAssetsAsync(admin, "?includeArchived=true");
+
+        deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        listed.Select(Describe).ShouldBe([("Generator 1", "Generator", null, false)]);
+        withArchived.Select(Describe).ShouldBe([("Generator 1", "Generator", null, false), ("Haul truck 7", "Truck", null, true)]);
     }
 
     [Fact]
@@ -201,12 +197,6 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     private static async Task<JsonElement[]> ListAssetsAsync(HttpClient client, string query = "") =>
         (await client.GetFromJsonAsync<JsonElement[]>($"/assets{query}", CancellationToken)).ShouldNotBeNull();
 
-    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql)
-    {
-        await using var command = new NpgsqlCommand(sql, connection);
-        await command.ExecuteNonQueryAsync(CancellationToken);
-    }
-
     private static (string?, string?, string?, bool) Describe(JsonElement asset) => (
         asset.GetProperty("name").GetString(),
         asset.GetProperty("type").GetString(),
@@ -218,5 +208,10 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         var client = Fixture.Api.CreateClient();
         await AuthClient.AuthorizeAsync(client, AdminEmail, AdminPassword);
         return client;
+    }
+
+    private sealed class EveryAssetHasReadings : IReadingHistory
+    {
+        public Task<bool> AssetHasReadingsAsync(Guid assetId, CancellationToken cancellationToken) => Task.FromResult(true);
     }
 }

@@ -21,7 +21,7 @@ public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBa
     public async Task<IReadOnlyList<AssetGroupResponse>> List(CancellationToken cancellationToken) =>
         await db.AssetGroups
             .OrderBy(group => group.Name)
-            .Select(group => new AssetGroupResponse(group.Id, group.Name))
+            .Select(group => ToResponse(group))
             .ToListAsync(cancellationToken);
 
     /// <summary>Creates an Asset Group.</summary>
@@ -35,7 +35,7 @@ public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBa
         var group = new AssetGroup { Name = request.Name };
         db.AssetGroups.Add(group);
         await db.SaveChangesAsync(cancellationToken);
-        return StatusCode(StatusCodes.Status201Created, new AssetGroupResponse(group.Id, group.Name));
+        return StatusCode(StatusCodes.Status201Created, ToResponse(group));
     }
 
     /// <summary>Renames an Asset Group.</summary>
@@ -55,6 +55,8 @@ public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBa
 
         group.Name = request.Name;
         await db.SaveChangesAsync(cancellationToken);
-        return new AssetGroupResponse(group.Id, group.Name);
+        return ToResponse(group);
     }
+
+    private static AssetGroupResponse ToResponse(AssetGroup group) => new(group.Id, group.Name);
 }
