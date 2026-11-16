@@ -20,7 +20,7 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
         await Fixture.ResetDatabaseAsync();
         // The reset also deletes the users the host seeded at startup; seed them again so every
         // test starts where a freshly started host does.
-        await UserSeeder.SeedAsync(Fixture.Api.Services, CancellationToken);
+        await UserSeeder.SeedAsync(Fixture.Api.Services);
     }
 
     /// <inheritdoc />

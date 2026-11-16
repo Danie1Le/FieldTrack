@@ -16,7 +16,7 @@ public static partial class UserSeeder
     public const string AdminPasswordKey = "FIELDTRACK_ADMIN_PASSWORD";
 
     /// <summary>Ensures both roles exist and, when no Admin exists, creates one from configuration.</summary>
-    public static async Task SeedAsync(IServiceProvider services, CancellationToken cancellationToken)
+    public static async Task SeedAsync(IServiceProvider services)
     {
         await using var scope = services.CreateAsyncScope();
         var provider = scope.ServiceProvider;

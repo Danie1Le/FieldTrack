@@ -42,7 +42,7 @@ if (app.Environment.IsDevelopment())
     await scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>().Database.MigrateAsync();
 }
 
-await UserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
+await UserSeeder.SeedAsync(app.Services);
 
 app.UseAuthentication();
 app.UseAuthorization();
