@@ -62,6 +62,10 @@ dotnet_naming_style.underscore_camel.capitalization = camel_case
 # Unused usings fail the build (needs GenerateDocumentationFile, set in Directory.Build.props).
 dotnet_diagnostic.IDE0005.severity = warning
 
+# EF Core scaffolds migrations in its own style; analyzers skip them.
+[src/FieldTrack.Infrastructure/Persistence/Migrations/*.cs]
+generated_code = true
+
 # Tests: xUnit test method names use underscores to read as sentences.
 [tests/**.cs]
 dotnet_diagnostic.CA1707.severity = none
