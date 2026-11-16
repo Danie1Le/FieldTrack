@@ -1,3 +1,4 @@
+using FieldTrack.Api.Auth;
 using FieldTrack.Api.Health;
 using FieldTrack.Infrastructure.Messaging;
 using FieldTrack.Infrastructure.Persistence;
@@ -25,6 +26,19 @@ builder.Services.PostConfigure<HealthCheckServiceOptions>(options =>
         registration.Timeout = TimeSpan.FromSeconds(5);
     }
 });
+builder.Services.AddFieldTrackAuth();
+// The request-start and request-finished lines include the query string, where SignalR clients
+// send their access token. Silence them whatever the configured levels say (#23: no tokens in logs).
+// A provider-specific level outranks a provider-less filter, so pin the category for every provider
+// that configuration names too.
+builder.Services.PostConfigure<LoggerFilterOptions>(options =>
+{
+    foreach (var provider in options.Rules.Select(rule => rule.ProviderName).Append(null).Distinct().ToList())
+    {
+        options.Rules.Add(new LoggerFilterRule(provider, "Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning, filter: null));
+    }
+});
+builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -36,10 +50,17 @@ if (app.Environment.IsDevelopment())
     await scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>().Database.MigrateAsync();
 }
 
-// The API docs are public in every environment (spec #21: Scalar for the public API docs).
-app.MapOpenApi();
-app.MapScalarApiReference();
-app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthReportWriter.WriteAsync });
+await UserSeeder.SeedAsync(app.Services);
+
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseRateLimiter();
+
+// The API docs and health are public in every environment (spec #21: Scalar for the public API docs).
+app.MapOpenApi().AllowAnonymous();
+app.MapScalarApiReference().AllowAnonymous();
+app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthReportWriter.WriteAsync }).AllowAnonymous();
+app.MapControllers();
 
 await app.RunAsync();
 

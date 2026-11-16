@@ -1,3 +1,5 @@
+using FieldTrack.Api.Auth;
+
 namespace FieldTrack.IntegrationTests;
 
 /// <summary>
@@ -13,7 +15,13 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     protected static CancellationToken CancellationToken => TestContext.Current.CancellationToken;
 
     /// <inheritdoc />
-    public async ValueTask InitializeAsync() => await Fixture.ResetDatabaseAsync();
+    public async ValueTask InitializeAsync()
+    {
+        await Fixture.ResetDatabaseAsync();
+        // The reset also deletes the users the host seeded at startup; seed them again so every
+        // test starts where a freshly started host does.
+        await UserSeeder.SeedAsync(Fixture.Api.Services);
+    }
 
     /// <inheritdoc />
     public ValueTask DisposeAsync()
