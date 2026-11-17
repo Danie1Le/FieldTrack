@@ -1,0 +1,30 @@
+<main class="card">
+  <h1>FieldTrack</h1>
+
+  @if (step() === 'signIn') {
+    <form (submit)="$event.preventDefault(); signIn(email.value, password.value)">
+      <label for="email">Email</label>
+      <input #email id="email" type="email" autocomplete="username" required />
+      <label for="password">Password</label>
+      <input #password id="password" type="password" autocomplete="current-password" required />
+      <button type="submit" class="btn btn-solid" [disabled]="busy()">Sign in</button>
+    </form>
+  } @else {
+    <form (submit)="$event.preventDefault(); changePassword(newPassword.value, confirmation.value)">
+      <p>Your password is temporary. Choose a new one to finish signing in.</p>
+      <label for="new-password">New password</label>
+      <input #newPassword id="new-password" type="password" autocomplete="new-password" required />
+      <label for="confirmation">New password again</label>
+      <input #confirmation id="confirmation" type="password" autocomplete="new-password" required />
+      <button type="submit" class="btn btn-solid" [disabled]="busy()">Change password and sign in</button>
+    </form>
+  }
+
+  @if (errors().length) {
+    <ul class="errors" role="alert">
+      @for (error of errors(); track $index) {
+        <li>{{ error }}</li>
+      }
+    </ul>
+  }
+</main>
