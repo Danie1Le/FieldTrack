@@ -187,6 +187,38 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
         edited.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
+    [Theory]
+    [InlineData("archive Asset", HttpStatusCode.Conflict)]
+    [InlineData("archive Device", HttpStatusCode.Conflict)]
+    [InlineData("delete Asset", HttpStatusCode.NotFound)]
+    public async Task A_detach_during_an_Archive_or_delete_waits_for_it_instead_of_deadlocking(string change, HttpStatusCode expected)
+    {
+        using var admin = await AdminClientAsync();
+        var (device, asset) = await AttachedDeviceAsync(admin);
+        var attachment = (await ListAsync(admin, $"/attachments?assetId={asset}"))[0].GetProperty("id").GetString();
+        var (lockSql, endSql, id) = change switch
+        {
+            "archive Asset" => ("SELECT FROM assets WHERE id = @p0 FOR UPDATE", "UPDATE attachments SET detached_at = attached_at WHERE asset_id = @p0", asset),
+            "archive Device" => ("SELECT FROM devices WHERE id = @p0 FOR UPDATE", "UPDATE attachments SET detached_at = attached_at WHERE device_id = @p0", device),
+            "delete Asset" => ("SELECT FROM assets WHERE id = @p0 FOR UPDATE", "DELETE FROM attachments WHERE asset_id = @p0", asset),
+            _ => throw new ArgumentOutOfRangeException(nameof(change), change, null),
+        };
+        await using var changer = await OpenDatabaseAsync();
+        await using var transaction = await changer.BeginTransactionAsync(CancellationToken);
+        // What Archive and delete do: lock the Asset or Device, bump the Alert Rule version, then end or delete the Attachment.
+        await SqlAsync(changer, lockSql, Guid.Parse(id));
+        await SqlAsync(changer, "UPDATE alert_rule_version SET version = version + 1");
+
+        var detach = admin.PostAsync($"/attachments/{attachment}/detach", content: null, CancellationToken);
+        await LockWaitsAsync(1);
+        // A detach that took the Attachment row before the version would hold it here: a deadlock.
+        await SqlAsync(changer, endSql, Guid.Parse(id));
+        await transaction.CommitAsync(CancellationToken);
+
+        using var detached = await detach;
+        detached.StatusCode.ShouldBe(expected);
+    }
+
     // An Engine overheat rule on an Asset fitted with TRK-007, and the Open Alert its first Reading raised.
     private async Task<(string Device, string Asset, string Rule, string Alert)> OpenAlertAsync(HttpClient admin)
     {
