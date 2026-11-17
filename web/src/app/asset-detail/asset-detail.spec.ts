@@ -124,7 +124,7 @@ describe('AssetDetail', () => {
 
     expect(request.request.params.get('from')).toBe('2026-11-16T12:00:00.000Z');
     expect(request.request.params.get('to')).toBe('2026-11-17T12:00:00.000Z');
-    expect(request.request.params.get('thinTo')).toBe('3000');
+    expect(request.request.params.get('thinTo')).toBe('1500');
   });
 
   it('draws the threshold and clear lines on the engine temp chart only', async () => {

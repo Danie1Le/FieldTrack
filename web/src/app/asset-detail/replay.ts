@@ -1,10 +1,12 @@
 import { AlertRule, Sensor } from '../control-room/live';
 
 /**
- * The most vertices the route or the trail is drawn with (a screen cannot show more), and so the most Readings the
- * page asks the history endpoint for: it thins a busy range to this many server-side (#126).
+ * The most vertices the route or the trail is drawn with, and so the most Readings the page asks the history endpoint
+ * for: it thins a busy range to this many server-side (#126). About a point per pixel of a wide chart, a minute apart
+ * over 24 h; a narrower range shows every Reading. Each point costs the server a PostGIS conversion, and the API load
+ * test (#47) holds this read to p95 < 150 ms.
  */
-export const maxDrawn = 3000;
+export const maxDrawn = 1500;
 
 /**
  * The Reading the replay shows at a time: the last one at or before it (the first one before the replay starts), or
