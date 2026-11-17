@@ -265,8 +265,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         // Separate statements, so each sees what committed while the one before waited on a lock. The Alert Rule
         // version comes last, like in the API's changes (after their Device or Asset), so the two never deadlock.
         long version;
-        await using (var locks = new NpgsqlBatch(_connection, transaction)
-                     { BatchCommands = { new(LockDevices), new(LockAssets), new(AlertRuleRunner.ReadVersion) } })
+        await using (var locks = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(LockDevices), new(LockAssets), new(AlertRuleRunner.ReadVersion) } })
         await using (var reader = await locks.ExecuteReaderAsync(cancellationToken))
         {
             await reader.NextResultAsync(cancellationToken);
