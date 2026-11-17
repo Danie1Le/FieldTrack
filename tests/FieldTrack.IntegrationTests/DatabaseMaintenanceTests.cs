@@ -34,19 +34,44 @@ public sealed class DatabaseMaintenanceTests(FieldTrackFixture fixture) : Integr
     [Fact]
     public async Task A_Reading_partition_holds_one_UTC_day()
     {
-        await using var connection = await OpenAsync();
-        await using var command = new NpgsqlCommand(
-            "SELECT pg_get_expr(c.relpartbound, c.oid) FROM pg_class c WHERE c.relname = @name", connection);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        command.Parameters.AddWithValue("name", PartitionName(today));
 
-        var bound = (string?)await command.ExecuteScalarAsync(CancellationToken);
+        // The shared host's startup run makes it, and this test may run before that run commits.
+        var bound = await EventuallyAsync(
+            async () =>
+            {
+                await using var connection = await OpenAsync();
+                await using var command = new NpgsqlCommand(
+                    "SELECT pg_get_expr(c.relpartbound, c.oid) FROM pg_class c WHERE c.relname = @name", connection);
+                command.Parameters.AddWithValue("name", PartitionName(today));
+                return (string?)await command.ExecuteScalarAsync(CancellationToken);
+            },
+            bound => bound is not null);
 
         bound.ShouldBe($"FOR VALUES FROM ('{today:yyyy-MM-dd} 00:00:00+00') TO ('{today.AddDays(1):yyyy-MM-dd} 00:00:00+00')");
     }
 
     [Fact]
-    public async Task Expired_refresh_tokens_are_purged_and_revoked_ones_are_kept_until_they_expire()
+    public async Task Creating_a_partition_gives_up_rather_than_queue_ingest_behind_a_long_reader()
+    {
+        await using var reader = await OpenAsync();
+        await using var transaction = await reader.BeginTransactionAsync(CancellationToken);
+        await using (var lockReadings = new NpgsqlCommand("LOCK TABLE readings IN ACCESS SHARE MODE", reader, transaction))
+        {
+            await lockReadings.ExecuteNonQueryAsync(CancellationToken);
+        }
+
+        await using var scope = Fixture.Api.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>();
+        var day = new DateOnly(2100, 1, 1);
+
+        var refused = await Should.ThrowAsync<PostgresException>(() => db.CreateReadingPartitionsAsync(day, day, CancellationToken));
+
+        refused.SqlState.ShouldBe(PostgresErrorCodes.LockNotAvailable);
+    }
+
+    [Fact]
+    public async Task Expired_refresh_tokens_are_purged_and_spent_ones_are_kept_one_extra_lifetime()
     {
         var now = DateTimeOffset.UtcNow;
         await using (var scope = Fixture.Api.Services.CreateAsyncScope())
@@ -55,10 +80,11 @@ public sealed class DatabaseMaintenanceTests(FieldTrackFixture fixture) : Integr
             var user = await db.Users.SingleAsync(CancellationToken);
             db.RefreshTokens.AddRange(
                 Token(user.Id, 1, expiresAt: now.AddMinutes(-1), revokedAt: null),
-                Token(user.Id, 2, expiresAt: now.AddDays(-1), revokedAt: now.AddDays(-2)),
-                // A spent token presented again revokes the whole family (ADR 0002), so it must stay until it expires.
+                Token(user.Id, 2, expiresAt: now.AddDays(-8), revokedAt: now.AddDays(-9)),
+                // A spent token presented again revokes the whole family (ADR 0002), so it stays one lifetime past expiry.
                 Token(user.Id, 3, expiresAt: now.AddDays(1), revokedAt: now.AddMinutes(-1)),
-                Token(user.Id, 4, expiresAt: now.AddDays(1), revokedAt: null));
+                Token(user.Id, 4, expiresAt: now.AddDays(1), revokedAt: null),
+                Token(user.Id, 5, expiresAt: now.AddDays(-1), revokedAt: now.AddDays(-2)));
             await db.SaveChangesAsync(CancellationToken);
         }
 
@@ -74,9 +100,9 @@ public sealed class DatabaseMaintenanceTests(FieldTrackFixture fixture) : Integr
                 var hashes = await db.RefreshTokens.Select(token => token.TokenHash).ToListAsync(CancellationToken);
                 return hashes.Select(hash => hash[0]).Order().ToList();
             },
-            hashes => hashes.Count == 2);
+            hashes => hashes.Count == 3);
 
-        kept.ShouldBe([(byte)3, (byte)4]);
+        kept.ShouldBe([(byte)3, (byte)4, (byte)5]);
     }
 
     private static RefreshToken Token(Guid userId, byte hash, DateTimeOffset expiresAt, DateTimeOffset? revokedAt) => new()
