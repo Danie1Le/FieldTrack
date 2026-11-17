@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { AuthService } from '../auth/auth';
 import { LIVE_HUB, LiveFleet, LiveHubConnection } from './live-fleet';
-import { LiveAsset } from './live';
+import { Alert, LiveAsset } from './live';
 
 /** Stands in for SignalR's HubConnection: records connects and lets a test fire the client's events. */
 class FakeHub implements LiveHubConnection {
@@ -13,7 +13,7 @@ class FakeHub implements LiveHubConnection {
 
   constructor(private readonly accessToken: () => Promise<string>) {}
 
-  on(event: string, handler: (assets: LiveAsset[]) => void) {
+  on(event: string, handler: (pushed: never) => void) {
     this.handlers.set(event, handler);
   }
   onreconnecting(handler: () => void) {
@@ -54,6 +54,24 @@ const truck = (status: LiveAsset['status'], id = 'truck-1'): LiveAsset => ({
   latest: null,
 });
 
+const overheat = (status: Alert['status'], id = 'alert-1', raisedAt = '2026-11-17T10:00:00Z'): Alert => ({
+  id,
+  alertRuleId: 'rule-1',
+  assetId: 'truck-1',
+  severity: 'Critical',
+  message: 'Engine temp 108.4 °C, above 105',
+  status,
+  raisedAt,
+  resolvedAt: status === 'Resolved' ? '2026-11-17T10:05:00Z' : null,
+  resolveReason: status === 'Resolved' ? 'Cleared' : null,
+  acknowledgedBy: null,
+  acknowledgedAt: null,
+  resolvedBy: null,
+  note: null,
+  latched: false,
+  fromBacklog: false,
+});
+
 describe('LiveFleet', () => {
   let hub: FakeHub;
   let api: HttpTestingController;
@@ -81,11 +99,25 @@ describe('LiveFleet', () => {
     vi.useRealTimers();
   });
 
+  /** The reads a (re)connect makes over REST, the Assets first. */
+  async function snapshotReads() {
+    const assets = await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 });
+    return {
+      assets,
+      others: [
+        api.expectOne('/api/asset-groups'),
+        api.expectOne('/api/alert-rules'),
+        api.expectOne('/api/alerts?active=true'),
+        api.expectOne('/api/alerts?active=false'),
+      ],
+    };
+  }
+
   /** Answers the reads a (re)connect makes over REST. */
-  async function serveSnapshot(assets: LiveAsset[]) {
-    await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 }).then((r) => r.flush(assets));
-    api.expectOne('/api/asset-groups').flush([]);
-    api.expectOne('/api/alert-rules').flush([]);
+  async function serveSnapshot(assets: LiveAsset[], active: Alert[] = [], resolved: Alert[] = []) {
+    const reads = await snapshotReads();
+    reads.assets.flush(assets);
+    reads.others.forEach((read, i) => read.flush(i === 2 ? active : i === 3 ? resolved : []));
     await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
   }
 
@@ -104,12 +136,11 @@ describe('LiveFleet', () => {
 
   it('keeps a push that arrives while the fleet loads over the older snapshot', async () => {
     fleet.start();
-    const snapshot = await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 });
+    const snapshot = await snapshotReads();
 
     hub.fire('AssetsUpdated', [truck('Offline')]);
-    snapshot.flush([truck('Normal')]);
-    api.expectOne('/api/asset-groups').flush([]);
-    api.expectOne('/api/alert-rules').flush([]);
+    snapshot.assets.flush([truck('Normal')]);
+    snapshot.others.forEach((read) => read.flush([]));
     await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
 
     expect(fleet.assets()[0].status).toBe('Offline');
@@ -117,19 +148,63 @@ describe('LiveFleet', () => {
 
   it('lets two overlapping loads each finish without stopping the hub', async () => {
     fleet.start();
-    const first = await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 });
-    const firstReads = [first, api.expectOne('/api/asset-groups'), api.expectOne('/api/alert-rules')];
+    const first = await snapshotReads();
 
     hub.fire('reconnected');
-    const second = await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 });
-    const secondReads = [second, api.expectOne('/api/asset-groups'), api.expectOne('/api/alert-rules')];
+    const second = await snapshotReads();
 
-    firstReads.forEach((read, i) => read.flush(i === 0 ? [truck('Normal')] : []));
+    first.assets.flush([truck('Normal')]);
+    first.others.forEach((read) => read.flush([]));
     await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
-    secondReads.forEach((read, i) => read.flush(i === 0 ? [truck('Offline')] : []));
+    second.assets.flush([truck('Offline')]);
+    second.others.forEach((read) => read.flush([]));
 
     await vi.waitFor(() => expect(fleet.assets()[0].status).toBe('Offline'));
     expect(fleet.connection()).toBe('live');
+  });
+
+  it('loads Active and Resolved Alerts once connected, then applies raised and updated Alerts', async () => {
+    fleet.start();
+    await serveSnapshot([truck('Alerting')], [overheat('Open')], [overheat('Resolved', 'alert-0')]);
+
+    hub.fire('AlertRaised', overheat('Open', 'alert-2'));
+    hub.fire('AlertUpdated', overheat('Acknowledged'));
+
+    expect(fleet.alerts().map((a) => [a.id, a.status])).toEqual([
+      ['alert-1', 'Acknowledged'],
+      ['alert-0', 'Resolved'],
+      ['alert-2', 'Open'],
+    ]);
+  });
+
+  it('never moves an Alert back to an earlier status, whatever order its copies arrive in', async () => {
+    fleet.start();
+    const snapshot = await snapshotReads();
+
+    // Pushed while the snapshot loads; the snapshot was read before it and replays under it.
+    hub.fire('AlertUpdated', overheat('Resolved'));
+    snapshot.assets.flush([]);
+    snapshot.others.forEach((read, i) => read.flush(i === 2 ? [overheat('Acknowledged')] : []));
+    await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
+    hub.fire('AlertUpdated', overheat('Open'));
+
+    expect(fleet.alerts().map((a) => a.status)).toEqual(['Resolved']);
+  });
+
+  it('Acknowledges and Resolves through the API and shows the answer before its push arrives', async () => {
+    fleet.start();
+    await serveSnapshot([], [overheat('Open'), overheat('Open', 'alert-2')]);
+
+    const acknowledged = fleet.acknowledge('alert-1');
+    api.expectOne({ method: 'POST', url: '/api/alerts/alert-1/acknowledge' }).flush(overheat('Acknowledged'));
+    await acknowledged;
+    const resolved = fleet.resolve('alert-2', 'Refuel booked');
+    const resolve = api.expectOne({ method: 'POST', url: '/api/alerts/alert-2/resolve' });
+    expect(resolve.request.body).toEqual({ note: 'Refuel booked' });
+    resolve.flush(overheat('Resolved', 'alert-2'));
+    await resolved;
+
+    expect(fleet.alerts().map((a) => a.status)).toEqual(['Acknowledged', 'Resolved']);
   });
 
   it('reloads the fleet over REST after an automatic reconnect, recovering missed pushes', async () => {
