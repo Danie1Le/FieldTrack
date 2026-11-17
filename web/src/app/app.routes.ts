@@ -30,5 +30,11 @@ export const routes: Routes = [
     canActivate: [adminGuard],
     title: 'Geofences · FieldTrack',
   },
+  {
+    path: 'users',
+    loadComponent: () => import('./users/users-page').then((m) => m.UsersPage),
+    canActivate: [adminGuard],
+    title: 'Users · FieldTrack',
+  },
   { path: '**', redirectTo: '' },
 ];

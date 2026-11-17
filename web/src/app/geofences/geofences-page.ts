@@ -1,21 +1,11 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Observable, firstValueFrom } from 'rxjs';
 import { AuthService } from '../auth/auth';
 import { AlertRule, GeoJsonPolygon, Geofence } from '../control-room/live';
+import { problemsOf } from '../problems';
 import { GeofenceDraft, GeofenceEditor } from './geofence-editor';
-
-/** Why the API refused a change, as text for people: its validation messages, else its problem detail. */
-function problemsOf(error: unknown): string[] {
-  const body = error instanceof HttpErrorResponse ? error.error : null;
-  const messages = Object.values<string[]>(body?.errors ?? {}).flat();
-  if (messages.length) {
-    return messages;
-  }
-
-  return [typeof body?.detail === 'string' ? body.detail : 'The change did not go through. Try again.'];
-}
 
 /**
  * The Geofences page (Admins only, spec #21 story 27): draw, edit and delete Geofences, and see which Alert Rules use
