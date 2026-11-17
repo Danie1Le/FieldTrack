@@ -29,6 +29,7 @@ describe('Manage', () => {
     expect(links.map((link) => [link.textContent!.trim(), link.getAttribute('href')])).toEqual([
       ['Assets', '/manage/assets'],
       ['Devices', '/manage/devices'],
+      ['Alert Rules', '/manage/alert-rules'],
     ]);
   });
 });

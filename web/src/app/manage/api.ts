@@ -1,6 +1,6 @@
 /** Shapes the management screens read and send, besides those the Control room already uses (`live.ts`). */
 
-import { AssetType } from '../control-room/live';
+import { AlertRule, AssetType } from '../control-room/live';
 
 /** An Asset (`AssetResponse`). Lists leave out Archived ones unless asked. */
 export interface Asset {
@@ -30,3 +30,9 @@ export interface Attachment {
   attachedAt: string;
   detachedAt: string | null;
 }
+
+/** An Alert Rule as the management screen reads it (`AlertRuleResponse`), with the Offline setting the Control room skips. */
+export type ManagedRule = AlertRule & {
+  /** Offline rules: how many seconds without a Reading raise the Alert. */
+  offlineSeconds: number | null;
+};
