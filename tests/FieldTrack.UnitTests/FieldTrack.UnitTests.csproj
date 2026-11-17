@@ -28,4 +28,9 @@
     <Compile Include="..\FieldTrack.IntegrationTests\TestImages.cs" Link="TestImages.cs" />
     <None Include="..\..\docker-compose.yml" Link="docker-compose.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- TelemetryPayloadTests checks the broker's payload limit matches the contract's. -->
+  <ItemGroup>
+    <None Include="..\..\docker\mosquitto\mosquitto.conf" Link="mosquitto.conf" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
