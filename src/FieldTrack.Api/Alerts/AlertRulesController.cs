@@ -1,4 +1,5 @@
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Live;
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -9,12 +10,13 @@ namespace FieldTrack.Api.Alerts;
 
 /// <summary>
 /// Alert Rules, which ingest evaluates against each new Reading (ADR 0005). Everyone signed in reads them;
-/// only Admins change them.
+/// only Admins change them. Every change bumps the Alert Rule version in its transaction, so ingest reloads the rules
+/// before its next batch (ADR 0005).
 /// </summary>
 [ApiController]
 [Route("alert-rules")]
 [Authorize(Policy = Policies.Read)]
-public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBase
+public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider time, LivePush live) : ControllerBase
 {
     /// <summary>Lists Alert Rules by name, disabled ones included.</summary>
     [HttpGet]
@@ -40,15 +42,19 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AlertRuleResponse>> Create(AlertRuleRequest request, CancellationToken cancellationToken)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await LockTargetAssetAsync(request, cancellationToken);
         if (await RefusalAsync(request, currentAssetId: null, cancellationToken) is { } refusal)
         {
             return refusal;
         }
 
+        await db.BumpAlertRuleVersionAsync(cancellationToken);
         var rule = new AlertRule { Name = request.Name };
         Apply(request, rule);
         db.AlertRules.Add(rule);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ToResponse(rule));
     }
 
@@ -56,7 +62,11 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
     /// Edits an Alert Rule. A rule whose Asset has been Archived can still be edited, so an Admin can disable it;
     /// only moving a rule onto an Archived Asset is refused.
     /// </summary>
-    /// <remarks>An edit leaves the rule's existing Alerts and rule state as they are (#34).</remarks>
+    /// <remarks>
+    /// An edit of the rule's condition (kind, target, threshold settings, enabled) resolves its Active Alerts, as Rule
+    /// disabled when it disables the rule and Rule changed otherwise, and drops its rule state, so the rule starts afresh
+    /// on the next Reading (#10). A rename or a new severity leaves both as they are.
+    /// </remarks>
     /// <response code="400">Not exactly one known target, a move to an Archived Asset, or a Threshold rule missing a setting.</response>
     /// <response code="404">No Alert Rule has this id.</response>
     [HttpPut("{id:guid}")]
@@ -66,6 +76,10 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AlertRuleResponse>> Update(Guid id, AlertRuleRequest request, CancellationToken cancellationToken)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await LockTargetAssetAsync(request, cancellationToken);
+        // The rule is read after the bump, so an Archive or another change of it that got there first has committed.
+        await db.BumpAlertRuleVersionAsync(cancellationToken);
         if (await db.AlertRules.FindAsync([id], cancellationToken) is not { } rule)
         {
             return NotFound();
@@ -76,8 +90,19 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
             return refusal;
         }
 
+        var before = Condition(rule);
         Apply(request, rule);
         await db.SaveChangesAsync(cancellationToken);
+        List<Guid> resolved = [];
+        if (Condition(rule) != before)
+        {
+            var reason = rule.Enabled ? ResolveReason.RuleChanged : ResolveReason.RuleDisabled;
+            resolved = await db.ResolveActiveAlertsOfRuleAsync(id, reason, time.GetUtcNow(), cancellationToken);
+            await db.AlertRuleStates.Where(state => state.AlertRuleId == id).ExecuteDeleteAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        await live.AlertsUpdatedAsync(resolved, cancellationToken);
         return ToResponse(rule);
     }
 
@@ -97,6 +122,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
         // An ingest batch reads the enabled rules FOR KEY SHARE and holds that lock until it commits, so this lock
         // waits for a batch that may raise an Alert for the rule, and the check below then sees its Alert.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.BumpAlertRuleVersionAsync(cancellationToken);
         // Not FromSql on AlertRules: EF 10 maps the optional ThresholdSettings to wrong column names there.
         var locked = await db.Database.SqlQuery<Guid>($"""SELECT id AS "Value" FROM alert_rules WHERE id = {id} FOR UPDATE""").ToListAsync(cancellationToken);
         if (locked.Count == 0)
@@ -112,6 +138,17 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
         await db.AlertRules.Where(rule => rule.Id == id).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return NoContent();
+    }
+
+    // Lock order (ADR 0005): the target Asset before the Alert Rule version, so the rule's foreign key check never takes
+    // it after the version, and before the Archived check, so an Archive of it has committed or waits for this change.
+    // Key share waits for an Archive or delete but not for ingest.
+    private async Task LockTargetAssetAsync(AlertRuleRequest request, CancellationToken cancellationToken)
+    {
+        if (request.AssetId is { } assetId)
+        {
+            await db.Database.SqlQuery<Guid>($"""SELECT id AS "Value" FROM assets WHERE id = {assetId} FOR KEY SHARE""").ToListAsync(cancellationToken);
+        }
     }
 
     // currentAssetId: the Asset an edited rule targets now, which may stay even once Archived.
@@ -158,6 +195,11 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
             ? new ThresholdSettings(request.Sensor!.Value, request.Operator!.Value, request.Threshold!.Value, request.Hysteresis!.Value)
             : null;
     }
+
+    // What decides when the rule raises and resolves; editing any of it starts the rule afresh. Name and severity only
+    // change how its Alerts read.
+    private static (AlertRuleKind, Guid?, Guid?, ThresholdSettings?, bool) Condition(AlertRule rule) =>
+        (rule.Kind, rule.AssetId, rule.AssetGroupId, rule.ThresholdSettings, rule.Enabled);
 
     private static AlertRuleResponse ToResponse(AlertRule rule) =>
         new(rule.Id, rule.Name, rule.Kind, rule.AssetId, rule.AssetGroupId, rule.Severity, rule.Enabled,
