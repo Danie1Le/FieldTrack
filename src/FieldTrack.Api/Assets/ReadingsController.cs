@@ -59,9 +59,17 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
         }
 
         // Readings are outside the EF model (ADR 0003), so this reads them with SQL; the index on
-        // (asset_id, device_time) and partition pruning on device_time serve it. The LIMIT detects a range holding
-        // more than the response may.
-        var limit = thinTo ?? MaxReadings;
+        // (asset_id, device_time) and partition pruning on device_time serve it. Counting up to thinTo + 1 reads
+        // the index only.
+        if (thinTo is { } points && await db.Database.SqlQuery<long>($"""
+                SELECT count(*) AS "Value" FROM (
+                    SELECT FROM readings WHERE asset_id = {assetId} AND device_time >= {start} AND device_time < {end}
+                    LIMIT {points + 1}) r
+                """).SingleAsync(cancellationToken) > points)
+        {
+            return await ThinnedAsync(assetId, start, end, points, cancellationToken);
+        }
+
         var readings = await db.Database.SqlQuery<ReadingResponse>($"""
             SELECT d.serial_number AS device_serial_number, r.boot, r.seq AS sequence_number, r.device_time, r.received_time,
                    ST_Y(r.location::geometry) AS latitude, ST_X(r.location::geometry) AS longitude,
@@ -70,21 +78,25 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
             JOIN devices d ON d.id = r.device_id
             WHERE r.asset_id = {assetId} AND r.device_time >= {start} AND r.device_time < {end}
             ORDER BY r.device_time, r.device_id, r.boot, r.seq
-            LIMIT {limit + 1}
+            LIMIT {MaxReadings + 1}
             """).ToListAsync(cancellationToken);
-        if (readings.Count <= limit)
-        {
-            return readings;
-        }
-
-        if (thinTo is not { } points)
+        if (readings.Count > MaxReadings)
         {
             ModelState.AddModelError(nameof(to), $"The range holds more than {MaxReadings} Readings; ask for a shorter one.");
             return ValidationProblem(ModelState);
         }
 
-        // Thinned: one index probe per slice of Device time, so the cost follows thinTo, not how many Readings the
-        // range holds (24 h at demo rate: about 1 s to number every Reading, tens of ms to probe, #126).
+        return readings;
+    }
+
+    /// <summary>
+    /// The first Reading of each of <paramref name="points"/> - 1 even slices of Device time between the range's
+    /// first and last Reading, then the last. One index probe per slice, so the cost follows the points drawn, not
+    /// how many Readings the range holds (24 h at demo rate: about 1 s to number every Reading, tens of ms to probe).
+    /// </summary>
+    private async Task<List<ReadingResponse>> ThinnedAsync(
+        Guid assetId, DateTimeOffset start, DateTimeOffset end, int points, CancellationToken cancellationToken)
+    {
         var slices = points - 1;
         return await db.Database.SqlQuery<ReadingResponse>($"""
             WITH span AS (
