@@ -23,7 +23,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     /// <summary>Named sets of Assets.</summary>
     public DbSet<AssetGroup> AssetGroups => Set<AssetGroup>();
 
-    /// <summary>Registered transmitters, Archived ones included.</summary>
+    /// <summary>Registered Devices, Archived ones included.</summary>
     public DbSet<Device> Devices => Set<Device>();
 
     /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
@@ -74,10 +74,18 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
         });
 
         // Telemetry names a Device only by serial number, so one serial is one Device, Archived or not.
-        builder.Entity<Device>().HasIndex(device => device.SerialNumber).IsUnique();
+        builder.Entity<Device>(device =>
+        {
+            device.HasIndex(d => d.SerialNumber).IsUnique();
+            // A serial is one MQTT topic level: 1-64 of [A-Za-z0-9._-], so no '/', '+' or '#'.
+            device.ToTable(table => table.HasCheckConstraint("ck_devices_serial_number", "serial_number ~ '^[A-Za-z0-9._-]{1,64}$'"));
+        });
 
         builder.Entity<Attachment>(attachment =>
         {
+            // Ingest stamps a Reading by the Attachment covering its Device time, so a period must not end
+            // before it starts. A zero-length one is harmless: it covers no time.
+            attachment.ToTable(table => table.HasCheckConstraint("ck_attachments_period", "detached_at IS NULL OR detached_at >= attached_at"));
             // Attachments are history: deleting an Asset or Device must decide what happens to them
             // (#25), so the database refuses to cascade.
             attachment.HasOne<Device>().WithMany().HasForeignKey(a => a.DeviceId).OnDelete(DeleteBehavior.Restrict);

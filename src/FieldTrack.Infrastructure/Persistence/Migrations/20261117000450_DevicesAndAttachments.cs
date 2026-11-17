@@ -23,6 +23,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_devices", x => x.id);
+                    table.CheckConstraint("ck_devices_serial_number", "serial_number ~ '^[A-Za-z0-9._-]{1,64}$'");
                 });
 
             migrationBuilder.CreateTable(
@@ -38,6 +39,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_attachments", x => x.id);
+                    table.CheckConstraint("ck_attachments_period", "detached_at IS NULL OR detached_at >= attached_at");
                     table.ForeignKey(
                         name: "fk_attachments_assets_asset_id",
                         column: x => x.asset_id,

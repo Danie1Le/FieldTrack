@@ -120,7 +120,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.HasIndex("DeviceId", "AttachedAt")
                         .HasDatabaseName("ix_attachments_device_id_attached_at");
 
-                    b.ToTable("attachments", (string)null);
+                    b.ToTable("attachments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_attachments_period", "detached_at IS NULL OR detached_at >= attached_at");
+                        });
                 });
 
             modelBuilder.Entity("FieldTrack.Domain.Assets.Device", b =>
@@ -150,7 +153,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_devices_serial_number");
 
-                    b.ToTable("devices", (string)null);
+                    b.ToTable("devices", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_devices_serial_number", "serial_number ~ '^[A-Za-z0-9._-]{1,64}$'");
+                        });
                 });
 
             modelBuilder.Entity("FieldTrack.Infrastructure.Identity.FieldTrackUser", b =>
