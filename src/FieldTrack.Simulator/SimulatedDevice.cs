@@ -72,7 +72,10 @@ internal sealed class SimulatedDevice
     public string Serial => _spec.Serial;
 
     /// <summary>The MQTT topic the Device publishes to: <c>fieldtrack/v1/devices/{serial}/telemetry</c> (spec #21).</summary>
-    public string Topic => $"fieldtrack/v1/devices/{Serial}/telemetry";
+    public string Topic => TopicFor(Serial);
+
+    /// <summary>The telemetry topic of the Device with <paramref name="serial"/>.</summary>
+    public static string TopicFor(string serial) => $"fieldtrack/v1/devices/{serial}/telemetry";
 
     /// <summary>The Boot this Device is in.</summary>
     public int Boot { get; private set; }
