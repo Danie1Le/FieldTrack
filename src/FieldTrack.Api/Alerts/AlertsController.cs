@@ -46,7 +46,8 @@ public sealed class AlertsController(FieldTrackDbContext db) : ControllerBase
     public async Task<ActionResult<AlertResponse>> Get(Guid id, CancellationToken cancellationToken) =>
         await db.Alerts.FindAsync([id], cancellationToken) is { } alert ? ToResponse(alert) : NotFound();
 
-    private static AlertResponse ToResponse(Alert alert) =>
+    /// <summary>An Alert as this controller returns it; the live push sends the same shape.</summary>
+    internal static AlertResponse ToResponse(Alert alert) =>
         new(alert.Id, alert.AlertRuleId, alert.AssetId, alert.Reading, alert.Severity, alert.Message, alert.Status,
             alert.RaisedAt, alert.ResolvedAt, alert.ResolveReason, alert.CreatedAt, alert.FromBacklog);
 }
