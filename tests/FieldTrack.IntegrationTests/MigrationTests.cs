@@ -13,6 +13,7 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     private const string AssetId = "00000000-0000-0000-0000-000000000002";
     private const string AssetGroupId = "00000000-0000-0000-0000-000000000003";
     private const string AlertRuleId = "00000000-0000-0000-0000-000000000004";
+    private const string GeofenceId = "00000000-0000-0000-0000-000000000005";
     // The seeded Admin, for columns that name a user.
     private const string AnyUser = "(SELECT id FROM users LIMIT 1)";
 
@@ -172,6 +173,38 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Theory]
+    [InlineData("'GeofenceExit'", "NULL")]
+    [InlineData("'GeofenceEnter'", "NULL")]
+    [InlineData("'Threshold'", $"'{GeofenceId}'")]
+    public async Task Database_refuses_a_Geofence_rule_without_its_Geofence_and_any_other_kind_with_one(string kind, string geofenceId)
+    {
+        await InsertAssetAndAssetGroupAsync();
+        await ExecuteAsync(InsertGeofence);
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(InsertRule(("kind", kind), ("geofence_id", geofenceId))));
+
+        failure.ConstraintName.ShouldBe("ck_alert_rules_geofence");
+    }
+
+    [Fact]
+    public async Task Database_keeps_a_Geofence_area_as_a_geography_polygon_and_refuses_to_delete_one_a_rule_names()
+    {
+        await InsertAssetAndAssetGroupAsync();
+        await ExecuteAsync(InsertGeofence);
+        await ExecuteAsync(InsertRule(("kind", "'GeofenceExit'"), ("geofence_id", $"'{GeofenceId}'")));
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync("DELETE FROM geofences"));
+
+        failure.ConstraintName.ShouldBe("fk_alert_rules_geofences_geofence_id");
+        await using var connection = await OpenDatabaseAsync();
+        (await SqlAsync(connection, "SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid = 'geofences'::regclass AND attname = 'area'"))
+            .ShouldBe("geography(Polygon,4326)");
+        (await SqlAsync(connection, "SELECT indexdef FROM pg_indexes WHERE tablename = 'geofences' AND indexdef LIKE '%(area)%'"))
+            .ShouldBe("CREATE INDEX ix_geofences_area ON public.geofences USING gist (area)");
+    }
+
+    [Theory]
+    [InlineData("geofences", "kind", "ck_geofences_kind")]
     [InlineData("alert_rules", "kind", "ck_alert_rules_kind")]
     [InlineData("alert_rules", "severity", "ck_alert_rules_severity")]
     [InlineData("alert_rules", "sensor", "ck_alert_rules_sensor")]
@@ -182,8 +215,12 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     {
         await InsertRuleAsync();
 
-        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(
-            table == "alerts" ? InsertAlert((column, "'Nope'")) : InsertRule(("id", "gen_random_uuid()"), (column, "'Nope'"))));
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(table switch
+        {
+            "alerts" => InsertAlert((column, "'Nope'")),
+            "geofences" => InsertGeofence.Replace("'Inclusion'", "'Nope'", StringComparison.Ordinal),
+            _ => InsertRule(("id", "gen_random_uuid()"), (column, "'Nope'")),
+        }));
 
         failure.ConstraintName.ShouldBe(constraint);
     }
@@ -366,6 +403,11 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
         ["threshold"] = "105",
         ["hysteresis"] = "5",
     }, overrides);
+
+    private const string InsertGeofence = $"""
+        INSERT INTO geofences (id, name, kind, area)
+        VALUES ('{GeofenceId}', 'Depot', 'Inclusion', 'SRID=4326;POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))')
+        """;
 
     private static string InsertAlert(params (string Column, string Value)[] overrides) => Insert("alerts", new()
     {

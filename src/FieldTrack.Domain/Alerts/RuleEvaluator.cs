@@ -138,6 +138,8 @@ public static class RuleEvaluator
         rule switch
         {
             { Kind: AlertRuleKind.Threshold, ThresholdSettings: { } threshold } => ThresholdTransition(threshold, reading, breached),
+            { Kind: AlertRuleKind.GeofenceExit, Geofence: { } geofence } => GeofenceTransition(!geofence.Contains(reading.Latitude, reading.Longitude), breached),
+            { Kind: AlertRuleKind.GeofenceEnter, Geofence: { } geofence } => GeofenceTransition(geofence.Contains(reading.Latitude, reading.Longitude), breached),
             // A kind without its settings evaluates nothing rather than fail the ingest batch; the schema refuses it.
             _ => null,
         };
@@ -163,6 +165,10 @@ public static class RuleEvaluator
         return (was, now);
     }
 
+    // Breached means on the side the rule alerts on: outside for exit, inside for enter. ADR 0005: the first Reading only
+    // sets that baseline, so an Alert needs an observed crossing.
+    private static (bool Was, bool Now) GeofenceTransition(bool onAlertingSide, bool? breached) => (breached ?? onAlertingSide, onAlertingSide);
+
     private static Alert Raise(AlertRule rule, Guid assetId, StoredReading stored, TimeProvider time)
     {
         var createdAt = time.GetUtcNow();
@@ -173,14 +179,22 @@ public static class RuleEvaluator
             AssetId = assetId,
             Reading = stored.Id,
             Severity = rule.Severity,
-            Message = Message(rule.ThresholdSettings!, stored.Reading),
+            Message = Message(rule, stored.Reading),
             Status = AlertStatus.Open,
             RaisedAt = stored.Reading.DeviceTime,
             CreatedAt = createdAt,
         };
     }
 
-    private static string Message(ThresholdSettings settings, Reading reading)
+    private static string Message(AlertRule rule, Reading reading) =>
+        rule.Kind switch
+        {
+            AlertRuleKind.GeofenceExit => $"Left Geofence {rule.Geofence!.Name}",
+            AlertRuleKind.GeofenceEnter => $"Entered Geofence {rule.Geofence!.Name}",
+            _ => ThresholdMessage(rule.ThresholdSettings!, reading),
+        };
+
+    private static string ThresholdMessage(ThresholdSettings settings, Reading reading)
     {
         var (label, unit, value) = SensorOf(settings.Sensor);
         var (threshold, hysteresis) = (settings.Threshold, settings.Hysteresis);
