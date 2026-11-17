@@ -49,22 +49,27 @@ internal static class FleetRunner
             device, boots[device.Serial], options.Scenario, options.RandomInjection, () => BootState.Raise(options.StatePath, [device.Serial])[device.Serial])).ToList();
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (options.Duration is { } duration)
-        {
-            stop.CancelAfter(duration);
-        }
 
         // A Reading in flight when the run stops gets a short grace to be acknowledged, so the Manifest does not
         // leave out one the broker already holds.
         using var drain = new CancellationTokenSource();
         using var _ = stop.Token.Register(() => drain.CancelAfter(_drainTimeout));
 
+        // One connection per Device, as on the real fleet. They connect before the run's clock starts: connecting a whole fleet can
+        // take over a second, which would be a debt the schedule skips (#105).
+        var publishers = devices.Select(device => new ReconnectingPublisher(options.BrokerHost, options.BrokerPort, device.Serial, log)).ToList();
+        await Task.WhenAll(publishers.Select(publisher => publisher.ConnectAsync(stop.Token)));
+        if (options.Duration is { } duration)
+        {
+            stop.CancelAfter(duration);
+        }
+
         var startedAt = time.GetUtcNow();
         var startTimestamp = time.GetTimestamp();
         RunManifest manifest;
         try
         {
-            await Task.WhenAll(devices.Select((device, index) => RunDeviceAsync(device, index)));
+            await Task.WhenAll(devices.Select((device, index) => RunDeviceAsync(device, publishers[index], index)));
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
@@ -72,6 +77,7 @@ internal static class FleetRunner
         }
         finally
         {
+            await Task.WhenAll(publishers.Select(publisher => publisher.DisposeAsync().AsTask()));
             // Written however the run ends: what was acknowledged is still the benchmark's ground truth.
             // The same clock the Devices step by, so a wall-clock step mid-run cannot move the windows off the Readings.
             manifest = RunManifest.Of(startedAt, startedAt + time.GetElapsedTime(startTimestamp), options.RatePerSecond, devices);
@@ -81,11 +87,11 @@ internal static class FleetRunner
         return manifest;
 
         // A Device that fails stops the whole run rather than leave it running short-handed and silent.
-        async Task RunDeviceAsync(SimulatedDevice device, int index)
+        async Task RunDeviceAsync(SimulatedDevice device, ReconnectingPublisher publisher, int index)
         {
             try
             {
-                await PublishAsync(device, index, pacing, options, log, time, startedAt, startTimestamp, stop.Token, drain.Token);
+                await PublishAsync(device, publisher, index, pacing, log, time, startedAt, startTimestamp, stop.Token, drain.Token);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -97,17 +103,35 @@ internal static class FleetRunner
     }
 
     private static async Task PublishAsync(
-        SimulatedDevice device, int index, Pacing? pacing, RunOptions options, TextWriter log, TimeProvider time, DateTimeOffset startedAt, long startTimestamp,
+        SimulatedDevice device, ReconnectingPublisher publisher, int index, Pacing? pacing, TextWriter log, TimeProvider time, DateTimeOffset startedAt, long startTimestamp,
         CancellationToken stop, CancellationToken drain)
     {
-        // One connection per Device, as on the real fleet.
-        await using var publisher = new ReconnectingPublisher(options.BrokerHost, options.BrokerPort, device.Serial, log);
-        await Task.Delay(pacing?.StartOffset(index) ?? TimeSpan.Zero, time, stop);
-        using var timer = pacing is { } paced ? new PeriodicTimer(paced.Interval, time) : null;
+        if (pacing is { } paced)
+        {
+            // The schedule only says a Reading is owed; it is stepped, and so stamped, when taken, so a late wake-up adds no latency to it.
+            await foreach (var owed in paced.OwedAsync(index, time, startTimestamp, stop))
+            {
+                if (owed.Skipped > 0)
+                {
+                    await log.WriteLineAsync($"{device.Serial}: more than {Pacing.MaxDebt.TotalSeconds:0} s behind the rate; skipped {owed.Skipped} Readings");
+                }
+
+                await StepAndPublishAsync(time.GetElapsedTime(startTimestamp));
+            }
+
+            return;
+        }
+
+        // Maximum mode has no schedule: the next Reading follows as soon as the last one was acknowledged.
         do
         {
             // Device time is run start + elapsed, the clock of the Manifest's windows, so a wall-clock step cannot split them.
-            var elapsed = time.GetElapsedTime(startTimestamp);
+            await StepAndPublishAsync(time.GetElapsedTime(startTimestamp));
+        }
+        while (!stop.IsCancellationRequested);
+
+        async Task StepAndPublishAsync(TimeSpan elapsed)
+        {
             device.Step(startedAt + elapsed, elapsed);
             while (device.NextToSend is { } payload)
             {
@@ -116,7 +140,5 @@ internal static class FleetRunner
                 options.Acknowledged?.Invoke(time.GetElapsedTime(startTimestamp) - elapsed);
             }
         }
-        // Maximum mode has no timer: the next Reading follows as soon as the last one was acknowledged.
-        while (timer is null ? !stop.IsCancellationRequested : await timer.WaitForNextTickAsync(stop));
     }
 }
