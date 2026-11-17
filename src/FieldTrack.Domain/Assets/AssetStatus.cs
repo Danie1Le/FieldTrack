@@ -12,7 +12,7 @@ public enum AssetStatus
     /// <summary>At least one of the Asset's Alerts is Active.</summary>
     Alerting,
 
-    /// <summary>Its Device has sent nothing for <see cref="AssetStatuses.OfflineAfter"/>.</summary>
+    /// <summary>Its Device has sent nothing for <see cref="AssetStatuses.OfflineAfter"/> since its last Reading or its attach, whichever is later.</summary>
     Offline,
 
     /// <summary>Reporting, and nothing needs attention.</summary>

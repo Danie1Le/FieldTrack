@@ -23,7 +23,7 @@ A named set of Assets, such as a site or fleet; an Asset belongs to at most one.
 _Avoid_: Fleet, site, tag, category
 
 **Asset Status**:
-The live condition of an Asset worked out from its Device and open Alerts, never set by hand: No device, Alerting, Offline or Normal, in that order of precedence.
+The live condition of an Asset worked out from its Device and Active Alerts, never set by hand: No device, Alerting, Offline or Normal, in that order of precedence.
 _Avoid_: State, health, lifecycle
 
 **Archived**:
