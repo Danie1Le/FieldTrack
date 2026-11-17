@@ -234,7 +234,7 @@ public sealed partial class IngestWorker(
         }
     }
 
-    private MqttClientOptions ClientOptions() =>
+    internal MqttClientOptions ClientOptions() =>
         new MqttClientOptionsBuilder()
             .WithBroker(broker.Value)
             .WithClientId(options.Value.ClientId)
