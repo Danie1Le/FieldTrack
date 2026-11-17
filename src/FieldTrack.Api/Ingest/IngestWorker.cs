@@ -21,8 +21,9 @@ namespace FieldTrack.Api.Ingest;
 /// on the next connect; the Reading key table drops any copy already stored (ADR 0003). A message that cannot
 /// become a Reading is acknowledged the same way, stored as a Rejected message in its batch's transaction, and a
 /// redelivered copy of one already stored is dropped too. After the PUBACKs, a separate push loop sends each
-/// committed batch's changes to the dashboards through <see cref="LivePush"/>, best effort (ADR 0005). The worker is
-/// a single instance (spec #21).
+/// committed batch's changes to the dashboards through <see cref="LivePush"/>, best effort (ADR 0005). Every
+/// <see cref="SweepEvery"/>, between batches on the same loop, it sweeps for silent Devices: Offline Alerts and Assets
+/// turning Offline (ADR 0005). The worker is a single instance (spec #21).
 /// </summary>
 public sealed partial class IngestWorker(
     IOptions<BrokerOptions> broker,
@@ -69,6 +70,9 @@ public sealed partial class IngestWorker(
 
     /// <summary>...or this long after its first message (ADR 0004: p95 publish-to-commit under 200 ms).</summary>
     public static readonly TimeSpan FlushAfter = TimeSpan.FromMilliseconds(25);
+
+    /// <summary>How often the worker sweeps for silent Devices, so an Offline Alert is at most this late (ADR 0005).</summary>
+    public static readonly TimeSpan SweepEvery = TimeSpan.FromSeconds(1);
 
     private static readonly TimeSpan _retryAfter = TimeSpan.FromSeconds(2);
 
@@ -179,33 +183,35 @@ public sealed partial class IngestWorker(
 
         LogConnected(options.Value.ClientId, connected.IsSessionPresent);
 
+        // ADR 0005 restart grace: Readings still queued in the broker would end a Device's silence, so Offline rules
+        // count from when this session first keeps up with the broker, and raise nothing before.
+        DateTimeOffset? caughtUpAt = null;
+        var nextSweep = time.GetUtcNow() + SweepEvery;
         try
         {
             while (true)
             {
-                var batch = await NextBatchAsync(received.Reader, stoppingToken);
-                var (readings, rejected) = Parse(batch);
-                var written = await writer.WriteAsync(readings, rejected, stoppingToken);
-                foreach (var reason in written.Rejected)
+                var batch = await NextBatchAsync(received.Reader, nextSweep - time.GetUtcNow(), stoppingToken);
+                if (batch.Count > 0)
                 {
-                    _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
+                    await StoreAsync(writer, batch, stoppingToken);
+                    // Fewer than BatchSize arrived within FlushAfter, so ingest is keeping up: a backlog fills whole
+                    // batches, since the broker keeps 2 x BatchSize messages in flight.
+                    if (batch.Count < BatchSize)
+                    {
+                        caughtUpAt ??= time.GetUtcNow();
+                    }
                 }
 
-                _identicalDuplicates.Add(written.IdenticalDuplicates);
-                _conflictingDuplicates.Add(written.ConflictingDuplicates);
-                crashes?.Reached(IngestCrashPoint.AfterCommit);
-
-                // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
-                // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.
-                foreach (var message in batch)
+                if (time.GetUtcNow() >= nextSweep)
                 {
-                    await message.Args.AcknowledgeAsync(CancellationToken.None);
-                }
+                    if (received.Reader.Count == 0)
+                    {
+                        caughtUpAt ??= time.GetUtcNow();
+                    }
 
-                // Pushed only now, after commit (ADR 0005) and after the PUBACKs (#35), so neither waits on it.
-                if (written.AssetIds.Count > 0 || written.RaisedAlertIds.Count > 0 || written.ResolvedAlertIds.Count > 0)
-                {
-                    _committed.Writer.TryWrite(written);
+                    Enqueue(await writer.SweepAsync(caughtUpAt, stoppingToken));
+                    nextSweep = time.GetUtcNow() + SweepEvery;
                 }
             }
         }
@@ -217,6 +223,39 @@ public sealed partial class IngestWorker(
             {
                 await client.DisconnectAsync(cancellationToken: CancellationToken.None);
             }
+        }
+    }
+
+    private async Task StoreAsync(ReadingWriter writer, List<ReceivedMessage> batch, CancellationToken stoppingToken)
+    {
+        var (readings, rejected) = Parse(batch);
+        var written = await writer.WriteAsync(readings, rejected, stoppingToken);
+        foreach (var reason in written.Rejected)
+        {
+            _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
+        }
+
+        _identicalDuplicates.Add(written.IdenticalDuplicates);
+        _conflictingDuplicates.Add(written.ConflictingDuplicates);
+        crashes?.Reached(IngestCrashPoint.AfterCommit);
+
+        // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
+        // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.
+        foreach (var message in batch)
+        {
+            await message.Args.AcknowledgeAsync(CancellationToken.None);
+        }
+
+        // Pushed only now, after commit (ADR 0005) and after the PUBACKs (#35), so neither waits on it.
+        Enqueue(written);
+    }
+
+    // Hands a committed batch or sweep to the push loop, unless it changed nothing the dashboards show.
+    private void Enqueue(WrittenBatch written)
+    {
+        if (written.AssetIds.Count > 0 || written.RaisedAlertIds.Count > 0 || written.ResolvedAlertIds.Count > 0)
+        {
+            _committed.Writer.TryWrite(written);
         }
     }
 
@@ -256,9 +295,34 @@ public sealed partial class IngestWorker(
             .WithReceiveMaximum(2 * BatchSize)
             .Build();
 
-    private static async Task<List<ReceivedMessage>> NextBatchAsync(ChannelReader<ReceivedMessage> reader, CancellationToken stoppingToken)
+    /// <summary>
+    /// The next batch, or an empty one once <paramref name="sweepIn"/> passes with no message, so the loop can sweep.
+    /// A sweep that is due goes before waiting messages, so a busy broker never starves it.
+    /// </summary>
+    private async Task<List<ReceivedMessage>> NextBatchAsync(ChannelReader<ReceivedMessage> reader, TimeSpan sweepIn, CancellationToken stoppingToken)
     {
-        var batch = new List<ReceivedMessage>(BatchSize) { await reader.ReadAsync(stoppingToken) };
+        if (sweepIn <= TimeSpan.Zero)
+        {
+            return [];
+        }
+
+        using (var sweepDue = new CancellationTokenSource(sweepIn, time))
+        using (var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, sweepDue.Token))
+        {
+            try
+            {
+                if (!await reader.WaitToReadAsync(wait.Token))
+                {
+                    throw new ChannelClosedException();
+                }
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                return [];
+            }
+        }
+
+        var batch = new List<ReceivedMessage>(BatchSize);
         using var flush = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         flush.CancelAfter(FlushAfter);
         while (batch.Count < BatchSize)
