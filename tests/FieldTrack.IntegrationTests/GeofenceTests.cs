@@ -38,6 +38,8 @@ public sealed class GeofenceTests(FieldTrackFixture fixture) : AlertTest(fixture
         double[][] tooFewPositions = [[0, 0], [1, 0], [0, 0]];
         double[][] latitudeOutOfRange = [[0, 0], [1, 0], [1, 91], [0, 0]];
         double[][] longitudeOutOfRange = [[0, 0], [181, 0], [1, 1], [0, 0]];
+        double[][] antipodalEdge = [[0, 0], [180, 0], [180, 10], [0, 10], [0, 0]];
+        double[][] antimeridianStrip = [[170, 0], [-170, 0], [-170, 10], [170, 10], [170, 0]];
         double[][] threeNumbers = [[0, 0, 5], [1, 0, 5], [1, 1, 5], [0, 0, 5]];
         double[][] tooManyPositions = [.. Enumerable.Range(0, 1000).Select(i => new[] { Math.Cos(i * Math.Tau / 1000), Math.Sin(i * Math.Tau / 1000) }), [1, 0]];
 
@@ -50,6 +52,8 @@ public sealed class GeofenceTests(FieldTrackFixture fixture) : AlertTest(fixture
             Depot() with { area = new Area("Polygon", [tooFewPositions]) },
             Depot() with { area = new Area("Polygon", [latitudeOutOfRange]) },
             Depot() with { area = new Area("Polygon", [longitudeOutOfRange]) },
+            Depot() with { area = new Area("Polygon", [antipodalEdge]) },
+            Depot() with { area = new Area("Polygon", [antimeridianStrip]) },
             Depot() with { area = new Area("Polygon", [threeNumbers]) },
             Depot() with { area = new Area("Polygon", [tooManyPositions]) },
             Depot() with { area = null },
@@ -95,6 +99,27 @@ public sealed class GeofenceTests(FieldTrackFixture fixture) : AlertTest(fixture
 
         geofences.ShouldHaveSingleItem();
         new[] { create, edit, delete }.ShouldAllBe(response => response.StatusCode == HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task A_rule_created_while_its_Geofence_is_being_deleted_waits_for_the_delete_and_is_refused()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        var geofence = await CreateAsync(admin, "/geofences", Depot());
+        await using var deleter = await OpenDatabaseAsync();
+        await using var delete = await deleter.BeginTransactionAsync(CancellationToken);
+        // What Geofence delete does: bump the Alert Rule version, then delete the Geofence row.
+        await SqlAsync(deleter, "UPDATE alert_rule_version SET version = version + 1");
+
+        var create = admin.PostAsJsonAsync("/alert-rules", LeftDepot(asset, geofence), CancellationToken);
+        await LockWaitsAsync(1);
+        // A create that checked the Geofence before its own bump has passed the check here, and fails on the foreign key.
+        await SqlAsync(deleter, "DELETE FROM geofences WHERE id = @p0", Guid.Parse(geofence));
+        await delete.CommitAsync(CancellationToken);
+
+        using var created = await create;
+        created.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]

@@ -167,6 +167,14 @@ public sealed class GeofencesController(FieldTrackDbContext db, TimeProvider tim
             return null;
         }
 
+        // PostGIS refuses an edge of 180 degrees of longitude (antipodal), and below that the planar reading ingest uses and the
+        // geodesic one in the database agree on which side is inside; at 180 or more an antimeridian strip would be read inverted.
+        if (rings.Any(ring => ring.Zip(ring.Skip(1)).Any(edge => Math.Abs(edge.Second[0] - edge.First[0]) >= 180)))
+        {
+            ModelState.AddModelError(nameof(GeofenceRequest.Area), "An area may not cross the antimeridian or have an edge of 180 degrees of longitude or more.");
+            return null;
+        }
+
         var linearRings = rings.Select(ring => _wgs84.CreateLinearRing([.. ring.Select(position => new Coordinate(position[0], position[1]))])).ToArray();
         var polygon = _wgs84.CreatePolygon(linearRings[0], linearRings[1..]);
         if (!polygon.IsValid)
