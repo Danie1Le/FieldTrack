@@ -37,10 +37,14 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     public static string Payload(int boot, long seq, DateTimeOffset deviceTime, double lat = 51.5, double lon = -0.12, string more = "") =>
         string.Create(CultureInfo.InvariantCulture, $"{{\"boot\":{boot},\"seq\":{seq},\"ts\":{deviceTime.ToUnixTimeMilliseconds()},\"lat\":{lat},\"lon\":{lon}{more}}}");
 
-    public async Task PublishAsync(string serialNumber, string payload)
+    public Task PublishAsync(string serialNumber, string payload) => PublishToAsync(TopicOf(serialNumber), payload);
+
+    public static string TopicOf(string serialNumber) => $"fieldtrack/v1/devices/{serialNumber}/telemetry";
+
+    public async Task PublishToAsync(string topic, string payload)
     {
         var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"fieldtrack/v1/devices/{serialNumber}/telemetry")
+            .WithTopic(topic)
             .WithPayload(Encoding.UTF8.GetBytes(payload))
             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
             .Build();

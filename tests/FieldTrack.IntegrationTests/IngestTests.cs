@@ -1,7 +1,10 @@
 using System.Globalization;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using FieldTrack.Api.Assets;
+using FieldTrack.Api.Ingest;
+using FieldTrack.Domain.Telemetry;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -260,6 +263,54 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         var history = await HistoryWhenAsync(admin, asset, count: 1, from: now.AddDays(-9), to: now.AddDays(1));
 
         history.Single().GetProperty("sequenceNumber").GetInt64().ShouldBe(5L);
+        // Stored plus rejected equals published (spec #21); the rejects were in this batch or an earlier one.
+        (await ListAsync(admin, "/rejected-messages")).Length.ShouldBe(6);
+    }
+
+    [Theory]
+    [InlineData(RejectReason.BadJson)]
+    [InlineData(RejectReason.MissingField)]
+    [InlineData(RejectReason.PositionOutOfRange)]
+    [InlineData(RejectReason.TooFarAhead)]
+    [InlineData(RejectReason.TooLate)]
+    [InlineData(RejectReason.UnknownTopicVersion)]
+    [InlineData(RejectReason.UnknownSerialNumber)]
+    [InlineData(RejectReason.ArchivedDevice)]
+    public async Task A_message_that_cannot_become_a_Reading_is_stored_as_a_Rejected_message_and_counted(RejectReason reason)
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        await AttachedDeviceAsync(admin, "TRK-007");
+        await AttachedDeviceAsync(admin, "OLD-001");
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, "UPDATE devices SET archived = true WHERE serial_number = 'OLD-001'");
+        using var rejects = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.RejectedMessagesInstrument);
+        var now = DateTimeOffset.UtcNow;
+        var (topic, payload) = reason switch
+        {
+            RejectReason.BadJson => (TelemetryPublisher.TopicOf("TRK-007"), "{\"boot\":1,"),
+            RejectReason.MissingField => (TelemetryPublisher.TopicOf("TRK-007"), """{"boot":1,"seq":0,"ts":0}"""),
+            RejectReason.PositionOutOfRange => (TelemetryPublisher.TopicOf("TRK-007"), TelemetryPublisher.Payload(1, 0, now, lon: 180.5)),
+            RejectReason.TooFarAhead => (TelemetryPublisher.TopicOf("TRK-007"), TelemetryPublisher.Payload(1, 0, now.AddMinutes(6))),
+            RejectReason.TooLate => (TelemetryPublisher.TopicOf("TRK-007"), TelemetryPublisher.Payload(1, 0, now.AddDays(-8))),
+            RejectReason.UnknownTopicVersion => ("fieldtrack/v2/devices/TRK-007/telemetry", TelemetryPublisher.Payload(1, 0, now)),
+            RejectReason.UnknownSerialNumber => (TelemetryPublisher.TopicOf("GHOST-1"), TelemetryPublisher.Payload(1, 0, now)),
+            RejectReason.ArchivedDevice => (TelemetryPublisher.TopicOf("OLD-001"), TelemetryPublisher.Payload(1, 0, now)),
+            _ => throw new ArgumentOutOfRangeException(nameof(reason)),
+        };
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        await publisher.PublishToAsync(topic, payload);
+        var rejected = (await EventuallyAsync(() => ListAsync(admin, "/rejected-messages"), listed => listed.Length > 0)).ShouldHaveSingleItem();
+
+        rejected.GetProperty("reason").GetString().ShouldBe(reason.ToString());
+        rejected.GetProperty("topic").GetString().ShouldBe(topic);
+        rejected.GetProperty("payload").GetBytesFromBase64().ShouldBe(Encoding.UTF8.GetBytes(payload));
+        rejected.GetProperty("receivedTime").GetDateTimeOffset().ShouldBeInRange(now, DateTimeOffset.UtcNow);
+        (await SqlAsync(database, "SELECT count(*) FROM readings")).ShouldBe(0L);
+        var counted = await EventuallyAsync(() => Task.FromResult(rejects.Measurements), measured => measured.Count > 0);
+        counted.ShouldHaveSingleItem().Value.ShouldBe(1L);
+        counted[0].Tags["reason"].ShouldBe(reason.ToString());
     }
 
     [Theory]

@@ -1,11 +1,13 @@
+using FieldTrack.Domain.Telemetry;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace FieldTrack.Infrastructure.Ingest;
 
 /// <summary>
-/// Stores batches of Readings exactly once (ADR 0003, ADR 0004). It holds one connection, with its stage
-/// table, for the life of an ingest session; dispose it and open a new one after any failure.
+/// Stores batches of Readings exactly once (ADR 0003, ADR 0004), and the batch's Rejected messages with them, so
+/// stored plus rejected always equals published (spec #21). It holds one connection, with its stage table, for the
+/// life of an ingest session; dispose it and open a new one after any failure.
 /// </summary>
 public sealed class ReadingWriter : IAsyncDisposable
 {
@@ -16,6 +18,7 @@ public sealed class ReadingWriter : IAsyncDisposable
     private const string CreateStage = """
         CREATE TEMP TABLE IF NOT EXISTS ingest_stage (
             ordinal integer NOT NULL,
+            topic text NOT NULL,
             serial_number text NOT NULL,
             boot integer NOT NULL,
             seq bigint NOT NULL,
@@ -28,14 +31,18 @@ public sealed class ReadingWriter : IAsyncDisposable
             fuel_pct real NULL,
             vibration_mm_s real NULL,
             battery_v real NULL,
-            content_hash bytea NOT NULL
+            payload bytea NOT NULL
         ) ON COMMIT DELETE ROWS
         """;
 
     private const string Copy = """
-        COPY ingest_stage (ordinal, serial_number, boot, seq, device_time, received_time, lat, lon,
-                           speed_kph, engine_temp_c, fuel_pct, vibration_mm_s, battery_v, content_hash)
+        COPY ingest_stage (ordinal, topic, serial_number, boot, seq, device_time, received_time, lat, lon,
+                           speed_kph, engine_temp_c, fuel_pct, vibration_mm_s, battery_v, payload)
         FROM STDIN (FORMAT BINARY)
+        """;
+
+    private const string CopyRejected = """
+        COPY rejected_messages (topic, payload, reason, received_time) FROM STDIN (FORMAT BINARY)
         """;
 
     // Readings have no foreign keys, and Asset and Device delete decide between remove and Archive by
@@ -57,7 +64,10 @@ public sealed class ReadingWriter : IAsyncDisposable
 
     // One statement: new keys go into reading_keys, and only the Readings whose key was new are stored,
     // so the first stored copy wins, across batches and within one (lowest ordinal = received first).
-    // Telemetry from unknown or Archived Devices is skipped (#27 records it as Rejected messages).
+    // The content hash is SHA-256 over the raw payload: a Device resends a Reading byte for byte, so "identical
+    // duplicate" (ADR 0003) means an identical payload, and any other copy is conflicting.
+    // Telemetry from unknown or Archived Devices becomes Rejected messages, decided in this same statement so
+    // each message is stored or rejected against one snapshot of devices, never both or neither.
     // Among overlapping ended Attachments, the one attached last wins (#25).
     // Stamping is one-shot, from the Attachments committed when the Reading is stored, and is never redone.
     // Device time may run up to TelemetryPayload.MaxAhead past Received time, so a Reading near an attach
@@ -72,7 +82,7 @@ public sealed class ReadingWriter : IAsyncDisposable
             ORDER BY d.id, s.boot, s.seq, s.ordinal
         ), new_keys AS (
             INSERT INTO reading_keys (device_id, boot, seq, device_time, content_hash)
-            SELECT device_id, boot, seq, device_time, content_hash FROM staged
+            SELECT device_id, boot, seq, device_time, sha256(payload) FROM staged
             ON CONFLICT DO NOTHING
             RETURNING device_id, boot, seq
         ), stored AS (
@@ -87,11 +97,21 @@ public sealed class ReadingWriter : IAsyncDisposable
                    s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
             FROM staged s
             JOIN new_keys USING (device_id, boot, seq)
+        ), rejected AS (
+            INSERT INTO rejected_messages (topic, payload, reason, received_time)
+            SELECT s.topic, s.payload, CASE WHEN d.id IS NULL THEN 'UnknownSerialNumber' ELSE 'ArchivedDevice' END, s.received_time
+            FROM ingest_stage s
+            LEFT JOIN devices d ON d.serial_number = s.serial_number
+            WHERE d.id IS NULL OR d.archived
+            ORDER BY s.ordinal
+            RETURNING reason
+        ), last_received AS (
+            UPDATE devices d
+            SET last_received_at = r.received_time
+            FROM (SELECT device_id, max(received_time) AS received_time FROM staged GROUP BY device_id) r
+            WHERE d.id = r.device_id
         )
-        UPDATE devices d
-        SET last_received_at = r.received_time
-        FROM (SELECT device_id, max(received_time) AS received_time FROM staged GROUP BY device_id) r
-        WHERE d.id = r.device_id
+        SELECT reason FROM rejected
         """;
 
     private readonly NpgsqlConnection _connection;
@@ -116,19 +136,37 @@ public sealed class ReadingWriter : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stores <paramref name="readings"/> (in receive order) in one transaction and stamps each with its
-    /// Asset; Readings already stored are skipped. Returns once committed.
+    /// Stores <paramref name="readings"/> (in receive order) and <paramref name="rejected"/> in one transaction, and
+    /// stamps each Reading with its Asset; Readings already stored are skipped, and Readings from unknown or Archived
+    /// Devices become Rejected messages. Returns once committed, with the reason of every Rejected message stored.
     /// </summary>
-    public async Task WriteAsync(IReadOnlyList<ReceivedReading> readings, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<RejectReason>> WriteAsync(
+        IReadOnlyList<ReceivedReading> readings, IReadOnlyList<RejectedMessage> rejected, CancellationToken cancellationToken)
     {
         await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
+        if (rejected.Count > 0)
+        {
+            await using var import = await _connection.BeginBinaryImportAsync(CopyRejected, cancellationToken);
+            foreach (var message in rejected)
+            {
+                await import.StartRowAsync(cancellationToken);
+                await import.WriteAsync(message.Topic, NpgsqlDbType.Text, cancellationToken);
+                await import.WriteAsync(message.Payload, NpgsqlDbType.Bytea, cancellationToken);
+                await import.WriteAsync(message.Reason.ToString(), NpgsqlDbType.Text, cancellationToken);
+                await import.WriteAsync(message.ReceivedTime, NpgsqlDbType.TimestampTz, cancellationToken);
+            }
+
+            await import.CompleteAsync(cancellationToken);
+        }
+
         await using (var import = await _connection.BeginBinaryImportAsync(Copy, cancellationToken))
         {
             for (var ordinal = 0; ordinal < readings.Count; ordinal++)
             {
-                var (serialNumber, reading, receivedTime, contentHash) = readings[ordinal];
+                var (topic, serialNumber, reading, receivedTime, payload) = readings[ordinal];
                 await import.StartRowAsync(cancellationToken);
                 await import.WriteAsync(ordinal, NpgsqlDbType.Integer, cancellationToken);
+                await import.WriteAsync(topic, NpgsqlDbType.Text, cancellationToken);
                 await import.WriteAsync(serialNumber, NpgsqlDbType.Text, cancellationToken);
                 await import.WriteAsync(reading.Boot, NpgsqlDbType.Integer, cancellationToken);
                 await import.WriteAsync(reading.SequenceNumber, NpgsqlDbType.Bigint, cancellationToken);
@@ -141,7 +179,7 @@ public sealed class ReadingWriter : IAsyncDisposable
                     await import.WriteAsync(sensor, NpgsqlDbType.Real, cancellationToken);
                 }
 
-                await import.WriteAsync(contentHash, NpgsqlDbType.Bytea, cancellationToken);
+                await import.WriteAsync(payload, NpgsqlDbType.Bytea, cancellationToken);
             }
 
             await import.CompleteAsync(cancellationToken);
@@ -152,8 +190,20 @@ public sealed class ReadingWriter : IAsyncDisposable
         {
             BatchCommands = { new(LockDevices), new(LockAssets), new(Store) },
         };
-        await batch.ExecuteNonQueryAsync(cancellationToken);
+        var reasons = rejected.Select(message => message.Reason).ToList();
+        await using (var reader = await batch.ExecuteReaderAsync(cancellationToken))
+        {
+            // Past the two locks' empty rows to Store's: the reason of each Reading it rejected.
+            await reader.NextResultAsync(cancellationToken);
+            await reader.NextResultAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                reasons.Add(Enum.Parse<RejectReason>(reader.GetString(0)));
+            }
+        }
+
         await transaction.CommitAsync(cancellationToken);
+        return reasons;
     }
 
     /// <inheritdoc />

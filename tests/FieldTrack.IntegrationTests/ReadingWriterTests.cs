@@ -20,8 +20,8 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
         var now = DateTimeOffset.UtcNow;
 
         await WriteAsync(
-            new ReceivedReading("TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 49f, null, null), now, [1]),
-            new ReceivedReading("TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 9f, null, null), now, [2]));
+            new ReceivedReading(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 49f, null, null), now, [1]),
+            new ReceivedReading(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 9f, null, null), now, [2]));
 
         await using var database = await OpenDatabaseAsync();
         (await SqlAsync(database, "SELECT count(*) FROM readings WHERE device_id = @p0", device)).ShouldBe(1L);
@@ -62,11 +62,11 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
     }
 
     private static ReceivedReading Received(long seq, DateTimeOffset deviceTime) =>
-        new("TRK-007", new Reading(1, seq, deviceTime, 51.5, -0.12, null, null, null, null, null), DateTimeOffset.UtcNow, [0]);
+        new(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, seq, deviceTime, 51.5, -0.12, null, null, null, null, null), DateTimeOffset.UtcNow, [0]);
 
     private async Task WriteAsync(params ReceivedReading[] readings)
     {
         await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), CancellationToken);
-        await writer.WriteAsync(readings, CancellationToken);
+        await writer.WriteAsync(readings, [], CancellationToken);
     }
 }
