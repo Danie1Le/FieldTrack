@@ -110,6 +110,11 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
     {
         var assets = await SeedAsync();
         var logs = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var meter = new System.Diagnostics.Metrics.MeterListener();
+        meter.InstrumentPublished = (instrument, listener) => { if (instrument.Name is "fieldtrack.ingest.batch_size" or "fieldtrack.ingest.batch_commit_duration") { listener.EnableMeasurementEvents(instrument); } };
+        meter.SetMeasurementEventCallback<long>((instrument, value, _, _) => logs.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} BATCH size {value}"));
+        meter.SetMeasurementEventCallback<double>((instrument, value, _, _) => logs.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} BATCH commit {value * 1000:F0} ms"));
+        meter.Start();
         await using var ingest = await StartIngestAsync(services: collection => collection.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(new CollectingLogger(logs)));
 
         var manifest = await FleetRunner.RunAsync(Fleet, Options(TimeSpan.FromSeconds(2), rate: null), TextWriter.Null, TimeProvider.System, CancellationToken);
@@ -123,7 +128,7 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         var timeline = new List<string>();
         var started = DateTime.UtcNow;
         long stored = 0;
-        for (var i = 0; i < 40; i++)
+        for (var i = 0; i < 20; i++)
         {
             stored = (long)(await SqlAsync(database, "SELECT count(*) FROM readings WHERE asset_id = @p0", truck))!;
             var all = (long)(await SqlAsync(database, "SELECT count(*) FROM readings"))!;
@@ -135,13 +140,13 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
                 break;
             }
 
-            await Task.Delay(1500, CancellationToken);
+            await Task.Delay(1000, CancellationToken);
         }
 
         var states = string.Join("; ", await ActivityAsync(database));
         var counts = string.Join(",", Fleet.Devices.Select(d => $"{d.Serial}={Published(manifest, d.Serial)}"));
         File.AppendAllText(Path.Combine(Path.GetTempPath(), "max-diag.log"), $"run {run} published={counts} stored={stored}\n");
-        stored.ShouldBe(Published(manifest, "TRK-001"), $"run {run} published {counts}\nTIMELINE\n{string.Join("\n", timeline)}\nPG {states}\nLOGS\n{string.Join("\n", logs.Take(60))}");
+        stored.ShouldBe(Published(manifest, "TRK-001"), $"run {run} published {counts}\nTIMELINE\n{string.Join("\n", timeline)}\nPG {states}\nLOGS\n{string.Join("\n", logs.Where(l => !l.Contains("DbCommand")).TakeLast(60))}");
     }
 
     private static async Task<List<string>> ActivityAsync(NpgsqlConnection database)
@@ -171,7 +176,7 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => logLevel >= Microsoft.Extensions.Logging.LogLevel.Warning;
 
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            lines.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} {logLevel} {formatter(state, exception)} {exception?.GetType().Name}: {exception?.Message}");
+            lines.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} {logLevel} {eventId.Id} {formatter(state, exception)} {exception?.GetType().Name}: {exception?.Message}");
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
