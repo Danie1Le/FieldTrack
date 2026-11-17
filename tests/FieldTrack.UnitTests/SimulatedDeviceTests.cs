@@ -49,14 +49,29 @@ public sealed class SimulatedDeviceTests
         var device = Truck();
 
         var first = device.NextPayload(Now, TimeSpan.Zero);
-        var retried = device.NextPayload(Now, TimeSpan.Zero);
         device.Published();
         var next = device.NextPayload(Now.AddSeconds(1), TimeSpan.FromSeconds(1));
 
-        retried.ShouldBe(first);
         Sequence(first).ShouldBe(0);
         Sequence(next).ShouldBe(1);
         device.NextSequence.ShouldBe(1);
+    }
+
+    [Fact]
+    public void A_retry_later_in_the_run_sends_the_same_bytes_until_the_Reading_was_published()
+    {
+        // A random walk moves on with every call, so rebuilding the payload would change its position.
+        var spec = new FleetDevice("TRK-001", "Haul truck 1", AssetType.Truck, null, null, 36, [Sensor.FuelPct]);
+        var device = new SimulatedDevice(spec, 1, new RandomWalkMotion(RandomWalkMotion.DefaultCentre, 36, 1500, new Random(1)));
+
+        var first = device.NextPayload(Now, TimeSpan.FromSeconds(1));
+        var retried = device.NextPayload(Now.AddSeconds(30), TimeSpan.FromSeconds(31));
+        device.Published();
+        var next = device.NextPayload(Now.AddSeconds(31), TimeSpan.FromSeconds(32));
+
+        retried.ShouldBe(first);
+        next.ShouldNotBe(first);
+        Sequence(next).ShouldBe(1);
     }
 
     [Fact]
@@ -64,7 +79,7 @@ public sealed class SimulatedDeviceTests
     {
         var device = Truck(sensors: [Sensor.FuelPct]);
 
-        var fuel = Enumerable.Range(0, 400).Select(minute => Fuel(device.NextPayload(Now, TimeSpan.FromMinutes(minute)))).ToArray();
+        var fuel = Enumerable.Range(0, 400).Select(minute => Fuel(PublishNext(device, TimeSpan.FromMinutes(minute)))).ToArray();
 
         fuel[0].ShouldBeGreaterThan(fuel[60]);
         fuel.Min().ShouldBeGreaterThanOrEqualTo(10);
@@ -106,6 +121,13 @@ public sealed class SimulatedDeviceTests
     {
         var root = JsonDocument.Parse(device.NextPayload(Now, elapsed)).RootElement;
         return new Position(root.GetProperty("lat").GetDouble(), root.GetProperty("lon").GetDouble());
+    }
+
+    private static byte[] PublishNext(SimulatedDevice device, TimeSpan elapsed)
+    {
+        var payload = device.NextPayload(Now, elapsed);
+        device.Published();
+        return payload;
     }
 
     private static long Sequence(byte[] payload) => JsonDocument.Parse(payload).RootElement.GetProperty("seq").GetInt64();

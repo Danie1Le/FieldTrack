@@ -13,6 +13,7 @@ internal sealed class SimulatedDevice
 
     private readonly FleetDevice _spec;
     private readonly IMotion _motion;
+    private byte[]? _pending;
 
     /// <summary>A Device with the traits of <paramref name="spec"/> that is in <paramref name="boot"/> and moves as <paramref name="motion"/> says.</summary>
     public SimulatedDevice(FleetDevice spec, int boot, IMotion motion)
@@ -31,8 +32,8 @@ internal sealed class SimulatedDevice
     {
         { Route: { } route } => new RouteMotion(GpxRoute.Load(route), spec.SpeedKph),
         { Position: { } position } => new FixedMotion(position),
-        // Seeded from the serial, so a Device wanders the same way every run.
-        _ => new RandomWalkMotion(RandomWalkMotion.DefaultCentre, spec.SpeedKph, 1500, new Random(spec.Serial.Aggregate(17, (hash, c) => (hash * 31) + c))),
+        // Every walker starts at the same centre; fine for the demo's one, worth an offset when Scenarios (#43) add more.
+        _ => new RandomWalkMotion(RandomWalkMotion.DefaultCentre, spec.SpeedKph, RandomWalkMotion.DefaultRadiusMeters, new Random(SeedFor(spec.Serial))),
     });
 
     /// <summary>The Device's serial number.</summary>
@@ -48,10 +49,26 @@ internal sealed class SimulatedDevice
     public long NextSequence { get; private set; }
 
     /// <summary>
-    /// The payload of the next Reading as it is at <paramref name="now"/>, <paramref name="elapsed"/> into the run. It
-    /// stays the same Sequence number until <see cref="Published"/>, so a retry sends the Reading again, not a new one.
+    /// The payload of the next Reading, built at <paramref name="now"/>, <paramref name="elapsed"/> into the run. Until
+    /// <see cref="Published"/> every call returns the same bytes, whatever times it is given, so a retry sends the Reading
+    /// again and ingest sees an identical duplicate, not a conflicting one (ADR 0001, ADR 0003).
     /// </summary>
-    public byte[] NextPayload(DateTimeOffset now, TimeSpan elapsed)
+    public byte[] NextPayload(DateTimeOffset now, TimeSpan elapsed) => _pending ??= Build(now, elapsed);
+
+    /// <summary>Records that the broker acknowledged the Reading <see cref="NextPayload"/> built.</summary>
+    public void Published()
+    {
+        _pending = null;
+        NextSequence++;
+    }
+
+    // Seeded from the serial, so a Device wanders the same way every run; string.GetHashCode is randomised per process.
+    private static int SeedFor(string serial) => serial.Aggregate(17, (hash, c) => (hash * 31) + c);
+
+    // Drains half a percent a minute, then tops up when it gets low, so a long run never ends on an empty tank.
+    private static double FuelPct(TimeSpan elapsed) => 90 - ((elapsed.TotalMinutes * 0.5) % 75);
+
+    private byte[] Build(DateTimeOffset now, TimeSpan elapsed)
     {
         var motion = _motion.At(elapsed);
         var message = new Message(
@@ -63,12 +80,6 @@ internal sealed class SimulatedDevice
             Value(Sensor.BatteryV, 13.8));
         return JsonSerializer.SerializeToUtf8Bytes(message, _json);
     }
-
-    /// <summary>Records that the broker acknowledged the Reading <see cref="NextPayload"/> built.</summary>
-    public void Published() => NextSequence++;
-
-    // Drains half a percent a minute, then tops up when it gets low, so a long run never ends on an empty tank.
-    private static double FuelPct(TimeSpan elapsed) => 90 - ((elapsed.TotalMinutes * 0.5) % 75);
 
     private float? Value(Sensor sensor, double value) => _spec.Sensors.Contains(sensor) ? (float)Math.Round(value, 2) : null;
 

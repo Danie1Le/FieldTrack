@@ -35,6 +35,9 @@ internal sealed class RandomWalkMotion : IMotion
     /// <summary>Where random walkers wander when the fleet file gives no better idea (Portland, the demo site).</summary>
     public static readonly Position DefaultCentre = new(45.5231, -122.6765);
 
+    /// <summary>How far a random walker strays from its centre by default: about the size of the demo site.</summary>
+    public const double DefaultRadiusMeters = 1500;
+
     // Radians of heading change per step at most; small enough that tracks look like vehicles, not dust.
     private const double MaxTurn = 0.4;
 

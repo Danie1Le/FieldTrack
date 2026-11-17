@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace FieldTrack.Simulator;
@@ -33,9 +34,11 @@ internal sealed class GpxRoute
         XDocument document;
         try
         {
-            document = XDocument.Parse(gpx);
+            // GPX never needs a DTD; refusing one rules out entity expansion from a route file copied from elsewhere.
+            using var reader = XmlReader.Create(new StringReader(gpx), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+            document = XDocument.Load(reader);
         }
-        catch (System.Xml.XmlException exception)
+        catch (XmlException exception)
         {
             throw new SimulatorException($"Route {source} is not valid XML: {exception.Message}", exception);
         }
