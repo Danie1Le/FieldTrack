@@ -1,0 +1,8 @@
+# Loads the FieldTrack dashboards beside the ones grafana/otel-lgtm ships (#48).
+apiVersion: 1
+
+providers:
+  - name: FieldTrack
+    type: file
+    options:
+      path: /fieldtrack/dashboards
