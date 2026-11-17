@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import { Observable, firstValueFrom } from 'rxjs';
 import { AuthService } from '../auth/auth';
 import { AlertRule, GeoJsonPolygon, Geofence } from '../control-room/live';
-import { GeofenceEditor } from './geofence-editor';
+import { GeofenceDraft, GeofenceEditor } from './geofence-editor';
 
 /** Why the API refused a change, as text for people: its validation messages, else its problem detail. */
 function problemsOf(error: unknown): string[] {
@@ -34,7 +34,7 @@ export class GeofencesPage {
   protected readonly geofences = signal<Geofence[] | null>(null);
   private readonly rules = signal<AlertRule[]>([]);
   /** The Geofence being edited, or a just-drawn area (id null); the map starts editing from its area. */
-  protected readonly draft = signal<{ id: string | null; area: GeoJsonPolygon } | null>(null);
+  protected readonly draft = signal<GeofenceDraft | null>(null);
   protected readonly name = signal('');
   protected readonly kind = signal<Geofence['kind']>('Inclusion');
   /** The draft's area as last drawn or edited on the map. */

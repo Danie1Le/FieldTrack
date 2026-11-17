@@ -19,7 +19,7 @@
         <li [attr.data-geofence]="geofence.id">
           <button type="button" [attr.aria-current]="draft()?.id === geofence.id ? 'true' : null" (click)="edit(geofence)">
             <strong class="name">{{ geofence.name }}</strong>
-            <span class="kind kind-{{ geofence.kind }}">{{ geofence.kind }}</span>
+            <span class="kind">{{ geofence.kind }}</span>
             <span class="rules muted">{{ rulesOf(geofence) }}</span>
           </button>
         </li>
@@ -75,6 +75,7 @@
     class="map"
     [geofences]="geofences() ?? []"
     [draft]="draft()"
+    [kind]="kind()"
     (drawn)="drawn($event)"
     (changed)="changed($event)"
   />

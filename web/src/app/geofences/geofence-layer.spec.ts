@@ -1,6 +1,6 @@
 import * as L from 'leaflet';
 import { Geofence } from '../control-room/live';
-import { geofenceLayer } from './geofence-layer';
+import { dashOf, geofenceLayer } from './geofence-layer';
 
 const geofence = (kind: Geofence['kind'], name = 'Depot'): Geofence => ({
   id: 'geofence-1',
@@ -10,6 +10,11 @@ const geofence = (kind: Geofence['kind'], name = 'Depot'): Geofence => ({
 });
 
 describe('geofenceLayer', () => {
+  it('gives an edited Exclusion the same dashed outline', () => {
+    expect(dashOf('Exclusion')).toBe(geofenceLayer(geofence('Exclusion')).options.dashArray);
+    expect(dashOf('Inclusion')).toBeUndefined();
+  });
+
   it('draws an Inclusion solid and an Exclusion dashed', () => {
     expect(geofenceLayer(geofence('Inclusion')).options.dashArray).toBeUndefined();
     expect(geofenceLayer(geofence('Exclusion')).options.dashArray).toBeTruthy();

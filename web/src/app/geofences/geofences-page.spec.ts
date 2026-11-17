@@ -6,14 +6,15 @@ import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
 import { AuthService } from '../auth/auth';
 import { AlertRule, GeoJsonPolygon, Geofence } from '../control-room/live';
-import { GeofenceEditor } from './geofence-editor';
+import { GeofenceDraft, GeofenceEditor } from './geofence-editor';
 import { GeofencesPage } from './geofences-page';
 
 /** Stands in for the Leaflet-Geoman map: a test emits what drawing and editing on the map would. */
 @Component({ selector: 'app-geofence-editor', template: '' })
 class FakeEditor {
   readonly geofences = input<Geofence[]>([]);
-  readonly draft = input<{ id: string | null; area: GeoJsonPolygon } | null>(null);
+  readonly draft = input<GeofenceDraft | null>(null);
+  readonly kind = input<Geofence['kind']>('Inclusion');
   readonly drawn = output<GeoJsonPolygon>();
   readonly changed = output<GeoJsonPolygon>();
 }
