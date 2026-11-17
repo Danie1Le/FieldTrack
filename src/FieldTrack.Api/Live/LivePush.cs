@@ -76,6 +76,19 @@ public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFact
     public Task AlertsUpdatedAsync(IReadOnlyCollection<Guid> alertIds, CancellationToken cancellationToken) =>
         PushAsync([], [], alertIds, cancellationToken);
 
+    /// <summary>Sends <see cref="LiveHub.GeofencesChanged"/>; call it once a Geofence create, edit or delete commits.</summary>
+    public async Task GeofencesChangedAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await hub.Clients.All.SendAsync(LiveHub.GeofencesChanged, cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            LogPushFailed(exception);
+        }
+    }
+
     [LoggerMessage(LogLevel.Warning, "Live push failed; dashboards catch up when they reload.")]
     private partial void LogPushFailed(Exception exception);
 }

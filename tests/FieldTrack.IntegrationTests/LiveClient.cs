@@ -55,6 +55,8 @@ internal sealed class LiveClient : IAsyncDisposable
             connection.On<JsonElement>(name, payload => client._received.Writer.TryWrite((name, payload)));
         }
 
+        connection.On(LiveHub.GeofencesChanged, () => client._received.Writer.TryWrite((LiveHub.GeofencesChanged, default)));
+
         connection.Closed += _ =>
         {
             client._closed.TrySetResult();

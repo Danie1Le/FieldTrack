@@ -7,7 +7,7 @@ namespace FieldTrack.Api.Live;
 /// <summary>
 /// The SignalR hub dashboards listen on for live changes; <see cref="LivePush"/> sends them after each change commits.
 /// Clients only listen, so it has no methods. Pushes carry no delivery guarantee: a dashboard that missed one, or
-/// reconnects, reloads <c>GET /assets/live</c> and <c>GET /alerts</c> (ADR 0005).
+/// reconnects, reloads <c>GET /assets/live</c>, <c>GET /alerts</c> and <c>GET /geofences</c> (ADR 0005).
 /// </summary>
 [Authorize(Policy = Policies.Read)]
 public sealed class LiveHub : Hub
@@ -23,4 +23,10 @@ public sealed class LiveHub : Hub
 
     /// <summary>Carries an Alert that was Acknowledged or Resolved, as <c>GET /alerts</c> shows it.</summary>
     public const string AlertUpdated = nameof(AlertUpdated);
+
+    /// <summary>
+    /// Carries nothing: a Geofence was created, edited or deleted, so dashboards reload <c>GET /geofences</c>. Edits are
+    /// rare and the list is small, so a reload is simpler than sending the change itself.
+    /// </summary>
+    public const string GeofencesChanged = nameof(GeofencesChanged);
 }
