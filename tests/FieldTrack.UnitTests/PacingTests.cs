@@ -39,11 +39,11 @@ public sealed class PacingTests
         {
             try
             {
-                await foreach (var at in pacing.DueTimesAsync(device, clock, startTimestamp, stop.Token))
+                await foreach (var owed in pacing.OwedAsync(device, clock, startTimestamp, stop.Token))
                 {
                     lock (due)
                     {
-                        due.Add((device, at));
+                        due.Add((device, owed.Due));
                     }
                 }
             }
@@ -56,6 +56,8 @@ public sealed class PacingTests
         // The aggregate Readings due after n wake-ups: reading k is due at k / rate, so those at or before the clock.
         for (var wake = 1; wake <= 64; wake++)
         {
+            // Every Device is waiting on its next timer before the clock moves, or a timer registered mid-advance would land a granule late.
+            await WaitForAsync(() => clock.PendingTimers == devices);
             clock.Advance(granule);
             var expected = (int)Math.Floor((granule * wake).TotalSeconds * rate) + 1;
             await WaitForAsync(() => { lock (due) { return due.Count >= expected; } });
@@ -71,6 +73,28 @@ public sealed class PacingTests
         {
             due.Select(reading => reading.At).Order().ShouldBe(Enumerable.Range(0, due.Count).Select(k => TimeSpan.FromSeconds(k / rate)), "every Reading, each at its slot");
             due.GroupBy(reading => reading.Device).Select(group => group.Count()).Max().ShouldBeLessThanOrEqualTo(due.Count / devices + 1);
+        }
+    }
+
+    [Fact(Timeout = 30_000)]
+    public async Task A_Device_more_than_a_second_behind_skips_the_oldest_Readings_and_says_how_many()
+    {
+        var pacing = new Pacing(devices: 1, ratePerSecond: 10);
+        var clock = new CoarseClock();
+        await using var owed = pacing.OwedAsync(0, clock, clock.GetTimestamp(), TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        (await Next()).ShouldBe(new OwedReading(TimeSpan.Zero, 0));
+
+        // The Device is busy publishing (a broker outage) while the clock runs 5 s on.
+        clock.Advance(TimeSpan.FromSeconds(5));
+
+        // Due 0.1 s .. 3.9 s (39 Readings) are older than the 1 s allowed; 4.0 s .. 5.0 s are kept.
+        (await Next()).ShouldBe(new OwedReading(TimeSpan.FromSeconds(4), 39));
+        (await Next()).ShouldBe(new OwedReading(TimeSpan.FromSeconds(4.1), 0));
+
+        async Task<OwedReading> Next()
+        {
+            (await owed.MoveNextAsync()).ShouldBeTrue();
+            return owed.Current;
         }
     }
 
@@ -102,6 +126,17 @@ public sealed class PacingTests
     {
         private readonly List<CoarseTimer> _timers = [];
         private long _now;
+
+        public int PendingTimers
+        {
+            get
+            {
+                lock (_timers)
+                {
+                    return _timers.Count;
+                }
+            }
+        }
 
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
