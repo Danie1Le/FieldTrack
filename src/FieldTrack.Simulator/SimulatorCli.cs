@@ -46,11 +46,17 @@ internal static class SimulatorCli
               A run refuses a working tree with uncommitted changes unless --allow-dirty true is given.
               Start the stack with bench/docker-compose.bench.yml. Exit code 3 means the run finished but missed its bar.
 
-          bench seed-history --fleet <file> --compose-project <name> [--routes <dir>] [--days 30] [--interval 480]
-              Seeds the fleet (fleets/bench.json has 200 Devices), then COPYs a Reading every --interval seconds (default 480) per Device
-              for --days (default 30) ending now, along the GPX routes in --routes (default src/FieldTrack.Simulator/fleets/routes),
-              bypassing MQTT: about 1.08 million Readings for the query benchmarks (#46). It also builds readings_unpartitioned, a copy with
-              the same indexes. Needs an empty database (docker compose down -v).
+          bench seed-history|geofence|history --compose-project <name> [--fleet <file> --routes <dir> --days 30 --interval 480 --vertices 5]
+              The query benchmarks (#46), on an empty database. `seed-history` seeds the fleet (200 Devices in fleets/bench.json), then
+              COPYs a Reading every --interval seconds (default 480) per Device for --days (default 30) ending now, along the GPX routes in
+              --routes (default src/FieldTrack.Simulator/fleets/routes), bypassing MQTT: about 1.08 million Readings. It also builds
+              readings_unpartitioned, a copy with the same indexes. `geofence` counts the Readings inside a Geofence holding about 1% of them with
+              the GiST index and with index scans off. The 50 ms bar (warm median with the index) applies to the headline shape only: a
+              square of --vertices positions (default 5, a fence drawn around a site). A 65-position circle of the same 1% is measured too and
+              reported without a bar. `history` reads one Asset's 24 hours from the partitioned and the unpartitioned table, requires the
+              same rows from both and reports the difference. Each records EXPLAIN (ANALYZE, BUFFERS) timings: a cold run, then the median
+              of 10 warm runs. `geofence` and `history` restart the compose postgres container before every cold run (the OS page cache is
+              not flushed).
 
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
         FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password.

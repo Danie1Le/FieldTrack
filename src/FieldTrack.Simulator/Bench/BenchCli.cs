@@ -18,9 +18,9 @@ internal static class BenchCli
     /// <exception cref="SimulatorException">The benchmark is unknown, an option is unusable, or the stack is not ready.</exception>
     public static async Task<bool> RunAsync(string kind, Options options, CancellationToken cancellationToken)
     {
-        if (kind is not ("throughput" or "flood" or "crash" or "duplicates" or "seed-history"))
+        if (kind is not ("throughput" or "flood" or "crash" or "duplicates" or "seed-history" or "geofence" or "history"))
         {
-            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates or seed-history.");
+            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates, seed-history, geofence or history.");
         }
 
         var rate = options.GetNumber("rate") ?? (kind == "crash" ? 500 : 2000);
@@ -42,9 +42,9 @@ internal static class BenchCli
             brokerHost, brokerPort, new BenchDatabase(dataSource), options.Get("state") ?? "simulator-state.json",
             options.Get("out") ?? Path.Combine("bench", "results"), composeProject);
 
-        if (kind == "seed-history")
+        if (kind is "seed-history" or "geofence" or "history")
         {
-            return Report(await SeedHistoryAsync(options, target, cancellationToken));
+            return await QueryAsync(kind, options, target, cancellationToken);
         }
 
         var fleet = FleetFile.Load(options.Require("fleet"));
@@ -60,7 +60,32 @@ internal static class BenchCli
         return Report(outcome);
     }
 
-    // 30 days of Device time, 200 Devices, a Reading every 8 minutes: 1.08 million Readings.
+    // The history is seeded once (30 days of Device time, 200 Devices, a Reading every 8 minutes: 1.08 million); geofence and history then read it.
+    private static async Task<bool> QueryAsync(string kind, Options options, BenchTarget target, CancellationToken cancellationToken)
+    {
+        var outcome = kind switch
+        {
+            "seed-history" => await SeedHistoryAsync(options, target, cancellationToken),
+            "geofence" => await GeofenceBench.RunAsync(
+                target, fraction: 0.01, Vertices(options.GetNumber("vertices")), QueryBench.WarmRuns, await PostgresRestartAsync(target, cancellationToken), Console.Out, cancellationToken),
+            _ => await HistoryBench.RunAsync(target, QueryBench.WarmRuns, await PostgresRestartAsync(target, cancellationToken), Console.Out, cancellationToken),
+        };
+        return Report(outcome);
+    }
+
+    // Fails before anything is restarted when --compose-project or --db point at the wrong database.
+    private static async Task<Func<CancellationToken, Task>> PostgresRestartAsync(BenchTarget target, CancellationToken cancellationToken) =>
+        (await DockerPostgres.FindAsync(target.ComposeProject, target.Database.DataSource, cancellationToken)).RestartAsync;
+
+    /// <summary>The geofence shape's position count from <c>--vertices</c>, defaulting to the headline square.</summary>
+    /// <exception cref="SimulatorException">The value is not a whole number.</exception>
+    internal static int Vertices(double? value) => value switch
+    {
+        null => GeofenceBench.SquareVertices,
+        { } number when double.IsInteger(number) => (int)Math.Clamp(number, -1, 100_000),
+        _ => throw new SimulatorException($"--vertices must be a whole number, got {value}."),
+    };
+
     private static async Task<BenchOutcome> SeedHistoryAsync(Options options, BenchTarget target, CancellationToken cancellationToken)
     {
         var fleet = FleetFile.Load(options.Require("fleet"));

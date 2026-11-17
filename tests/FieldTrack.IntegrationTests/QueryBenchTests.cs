@@ -32,8 +32,15 @@ public sealed class QueryBenchTests(FieldTrackFixture fixture) : IntegrationTest
     private readonly string _directory = Directory.CreateTempSubdirectory("fieldtrack-querybench-").FullName;
     private readonly NpgsqlDataSource _dataSource = NpgsqlDataSource.Create(fixture.DatabaseConnectionString);
 
-    private BenchTarget Target => new(
-        Fixture.BrokerHost, Fixture.BrokerPort, new BenchDatabase(_dataSource), Path.Combine(_directory, "state.json"), Path.Combine(_directory, "results"), "no-such-compose-project");
+    private readonly NpgsqlDataSource _noIndexDataSource = NpgsqlDataSource.Create(
+        new NpgsqlConnectionStringBuilder(fixture.DatabaseConnectionString) { Options = "-c enable_indexscan=off -c enable_indexonlyscan=off -c enable_bitmapscan=off" }.ConnectionString);
+
+    private BenchTarget Target => TargetOn(_dataSource);
+
+    private BenchTarget NoIndexTarget => TargetOn(_noIndexDataSource);
+
+    private BenchTarget TargetOn(NpgsqlDataSource dataSource) => new(
+        Fixture.BrokerHost, Fixture.BrokerPort, new BenchDatabase(dataSource), Path.Combine(_directory, "state.json"), Path.Combine(_directory, "results"), "no-such-compose-project");
 
     private async Task<BenchOutcome> SeedHistoryAsync()
     {
@@ -76,8 +83,106 @@ public sealed class QueryBenchTests(FieldTrackFixture fixture) : IntegrationTest
         again.Message.ShouldContain("not empty");
     }
 
+    [Fact]
+    public async Task The_geofence_bench_counts_the_Readings_in_an_area_of_about_one_percent_with_and_without_index_scans()
+    {
+        await SeedHistoryAsync();
+
+        var restarts = 0;
+        var outcome = await GeofenceBench.RunAsync(
+            Target, fraction: 0.01, GeofenceBench.SquareVertices, warmRuns: 10, _ => { restarts++; return Task.CompletedTask; }, TextWriter.Null, CancellationToken);
+
+        restarts.ShouldBe(4, "a restart before each timed arm of both shapes");
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("readings").GetInt64().ShouldBe(Readings);
+        var shapes = results.GetProperty("shapes").EnumerateArray().ToList();
+        shapes.Select(shape => shape.GetProperty("vertices").GetInt32()).ShouldBe([5, 65]);
+        shapes.Select(shape => shape.GetProperty("headline").GetBoolean()).ShouldBe([true, false], "the bar applies to the square");
+        foreach (var shape in shapes)
+        {
+            shape.GetProperty("inside").GetInt64().ShouldBeInRange(1, 20);
+            shape.GetProperty("fractionInside").GetDouble().ShouldBeInRange(0.001, 0.025);
+            shape.GetProperty("usedIndex").GetBoolean().ShouldBeTrue();
+            shape.GetProperty("withIndex").GetProperty("warmMs").GetArrayLength().ShouldBe(10);
+            shape.GetProperty("withIndex").GetProperty("cold").GetProperty("executionMs").GetDouble().ShouldBeGreaterThan(0);
+            var withoutIndex = shape.GetProperty("withoutIndex").GetProperty("cold").GetProperty("nodeTypes").EnumerateArray().Select(node => node.GetString()).ToList();
+            withoutIndex.ShouldContain("Seq Scan");
+            withoutIndex.ShouldNotContain(node => node!.Contains("Index", StringComparison.Ordinal), "the run without the GiST index must not use one");
+        }
+
+        outcome.Pass.ShouldBeTrue("a few hundred Readings are far inside the 50 ms bar");
+    }
+
+    [Fact]
+    public async Task The_geofence_bench_fails_when_the_run_with_the_index_did_not_use_one()
+    {
+        await SeedHistoryAsync();
+
+        // A database that plans without index scans (like the no-index arm does) makes "with the index" a Seq Scan: the timing would say nothing about the index.
+        var outcome = await GeofenceBench.RunAsync(NoIndexTarget, fraction: 0.01, GeofenceBench.SquareVertices, warmRuns: 3, _ => Task.CompletedTask, TextWriter.Null, CancellationToken);
+
+        outcome.Pass.ShouldBeFalse();
+        var shape = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results").GetProperty("shapes")[0];
+        shape.GetProperty("usedIndex").GetBoolean().ShouldBeFalse();
+        shape.GetProperty("failure").GetString()!.ShouldContain("did not use an index");
+    }
+
+    [Fact]
+    public async Task The_geofence_bench_refuses_a_shape_it_does_not_build()
+    {
+        await SeedHistoryAsync();
+
+        var refused = await Should.ThrowAsync<SimulatorException>(
+            () => GeofenceBench.RunAsync(Target, fraction: 0.01, vertices: 4, warmRuns: 3, _ => Task.CompletedTask, TextWriter.Null, CancellationToken));
+
+        refused.Message.ShouldContain("--vertices");
+    }
+
+    [Fact]
+    public async Task The_history_bench_reads_one_Assets_24_hours_from_both_tables_and_the_partitioned_plan_prunes_to_the_days_it_spans()
+    {
+        await SeedHistoryAsync();
+
+        var restarts = 0;
+        var outcome = await HistoryBench.RunAsync(Target, warmRuns: 10, _ => { restarts++; return Task.CompletedTask; }, TextWriter.Null, CancellationToken);
+
+        restarts.ShouldBe(2, "a restart before each table's timed runs");
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("rows").GetInt64().ShouldBe(96, "24 hours of one Reading per 15 minutes");
+        results.GetProperty("sameRows").GetBoolean().ShouldBeTrue();
+        results.GetProperty("partitionedRows").GetProperty("md5").GetString().ShouldNotBeNullOrEmpty();
+        results.GetProperty("partitionedFasterPercentCaveat").GetString()!.ShouldContain("96 rows");
+        var partitioned = results.GetProperty("partitioned");
+        var unpartitioned = results.GetProperty("unpartitioned");
+        partitioned.GetProperty("cold").GetProperty("rowsReturned").GetInt64().ShouldBe(96);
+        unpartitioned.GetProperty("cold").GetProperty("rowsReturned").GetInt64().ShouldBe(96);
+        partitioned.GetProperty("cold").GetProperty("relationsScanned").GetInt32().ShouldBeInRange(1, 2, "a 24 h window touches at most two daily partitions of the four");
+        unpartitioned.GetProperty("cold").GetProperty("relationsScanned").GetInt32().ShouldBe(1);
+        partitioned.GetProperty("warmMs").GetArrayLength().ShouldBe(10);
+        results.GetProperty("partitionedFasterPercent").ValueKind.ShouldBe(JsonValueKind.Number);
+        outcome.Pass.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task The_history_bench_fails_when_the_unpartitioned_copy_holds_other_Readings_in_the_same_number()
+    {
+        await SeedHistoryAsync();
+        await using (var command = _dataSource.CreateCommand("UPDATE readings_unpartitioned SET seq = seq + 100000"))
+        {
+            await command.ExecuteNonQueryAsync(CancellationToken);
+        }
+
+        var outcome = await HistoryBench.RunAsync(Target, warmRuns: 3, _ => Task.CompletedTask, TextWriter.Null, CancellationToken);
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("partitionedRows").GetProperty("count").GetInt64().ShouldBe(results.GetProperty("unpartitionedRows").GetProperty("count").GetInt64());
+        results.GetProperty("sameRows").GetBoolean().ShouldBeFalse();
+        outcome.Pass.ShouldBeFalse();
+    }
+
     public void Dispose()
     {
+        _noIndexDataSource.Dispose();
         // The shared database outlives this class: take back the old partitions and the copy so another test class does not meet them.
         using var command = _dataSource.CreateCommand("""
             DROP TABLE IF EXISTS readings_unpartitioned;
