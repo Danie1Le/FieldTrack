@@ -35,6 +35,14 @@ internal sealed record RunManifest(DateTimeOffset StartedAt, DateTimeOffset Ende
     public void Write(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        File.WriteAllText(path, JsonSerializer.Serialize(this, _json));
+        // Written to a temporary file and moved, so a crash mid-write cannot leave a truncated Manifest over a good one.
+        var temporary = path + ".tmp";
+        using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write))
+        {
+            JsonSerializer.Serialize(file, this, _json);
+            file.Flush(flushToDisk: true);
+        }
+
+        File.Move(temporary, path, overwrite: true);
     }
 }

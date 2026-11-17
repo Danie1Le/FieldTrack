@@ -483,4 +483,5 @@ $RECYCLE.BIN/
 
 # Simulator run output (state file with each Device Boot counter, run Manifests)
 simulator-state.json
+simulator-state.json.lock
 manifest-*.json

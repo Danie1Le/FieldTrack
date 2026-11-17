@@ -41,18 +41,38 @@ internal static class FleetRunner
 
         var startedAt = time.GetUtcNow();
         var startTimestamp = time.GetTimestamp();
+        RunManifest manifest;
         try
         {
-            await Task.WhenAll(devices.Select((device, index) => PublishAsync(device, index, pacing, options, log, time, startTimestamp, stop.Token, drain.Token)));
+            await Task.WhenAll(devices.Select((device, index) => RunDeviceAsync(device, index)));
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
             // The run is over, whether the duration passed or the developer cancelled it.
         }
+        finally
+        {
+            // Written however the run ends: what was acknowledged is still the benchmark's ground truth.
+            manifest = RunManifest.Of(startedAt, time.GetUtcNow(), options.RatePerSecond, devices);
+            manifest.Write(options.ManifestPath);
+        }
 
-        var manifest = RunManifest.Of(startedAt, time.GetUtcNow(), options.RatePerSecond, devices);
-        manifest.Write(options.ManifestPath);
         return manifest;
+
+        // A Device that fails stops the whole run rather than leave it running short-handed and silent.
+        async Task RunDeviceAsync(SimulatedDevice device, int index)
+        {
+            try
+            {
+                await PublishAsync(device, index, pacing, options, log, time, startTimestamp, stop.Token, drain.Token);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                await log.WriteLineAsync($"{device.Serial}: stopped ({exception.Message}); stopping the run");
+                await stop.CancelAsync();
+                throw;
+            }
+        }
     }
 
     private static async Task PublishAsync(

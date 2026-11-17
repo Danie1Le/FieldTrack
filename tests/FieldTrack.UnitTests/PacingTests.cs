@@ -30,6 +30,8 @@ public sealed class PacingTests
     [InlineData(3, -5)]
     [InlineData(3, double.NaN)]
     [InlineData(3, double.PositiveInfinity)]
+    [InlineData(1, 1e9)]
+    [InlineData(1, 1e-9)]
     public void A_fleet_or_rate_that_cannot_be_paced_is_refused(int devices, double rate)
     {
         Should.Throw<SimulatorException>(() => new Pacing(devices, rate));

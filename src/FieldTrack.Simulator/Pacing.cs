@@ -7,11 +7,17 @@ namespace FieldTrack.Simulator;
 /// </summary>
 internal readonly struct Pacing
 {
+    // PeriodicTimer takes 1 ms up to about 49.7 days.
+    private const double MinIntervalSeconds = 0.001;
+    private const double MaxIntervalSeconds = 4_000_000;
+
     private readonly int _devices;
     private readonly double _ratePerSecond;
 
     /// <summary>Paces <paramref name="devices"/> Devices to <paramref name="ratePerSecond"/> Readings per second in total.</summary>
-    /// <exception cref="SimulatorException">There is no Device, or the rate is not a positive number.</exception>
+    /// <exception cref="SimulatorException">
+    /// There is no Device, the rate is not a positive number, or it gives each Device an interval a timer cannot keep.
+    /// </exception>
     public Pacing(int devices, double ratePerSecond)
     {
         if (devices <= 0 || !double.IsFinite(ratePerSecond) || ratePerSecond <= 0)
@@ -20,6 +26,11 @@ internal readonly struct Pacing
         }
 
         (_devices, _ratePerSecond) = (devices, ratePerSecond);
+        if (devices / ratePerSecond is < MinIntervalSeconds or > MaxIntervalSeconds)
+        {
+            throw new SimulatorException(
+                $"--rate {ratePerSecond} gives each of the {devices} Devices a Reading every {devices / ratePerSecond:G3} s; it must be 1 ms to {MaxIntervalSeconds} s.");
+        }
     }
 
     /// <summary>The time between one Device's Readings.</summary>

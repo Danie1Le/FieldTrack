@@ -1,5 +1,4 @@
 using MQTTnet;
-using MQTTnet.Exceptions;
 using MQTTnet.Protocol;
 
 namespace FieldTrack.Simulator;
@@ -14,6 +13,8 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
     private static readonly TimeSpan _firstRetryDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan _longestRetryDelay = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _keepAlive = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _disconnectTimeout = TimeSpan.FromSeconds(1);
 
     private readonly string _host;
     private readonly int _port;
@@ -40,10 +41,13 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
         while (true)
         {
             string failure;
+            // MQTTnet's own timeout does not cover a broker that accepts TCP and then stays silent, so every attempt gets a deadline.
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attempt.CancelAfter(_timeout);
             try
             {
-                var client = await ConnectedAsync(cancellationToken);
-                var result = await client.PublishAsync(message, cancellationToken);
+                var client = await ConnectedAsync(attempt.Token);
+                var result = await client.PublishAsync(message, attempt.Token);
                 if (result.IsSuccess)
                 {
                     return;
@@ -51,8 +55,13 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
 
                 failure = $"the broker refused the publish: {result.ReasonCode}";
             }
-            catch (Exception exception) when (exception is MqttCommunicationException or MqttClientNotConnectedException or IOException or TimeoutException or InvalidOperationException)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                failure = $"no answer within {_timeout.TotalSeconds:0} s";
+            }
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Any failure is retried on a new connection: the network and MQTTnet throw too many kinds to list.
                 failure = exception.Message;
             }
 
@@ -70,11 +79,12 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
         {
             try
             {
-                await client.DisconnectAsync();
+                using var deadline = new CancellationTokenSource(_disconnectTimeout);
+                await client.DisconnectAsync(new MqttClientDisconnectOptions(), deadline.Token);
             }
-            catch (Exception exception) when (exception is MqttCommunicationException or IOException)
+            catch (Exception)
             {
-                // Already gone; nothing to close.
+                // A clean DISCONNECT is a courtesy; the connection is thrown away either way.
             }
         }
 
@@ -98,6 +108,8 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
                 .WithClientId($"fieldtrack-sim-{_name}-{Guid.NewGuid():N}")
                 .WithCleanStart()
                 .WithTimeout(_timeout)
+                // Short, so an idle connection to a broker that went silent is noticed before the next Reading.
+                .WithKeepAlivePeriod(_keepAlive)
                 .Build();
             // MQTTnet returns a refused CONNACK instead of throwing.
             var result = await client.ConnectAsync(options, cancellationToken);

@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using FieldTrack.Simulator;
 using MQTTnet;
@@ -86,6 +89,86 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
         await stop.CancelAsync();
 
         await Should.ThrowAsync<OperationCanceledException>(() => publishing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+    }
+
+    [Theory(Timeout = 30_000)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_broker_that_goes_silent_is_given_up_on_within_the_attempt_timeout(bool connAck)
+    {
+        // A half-open connection: TCP is accepted, then the broker never answers (no CONNACK, or no PUBACK after one).
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var accepted = new ConcurrentBag<TcpClient>();
+        _ = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                var connection = await listener.AcceptTcpClientAsync(stop.Token);
+                accepted.Add(connection);
+                if (connAck)
+                {
+                    await ConnAckAsync(connection.GetStream(), stop.Token);
+                }
+            }
+        }, stop.Token);
+        var log = new LogLines();
+        await using var publisher = new ReconnectingPublisher("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port, "silent", log);
+        var started = Stopwatch.StartNew();
+
+        var publishing = publisher.PublishAsync("fieldtrack/v1/devices/SILENT/telemetry", "x"u8.ToArray(), stop.Token);
+        while (log.Lines.IsEmpty && started.Elapsed < TimeSpan.FromSeconds(15))
+        {
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+
+        started.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(7));
+        log.Lines.ShouldContain(line => line.Contains("retrying"));
+        publishing.IsCompleted.ShouldBeFalse();
+        await stop.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(() => publishing);
+        foreach (var connection in accepted)
+        {
+            connection.Dispose();
+        }
+    }
+
+    // Reads the client's CONNECT and accepts it in the protocol version the client asked for.
+    private static async Task ConnAckAsync(NetworkStream stream, CancellationToken cancellationToken)
+    {
+        var header = new byte[1];
+        await stream.ReadExactlyAsync(header, cancellationToken);
+        int length = 0, shift = 0, next;
+        do
+        {
+            await stream.ReadExactlyAsync(header, cancellationToken);
+            next = header[0];
+            length |= (next & 0x7F) << shift;
+            shift += 7;
+        }
+        while ((next & 0x80) != 0);
+
+        var connect = new byte[length];
+        await stream.ReadExactlyAsync(connect, cancellationToken);
+        // Variable header: protocol name "MQTT" (2-byte length + 4 bytes), then the protocol level.
+        byte[] connAck = connect[6] == 5 ? [0x20, 0x03, 0x00, 0x00, 0x00] : [0x20, 0x02, 0x00, 0x00];
+        await stream.WriteAsync(connAck, cancellationToken);
+    }
+
+    private sealed class LogLines : TextWriter
+    {
+        public ConcurrentQueue<string> Lines { get; } = new();
+
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void WriteLine(string? value) => Lines.Enqueue(value ?? string.Empty);
+
+        public override Task WriteLineAsync(string? value)
+        {
+            WriteLine(value);
+            return Task.CompletedTask;
+        }
     }
 
     public void Dispose()
