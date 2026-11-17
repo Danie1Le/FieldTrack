@@ -31,6 +31,14 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<DateTimeOffset?>("AcknowledgedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("acknowledged_at");
+
+                    b.Property<Guid?>("AcknowledgedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("acknowledged_by");
+
                     b.Property<Guid>("AlertRuleId")
                         .HasColumnType("uuid")
                         .HasColumnName("alert_rule_id");
@@ -47,10 +55,19 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("from_backlog");
 
+                    b.Property<bool>("Latched")
+                        .HasColumnType("boolean")
+                        .HasColumnName("latched");
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("message");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("note");
 
                     b.Property<DateTimeOffset>("RaisedAt")
                         .HasColumnType("timestamp with time zone")
@@ -63,6 +80,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("ResolvedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("resolved_at");
+
+                    b.Property<Guid?>("ResolvedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by");
 
                     b.Property<string>("Severity")
                         .IsRequired()
@@ -94,11 +115,17 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_alerts");
 
+                    b.HasIndex("AcknowledgedBy")
+                        .HasDatabaseName("ix_alerts_acknowledged_by");
+
                     b.HasIndex("AlertRuleId")
                         .HasDatabaseName("ix_alerts_alert_rule_id");
 
                     b.HasIndex("RaisedAt")
                         .HasDatabaseName("ix_alerts_raised_at");
+
+                    b.HasIndex("ResolvedBy")
+                        .HasDatabaseName("ix_alerts_resolved_by");
 
                     b.HasIndex("AlertRuleId", "AssetId")
                         .IsUnique()
@@ -114,9 +141,13 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_alerts_resolve_reason", "resolve_reason IN ('Cleared', 'Manual', 'RuleChanged', 'RuleDisabled', 'AssetArchived', 'DeviceDetached')");
 
+                            t.HasCheckConstraint("ck_alerts_resolved_by", "(resolved_by IS NOT NULL) = (resolve_reason IS NOT DISTINCT FROM 'Manual') AND (resolved_by IS NOT NULL OR (note IS NULL AND NOT latched))");
+
                             t.HasCheckConstraint("ck_alerts_severity", "severity IN ('Warning', 'Critical')");
 
                             t.HasCheckConstraint("ck_alerts_status", "status IN ('Open', 'Acknowledged', 'Resolved')");
+
+                            t.HasCheckConstraint("ck_alerts_status_acknowledged", "(acknowledged_by IS NULL) = (acknowledged_at IS NULL) AND (status <> 'Open' OR acknowledged_at IS NULL) AND (status <> 'Acknowledged' OR acknowledged_at IS NOT NULL)");
                         });
                 });
 
@@ -399,6 +430,12 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("text")
                         .HasColumnName("concurrency_stamp");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("display_name");
 
                     b.Property<string>("Email")
                         .HasMaxLength(256)
@@ -709,6 +746,12 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("FieldTrack.Domain.Alerts.Alert", b =>
                 {
+                    b.HasOne("FieldTrack.Infrastructure.Identity.FieldTrackUser", null)
+                        .WithMany()
+                        .HasForeignKey("AcknowledgedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_alerts_users_acknowledged_by");
+
                     b.HasOne("FieldTrack.Domain.Alerts.AlertRule", null)
                         .WithMany()
                         .HasForeignKey("AlertRuleId")
@@ -722,6 +765,12 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_alerts_assets_asset_id");
+
+                    b.HasOne("FieldTrack.Infrastructure.Identity.FieldTrackUser", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_alerts_users_resolved_by");
                 });
 
             modelBuilder.Entity("FieldTrack.Domain.Alerts.AlertRule", b =>

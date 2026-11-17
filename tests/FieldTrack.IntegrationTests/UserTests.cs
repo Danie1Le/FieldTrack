@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using FieldTrack.Api.Auth;
+using FieldTrack.Infrastructure.Identity;
 using Microsoft.IdentityModel.JsonWebTokens;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
@@ -85,13 +87,17 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     }
 
     [Theory]
-    [InlineData("Viewer", AuthClient.TemporaryPassword)]
-    [InlineData("Operator", "short")]
-    public async Task Create_user_refuses_an_unknown_role_or_a_weak_password(string role, string temporaryPassword)
+    [InlineData("Viewer", AuthClient.TemporaryPassword, "Olivia")]
+    [InlineData("Operator", "short", "Olivia")]
+    [InlineData("Operator", AuthClient.TemporaryPassword, " ")]
+    // null: one character longer than MaxDisplayNameLength.
+    [InlineData("Operator", AuthClient.TemporaryPassword, null)]
+    public async Task Create_user_refuses_an_unknown_role_a_weak_password_or_a_blank_or_long_display_name(string role, string temporaryPassword, string? displayName)
     {
         using var admin = await AdminClientAsync();
 
-        using var response = await AuthClient.PostUserAsync(admin, OperatorEmail, role, temporaryPassword);
+        using var response = await AuthClient.PostUserAsync(
+            admin, OperatorEmail, role, temporaryPassword, displayName ?? new string('n', FieldTrackUser.MaxDisplayNameLength + 1));
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
@@ -110,15 +116,19 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     public async Task Admin_lists_users_with_their_roles_and_pending_password_changes()
     {
         using var admin = await AdminClientAsync();
-        await AuthClient.CreateUserAsync(admin, OperatorEmail, "Operator", OperatorPassword);
-        using var created = await AuthClient.PostUserAsync(admin, "new@fieldtrack.test", "Operator", AuthClient.TemporaryPassword);
+        await AuthClient.CreateUserAsync(admin, OperatorEmail, "Operator", OperatorPassword, "Olivia Operator");
+        using var created = await AuthClient.PostUserAsync(admin, "new@fieldtrack.test", "Operator", AuthClient.TemporaryPassword, "Nina New");
 
         var users = await admin.GetFromJsonAsync<JsonElement[]>("/users", CancellationToken);
 
         // The seeded Admin's false comes from IntegrationTest, which completes their first-sign-in change.
         users.ShouldNotBeNull()
-            .Select(user => (user.GetProperty("email").GetString(), user.GetProperty("role").GetString(), user.GetProperty("mustChangePassword").GetBoolean()))
-            .ShouldBe([(AdminEmail, "Admin", false), (OperatorEmail, "Operator", false), ("new@fieldtrack.test", "Operator", true)], ignoreOrder: true);
+            .Select(user => (user.GetProperty("email").GetString(), user.GetProperty("displayName").GetString(),
+                user.GetProperty("role").GetString(), user.GetProperty("mustChangePassword").GetBoolean()))
+            .ShouldBe([
+                (AdminEmail, UserSeeder.AdminDisplayName, "Admin", false),
+                (OperatorEmail, "Olivia Operator", "Operator", false),
+                ("new@fieldtrack.test", "Nina New", "Operator", true)], ignoreOrder: true);
     }
 
     [Fact]

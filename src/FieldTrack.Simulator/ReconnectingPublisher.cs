@@ -55,14 +55,13 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
 
                 failure = $"the broker refused the publish: {result.ReasonCode}";
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (Exception exception)
             {
-                failure = $"no answer within {_timeout.TotalSeconds:0} s";
-            }
-            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
-            {
-                // Any failure is retried on a new connection: the network and MQTTnet throw too many kinds to list.
-                failure = exception.Message;
+                // Cancelling can surface as any exception (MQTTnet wraps the aborted connect), and a connection error can land
+                // just after the cancel; either way the caller asked to stop, so it sees a cancellation and not the error.
+                cancellationToken.ThrowIfCancellationRequested();
+                // Any other failure is retried on a new connection: the network and MQTTnet throw too many kinds to list.
+                failure = exception is OperationCanceledException ? $"no answer within {_timeout.TotalSeconds:0} s" : exception.Message;
             }
 
             // The connection may be half-dead (the client has not noticed yet); start the next attempt on a fresh one.
