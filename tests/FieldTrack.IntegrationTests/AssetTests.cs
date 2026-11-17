@@ -107,6 +107,28 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
+    public async Task Deleting_an_Asset_with_an_Offline_Alert_but_no_Readings_Archives_it_so_the_Alert_keeps_its_Asset()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+        var rule = await CreateAsync(admin, "/alert-rules", new { name = "Generator silent", kind = "Offline", assetId = asset, severity = "Warning", offlineSeconds = 60 });
+        // A Device that never reported raises an Offline Alert without any Reading; ingest's sweep writes it.
+        await using (var database = await OpenDatabaseAsync())
+        {
+            await SqlAsync(database, """
+                INSERT INTO alerts (id, alert_rule_id, asset_id, severity, message, status, raised_at, created_at, from_backlog)
+                VALUES (gen_random_uuid(), @p0, @p1, 'Warning', 'No Reading received for 60 s', 'Open', now(), now(), false)
+                """, Guid.Parse(rule), Guid.Parse(asset));
+        }
+
+        using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
+        var withArchived = await ListAsync(admin, "/assets?includeArchived=true");
+
+        deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        withArchived.Select(Describe).ShouldBe([("Generator 1", "Generator", null, true)]);
+    }
+
+    [Fact]
     public async Task Deleting_an_unknown_Asset_is_not_found()
     {
         using var admin = await AdminClientAsync();

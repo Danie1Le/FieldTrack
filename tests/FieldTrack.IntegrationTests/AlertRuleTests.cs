@@ -37,6 +37,38 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Fact]
+    public async Task Admin_creates_an_Offline_rule_with_its_own_seconds_and_no_Threshold_settings()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+
+        var rule = await CreateAsync(admin, "/alert-rules", Silent(asset));
+        var created = await admin.GetFromJsonAsync<JsonElement>($"/alert-rules/{rule}", CancellationToken);
+        var threshold = await admin.GetFromJsonAsync<JsonElement>($"/alert-rules/{await CreateAsync(admin, "/alert-rules", Overheat(assetId: asset))}", CancellationToken);
+
+        created.GetProperty("kind").GetString().ShouldBe("Offline");
+        created.GetProperty("offlineSeconds").GetInt32().ShouldBe(60);
+        created.GetProperty("sensor").ValueKind.ShouldBe(JsonValueKind.Null);
+        created.GetProperty("threshold").ValueKind.ShouldBe(JsonValueKind.Null);
+        threshold.GetProperty("offlineSeconds").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Create_refuses_an_Offline_rule_without_a_positive_number_of_seconds()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+
+        foreach (var seconds in new int?[] { null, 0, -5 })
+        {
+            using var response = await admin.PostAsJsonAsync("/alert-rules", Silent(asset, seconds), CancellationToken);
+            response.StatusCode.ShouldBe(HttpStatusCode.BadRequest, $"{seconds}");
+        }
+
+        (await ListAsync(admin, "/alert-rules")).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_rule_may_target_an_Asset_Group()
     {
         using var admin = await AdminClientAsync();
@@ -193,6 +225,9 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
 
     private static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>
         new("Engine overheat", "Threshold", assetId, assetGroupId, "Critical", true, "EngineTempC", "GreaterThan", 105, 5);
+
+    private static object Silent(string assetId, int? offlineSeconds = 60) =>
+        new { name = "Generator silent", kind = "Offline", assetId, severity = "Warning", offlineSeconds };
 
     // Ingest is the only writer of Alerts; these API tests place one directly.
     private async Task<Guid> InsertAlertAsync(string rule, string asset, string status, DateTimeOffset? raisedAt = null)

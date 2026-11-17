@@ -72,8 +72,8 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
 
     /// <summary>
     /// Deletes an Asset with no history outright, with its Attachments, so mistakes are easy to clean
-    /// up. An Asset with history (Readings) is Archived instead and its open Attachment ended, which
-    /// keeps the history and hides it from lists.
+    /// up. An Asset with history (Readings, or Alerts: an Offline Alert needs no Reading) is Archived instead and its
+    /// open Attachment ended, which keeps the history and hides it from lists.
     /// </summary>
     /// <response code="404">No Asset has this id.</response>
     [HttpDelete("{id:guid}")]
@@ -91,7 +91,8 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             return NotFound();
         }
 
-        if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken))
+        // Ingest's sweep holds the Asset row (FOR KEY SHARE) while it raises an Offline Alert, so this sees that Alert.
+        if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken) || await db.Alerts.AnyAsync(alert => alert.AssetId == id, cancellationToken))
         {
             asset.Archived = true;
             await db.EndOpenAttachmentsAsync(attachment => attachment.AssetId == id, time.GetUtcNow(), cancellationToken);
