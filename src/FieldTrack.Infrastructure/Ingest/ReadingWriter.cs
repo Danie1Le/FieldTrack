@@ -193,12 +193,10 @@ public sealed class ReadingWriter : IAsyncDisposable
 
     private readonly NpgsqlConnection _connection;
     private readonly AlertRuleRunner _rules;
-    private readonly TimeProvider _time;
     private readonly IIngestCrashPoints? _crashes;
-    private DateTimeOffset _lastSweep;
 
-    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules, TimeProvider time, IIngestCrashPoints? crashes) =>
-        (_connection, _rules, _time, _crashes, _lastSweep) = (connection, rules, time, crashes, time.GetUtcNow());
+    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules, IIngestCrashPoints? crashes) =>
+        (_connection, _rules, _crashes) = (connection, rules, crashes);
 
     /// <summary>
     /// Opens a connection from <paramref name="dataSource"/>, prepares its stage table and loads the rule state.
@@ -212,7 +210,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         {
             await using var command = new NpgsqlCommand(CreateStage, connection);
             await command.ExecuteNonQueryAsync(cancellationToken);
-            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken), time, crashes);
+            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken), crashes);
         }
         catch
         {
@@ -325,12 +323,17 @@ public sealed class ReadingWriter : IAsyncDisposable
     }
 
     /// <summary>
-    /// One sweep (ADR 0005), run between batches on the ingest loop so it never races one: raises the Offline Alerts
-    /// due (none before <paramref name="caughtUpAt"/>, when ingest caught up with the broker backlog), and returns them
-    /// with the Assets that turned Offline since the last sweep, for the live push. Asset Status is computed on read, so
-    /// nothing is stored for those; only the dashboards need telling.
+    /// One sweep (ADR 0005) at <paramref name="at"/>, run between batches on the ingest loop so it never races one, after
+    /// every message received up to <paramref name="at"/> is stored: raises the Offline Alerts due (none before
+    /// <paramref name="caughtUpAt"/>, when ingest caught up with the broker backlog), and returns them with the Assets that
+    /// turned Offline in (<paramref name="since"/>, <paramref name="at"/>], for the live push. Asset Status is computed on
+    /// read, so nothing is stored for those; only the dashboards need telling.
     /// </summary>
-    public async Task<WrittenBatch> SweepAsync(DateTimeOffset? caughtUpAt, CancellationToken cancellationToken)
+    /// <param name="since">The previous sweep's time, kept across ingest sessions so no Asset's turn is missed.</param>
+    /// <param name="at">The sweep time.</param>
+    /// <param name="caughtUpAt">When this ingest session caught up with the broker backlog, or null.</param>
+    /// <param name="cancellationToken">Cancels the sweep.</param>
+    public async Task<WrittenBatch> SweepAsync(DateTimeOffset since, DateTimeOffset at, DateTimeOffset? caughtUpAt, CancellationToken cancellationToken)
     {
         var assets = new List<AttachedAsset>();
         List<AlertRule> rules;
@@ -348,15 +351,13 @@ public sealed class ReadingWriter : IAsyncDisposable
         }
 
         // Each Asset is pushed once, by the sweep that first sees it Offline: the instant lies in (last sweep, now].
-        var (since, now) = (_lastSweep, _time.GetUtcNow());
-        _lastSweep = now;
         Guid[] turnedOffline =
         [
             .. assets.Where(asset => AssetStatuses.OfflineFrom(asset.AttachedAt, asset.LastReceivedAt) is var offlineFrom
-                                     && since < offlineFrom && offlineFrom <= now)
+                                     && since < offlineFrom && offlineFrom <= at)
                 .Select(asset => asset.AssetId),
         ];
-        var raised = await _rules.SweepAsync(_connection, rules, assets, caughtUpAt, cancellationToken);
+        var raised = await _rules.SweepAsync(_connection, rules, assets, at, caughtUpAt, cancellationToken);
         return new WrittenBatch([], 0, 0, turnedOffline, raised, []);
     }
 

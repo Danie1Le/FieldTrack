@@ -1,12 +1,14 @@
 using System.Text.Json;
+using FieldTrack.Api.Ingest;
 using FieldTrack.Api.Live;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Time.Testing;
 
 namespace FieldTrack.IntegrationTests;
 
 /// <summary>
 /// The ingest worker's 1 s sweep (ADR 0005), driven by a <see cref="FakeTimeProvider"/> stepped one second at a time:
-/// each step is one sweep, so the sweep time an Alert records says which tick raised it.
+/// each step waits for its sweep, so the sweep time an Alert records says which tick raised it.
 /// </summary>
 public sealed class OfflineAlertTests(FieldTrackFixture fixture) : AlertTest(fixture)
 {
@@ -22,7 +24,7 @@ public sealed class OfflineAlertTests(FieldTrackFixture fixture) : AlertTest(fix
 
         await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, time.GetUtcNow()));
         var lastReceivedAt = await LastReceivedAtAsync(admin);
-        var raised = await StepUntilAsync(time, () => ListAsync(admin, "/alerts"), alerts => alerts.Length > 0);
+        var raised = await StepUntilAsync(api, time, () => ListAsync(admin, "/alerts"), alerts => alerts.Length > 0);
         await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 1, time.GetUtcNow()));
         var resolved = await EventuallyAsync(() => ListAsync(admin, "/alerts"), alerts => alerts.Single().GetProperty("status").GetString() == "Resolved");
 
@@ -50,13 +52,63 @@ public sealed class OfflineAlertTests(FieldTrackFixture fixture) : AlertTest(fix
             await SqlAsync(database, "UPDATE devices SET last_received_at = now() - interval '1 hour' WHERE id = @p0", Guid.Parse(device));
         }
 
-        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
-        var startedAt = time.GetUtcNow();
+        // Whole seconds, so the database's microseconds lose nothing.
+        var startedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var time = new FakeTimeProvider(startedAt);
         await using var api = await StartIngestAsync(time);
-        var raised = await StepUntilAsync(time, () => ListAsync(admin, "/alerts"), alerts => alerts.Length > 0);
+        await ConnectedAsync();
+        var raised = await StepUntilAsync(api, time, () => ListAsync(admin, "/alerts"), alerts => alerts.Length > 0);
 
-        // The first sweep, 1 s in, finds no backlog waiting; the rule's 60 s count from there.
-        raised.ShouldHaveSingleItem().GetProperty("raisedAt").GetDateTimeOffset().ShouldBeInRange(startedAt.AddSeconds(61), startedAt.AddSeconds(62));
+        // The empty broker queue comes back at once, at the start; the rule's 60 s count from there.
+        raised.ShouldHaveSingleItem().GetProperty("raisedAt").GetDateTimeOffset().ShouldBeInRange(startedAt.AddSeconds(60), startedAt.AddSeconds(61));
+    }
+
+    [Fact]
+    public async Task Readings_queued_while_ingest_was_down_hold_off_Offline_Alerts_until_the_backlog_is_stored()
+    {
+        // More than the 2 x BatchSize messages the broker keeps in flight, so part of the backlog waits in its queue.
+        const int PerDevice = 1_200;
+        string[] serials = ["GEN-001", "GEN-002"];
+        using var admin = await AdminClientAsync();
+        foreach (var serial in serials)
+        {
+            var (_, asset) = await AttachedDeviceAsync(admin, serial);
+            await CreateAsync(admin, "/alert-rules", Silent(asset, offlineSeconds: 1));
+        }
+
+        // Both Devices have been silent for an hour as far as the database knows: ingest was down.
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, "UPDATE attachments SET attached_at = now() - interval '2 hours'");
+        await SqlAsync(database, "UPDATE devices SET last_received_at = now() - interval '1 hour'");
+        var clientId = NewIngestClientId();
+        await TelemetryPublisher.CreateIngestSessionAsync(Fixture, clientId);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        await using (var publisher = await TelemetryPublisher.ConnectAsync(Fixture))
+        {
+            for (var seq = 0; seq < PerDevice; seq++)
+            {
+                foreach (var serial in serials)
+                {
+                    await publisher.PublishAsync(serial, TelemetryPublisher.Payload(1, seq, time.GetUtcNow()));
+                }
+            }
+        }
+
+        await using var api = await StartIngestAsync(time, clientId);
+        await EventuallyAsync(() => SqlAsync(database, "SELECT count(*) FROM readings"), count => (long)count! > 0);
+        // A sweep every fake second while the backlog drains, until each Device has its Offline Alert.
+        var alerts = await StepUntilAsync(api, time, async () => (await SqlAsync(database, "SELECT count(*) FROM readings"), await ListAsync(admin, "/alerts")),
+            state => (long)state.Item1! == serials.Length * PerDevice && state.Item2.Length == serials.Length);
+
+        // One Alert per Device, never resolved by a backlog Reading and raised again: each came only once its Device's
+        // last queued Reading was stored, and the rule's 1 s had passed since.
+        foreach (var alert in alerts.Item2)
+        {
+            alert.GetProperty("status").GetString().ShouldBe("Open");
+            var lastReceived = (DateTime)(await SqlAsync(database, "SELECT max(received_time) FROM readings WHERE asset_id = @p0",
+                Guid.Parse(alert.GetProperty("assetId").GetString()!)))!;
+            alert.GetProperty("raisedAt").GetDateTimeOffset().ShouldBeGreaterThanOrEqualTo(new DateTimeOffset(lastReceived, TimeSpan.Zero).AddSeconds(1));
+        }
     }
 
     [Fact]
@@ -72,7 +124,7 @@ public sealed class OfflineAlertTests(FieldTrackFixture fixture) : AlertTest(fix
         var lastReceivedAt = await LastReceivedAtAsync(admin);
 
         var offline = live.NextAsync(LiveHub.AssetsUpdated, assets => assets.EnumerateArray().Any(a => a.GetProperty("status").GetString() == "Offline"));
-        await StepUntilAsync(time, () => Task.FromResult(offline.IsCompleted), completed => completed);
+        await StepUntilAsync(api, time, () => Task.FromResult(offline.IsCompleted), completed => completed);
 
         var pushed = (await offline).EnumerateArray().ShouldHaveSingleItem();
         pushed.GetProperty("id").GetString().ShouldBe(asset);
@@ -80,20 +132,28 @@ public sealed class OfflineAlertTests(FieldTrackFixture fixture) : AlertTest(fix
         time.GetUtcNow().ShouldBeGreaterThanOrEqualTo(lastReceivedAt.AddSeconds(120));
     }
 
-    private static object Silent(string assetId) =>
-        new { name = "Generator silent", kind = "Offline", assetId, severity = "Critical", offlineSeconds = 60 };
-
     private static async Task<DateTimeOffset> LastReceivedAtAsync(HttpClient admin) =>
         (await EventuallyAsync(() => ListAsync(admin, "/devices"), devices => devices.Single().GetProperty("lastReceivedAt").ValueKind != JsonValueKind.Null))
         .Single().GetProperty("lastReceivedAt").GetDateTimeOffset();
 
-    // One fake second per step, so the worker sweeps once per step; the short real pause lets that sweep finish first.
-    private static async Task<T> StepUntilAsync<T>(FakeTimeProvider time, Func<Task<T>> read, Func<T, bool> done)
+    // A message from an unknown Device is stored as a Rejected message once the worker is connected and storing.
+    private async Task ConnectedAsync()
     {
-        for (var step = 0; step < 300; step++)
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        await publisher.PublishAsync("NOBODY", TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+        await using var database = await OpenDatabaseAsync();
+        (await EventuallyAsync(() => SqlAsync(database, "SELECT count(*) FROM rejected_messages"), count => (long)count! > 0)).ShouldBe(1L);
+    }
+
+    // One fake second per step, each waiting for the worker's sweep at that second (the sweeps counter), so no step
+    // overtakes a slow sweep. Call it once the worker is connected: it sweeps only from then.
+    private static async Task<T> StepUntilAsync<T>(WebApplicationFactory<Program> api, FakeTimeProvider time, Func<Task<T>> read, Func<T, bool> done)
+    {
+        using var sweeps = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.SweepsInstrument);
+        for (var step = 1; step <= 300; step++)
         {
             time.Advance(TimeSpan.FromSeconds(1));
-            await Task.Delay(20, CancellationToken);
+            (await EventuallyAsync(() => Task.FromResult(sweeps.Total), total => total >= step)).ShouldBe(step);
             var value = await read();
             if (done(value))
             {

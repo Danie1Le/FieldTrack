@@ -17,8 +17,8 @@ Readings drive rules per Asset in (Boot, Sequence number) order, and only when t
   - Offline Alerts use the sweep time.
 - **Offline detection:**
   - Each batch updates `LastReceivedAt` on every Device that sent Readings.
-  - The worker keeps these in memory and sweeps every 1 s on the same loop as batch processing, so the sweep never races a batch.
-  - After a worker start, no Offline Alert is raised until the broker backlog has drained and the rule's OfflineSeconds have passed.
+  - The worker sweeps every 1 s, at a fixed rate, on the same loop as batch processing, so the sweep never races a batch. It reads `LastReceivedAt` from the devices row that the batches on that loop write. Before a sweep it stores every message received up to the sweep time, so a waiting Reading is never taken for silence.
+  - After a worker start, no Offline Alert is raised until the broker backlog has drained and the rule's OfflineSeconds have passed. The worker knows the backlog has drained when a marker it publishes to its own session on connect comes back: Mosquitto keeps one queue per session, so the marker arrives behind every message queued before it.
 - **Rule and Geofence edits** bump a version row in the edit's transaction. The worker checks the version before each batch and reloads when it moved.
 - **Manual against platform resolve:** both use a conditional update (only when not yet Resolved); the first wins and the other is a no-op.
 

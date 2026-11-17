@@ -160,18 +160,18 @@ public sealed class AlertRuleRunner
     /// <summary>
     /// The sweep for Offline rules (ADR 0005): checks <paramref name="rules"/>, the enabled Offline rules, against each
     /// of <paramref name="assets"/>, the Assets in use with a Device attached, and raises an Offline Alert for each that
-    /// has been silent for the rule's seconds, in a transaction of its own over <paramref name="connection"/>. Nothing is
-    /// raised before <paramref name="caughtUpAt"/>, when ingest caught up with the broker backlog. Returns the ids of the
-    /// Alerts raised.
+    /// has been silent for the rule's seconds at <paramref name="at"/>, the sweep time, in a transaction of its own over
+    /// <paramref name="connection"/>. Nothing is raised before <paramref name="caughtUpAt"/>, when ingest caught up with the
+    /// broker backlog. Returns the ids of the Alerts raised.
     /// </summary>
     public async Task<IReadOnlyList<Guid>> SweepAsync(
-        NpgsqlConnection connection, IReadOnlyList<AlertRule> rules, IReadOnlyList<AttachedAsset> assets, DateTimeOffset? caughtUpAt,
-        CancellationToken cancellationToken)
+        NpgsqlConnection connection, IReadOnlyList<AlertRule> rules, IReadOnlyList<AttachedAsset> assets, DateTimeOffset at,
+        DateTimeOffset? caughtUpAt, CancellationToken cancellationToken)
     {
         var raises = new List<(AlertRule Rule, Guid AssetId, RuleEvaluation Evaluation)>();
         foreach (var asset in assets)
         {
-            var tick = new SweepTick(asset.AttachedAt, asset.LastReceivedAt, caughtUpAt);
+            var tick = new SweepTick(at, asset.AttachedAt, asset.LastReceivedAt, caughtUpAt);
             foreach (var rule in rules.Where(rule => rule.Targets(asset.AssetId, asset.AssetGroupId)))
             {
                 var evaluation = RuleEvaluator.Sweep(rule, asset.AssetId, _states.GetValueOrDefault((rule.Id, asset.AssetId)), tick, _time);
