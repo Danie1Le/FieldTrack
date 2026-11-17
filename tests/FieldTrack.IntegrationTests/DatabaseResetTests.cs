@@ -28,6 +28,16 @@ public sealed class DatabaseResetTests(FieldTrackFixture fixture) : IntegrationT
         }
     }
 
+    [Fact]
+    public async Task Reset_keeps_the_one_Alert_Rule_version_row()
+    {
+        await using var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
+        await connection.OpenAsync(CancellationToken);
+
+        // IntegrationTest has reset the database before this test.
+        (await CountAsync(connection, "alert_rule_version")).ShouldBe(1);
+    }
+
     private static async Task ExecuteAsync(NpgsqlConnection connection, string sql)
     {
         await using var command = new NpgsqlCommand(sql, connection);
