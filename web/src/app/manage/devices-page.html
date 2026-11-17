@@ -28,7 +28,7 @@
       </form>
     }
 
-    @for (session of attaching.sessions(); track session) {
+    @for (session of attaching.sessions(); track session.id) {
       @let device = session.item;
       <form (submit)="$event.preventDefault(); attach($any($event.target))">
         <h3>Attach {{ device.serialNumber }}</h3>
