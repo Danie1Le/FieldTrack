@@ -96,6 +96,10 @@ _Avoid_: Ack, accept, claim
 To end an Alert, done by the platform when its condition clears or by a user at any time; a Resolved Alert never reopens.
 _Avoid_: Close, dismiss, clear
 
+**Latch**:
+What holds an Alert Rule quiet after a user Resolves its Alert while the condition still holds: the rule raises nothing new for that Asset until the condition clears and breaches again.
+_Avoid_: Snooze, mute, suppression
+
 **Hysteresis**:
 The margin a sensor value must move back past a threshold before a threshold Alert resolves itself, so a value hovering at the threshold does not raise Alert after Alert.
 _Avoid_: Deadband, tolerance, buffer
