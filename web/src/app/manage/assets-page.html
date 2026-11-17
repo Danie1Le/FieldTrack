@@ -1,0 +1,115 @@
+@if (changes.problems().length) {
+  <ul class="problems" role="alert">
+    @for (problem of changes.problems(); track $index) {
+      <li>{{ problem }}</li>
+    }
+  </ul>
+}
+
+<div class="sections">
+  <section class="panel" aria-label="Assets">
+    <header>
+      <h2>Assets</h2>
+      <button type="button" class="btn" (click)="cancel(); assetForm.open('new')">New Asset</button>
+    </header>
+
+    @for (session of assetForm.sessions(); track session.id) {
+      @let asset = session.item === 'new' ? null : session.item;
+      <form (submit)="$event.preventDefault(); saveAsset($any($event.target))">
+        <h3>{{ asset ? 'Edit ' + asset.name : 'New Asset' }}</h3>
+        <label>Name <input name="name" required maxlength="200" [value]="asset?.name ?? ''" /></label>
+        <label>
+          Asset Type
+          <select name="type">
+            @for (type of assetTypes; track type) {
+              <option [value]="type" [selected]="type === asset?.type">{{ type }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          Asset Group
+          <select name="assetGroupId">
+            <option value="">None</option>
+            @for (group of groups(); track group.id) {
+              <option [value]="group.id" [selected]="group.id === asset?.assetGroupId">{{ group.name }}</option>
+            }
+          </select>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-solid" [disabled]="changes.busy()">Save</button>
+          <button type="button" class="btn" (click)="cancel()">Cancel</button>
+        </div>
+      </form>
+    }
+
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Type</th><th>Asset Group</th><th><span class="sr-only">Actions</span></th></tr>
+      </thead>
+      <tbody>
+        @for (asset of inUse(); track asset.id) {
+          <tr>
+            <td>{{ asset.name }}</td>
+            <td>{{ asset.type }}</td>
+            <td>{{ groupName(asset.assetGroupId) }}</td>
+            <td class="actions">
+              <button type="button" class="btn" (click)="cancel(); assetForm.open(asset)">Edit</button>
+              <app-confirm-action
+                label="Delete"
+                [question]="'Delete ' + asset.name + '? With Readings or Alerts it is Archived instead: kept with its history, its Alert Rules disabled, its Device detached and its Active Alerts resolved.'"
+                [disabled]="changes.busy()"
+                (confirmed)="removeAsset(asset)"
+              />
+            </td>
+          </tr>
+        } @empty {
+          <tr><td colspan="4" class="muted">{{ inUse() ? 'No Assets yet.' : 'Loading…' }}</td></tr>
+        }
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel" aria-label="Asset Groups">
+    <header>
+      <h2>Asset Groups</h2>
+      <button type="button" class="btn" (click)="cancel(); groupForm.open('new')">New Asset Group</button>
+    </header>
+
+    @for (session of groupForm.sessions(); track session.id) {
+      @let group = session.item === 'new' ? null : session.item;
+      <form (submit)="$event.preventDefault(); saveGroup($any($event.target))">
+        <h3>{{ group ? 'Rename ' + group.name : 'New Asset Group' }}</h3>
+        <label>Name <input name="groupName" required maxlength="200" [value]="group?.name ?? ''" /></label>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-solid" [disabled]="changes.busy()">Save</button>
+          <button type="button" class="btn" (click)="cancel()">Cancel</button>
+        </div>
+      </form>
+    }
+
+    <table>
+      <thead>
+        <tr><th>Name</th><th class="num">Assets</th><th><span class="sr-only">Actions</span></th></tr>
+      </thead>
+      <tbody>
+        @for (group of groups(); track group.id) {
+          <tr>
+            <td>{{ group.name }}</td>
+            <td class="num mono">{{ assetsIn(group) }}</td>
+            <td class="actions">
+              <button type="button" class="btn" (click)="cancel(); groupForm.open(group)">Rename</button>
+              <app-confirm-action
+                label="Delete"
+                [question]="'Delete ' + group.name + '? Only a group no Asset or Alert Rule names can go.'"
+                [disabled]="changes.busy()"
+                (confirmed)="removeGroup(group)"
+              />
+            </td>
+          </tr>
+        } @empty {
+          <tr><td colspan="3" class="muted">No Asset Groups yet.</td></tr>
+        }
+      </tbody>
+    </table>
+  </section>
+</div>

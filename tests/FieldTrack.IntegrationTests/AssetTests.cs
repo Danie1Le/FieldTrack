@@ -33,6 +33,100 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
+    public async Task Admin_deletes_an_Asset_Group_that_nothing_names()
+    {
+        using var admin = await AdminClientAsync();
+        var quarry = await CreateAsync(admin, "/asset-groups", new { name = "North quarry" });
+        await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+
+        using var deleted = await admin.DeleteAsync($"/asset-groups/{quarry}", CancellationToken);
+        using var unknown = await admin.DeleteAsync($"/asset-groups/{Guid.NewGuid()}", CancellationToken);
+        var groups = await ListAsync(admin, "/asset-groups");
+
+        deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        groups.Select(group => group.GetProperty("name").GetString()).ShouldBe(["Depot"]);
+    }
+
+    [Fact]
+    public async Task Deleting_an_Asset_Group_is_refused_while_an_Asset_Archived_or_not_or_an_Alert_Rule_names_it()
+    {
+        using var admin = await AdminClientAsync();
+        var withAsset = await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+        var withArchived = await CreateAsync(admin, "/asset-groups", new { name = "Old depot" });
+        var withRule = await CreateAsync(admin, "/asset-groups", new { name = "North quarry" });
+        await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck", assetGroupId = withAsset });
+        var archived = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator", assetGroupId = withArchived });
+        await using (var database = await OpenDatabaseAsync())
+        {
+            await SqlAsync(database, "UPDATE assets SET archived = true WHERE id = @p0", Guid.Parse(archived));
+        }
+
+        await CreateAsync(admin, "/alert-rules", Overheat(assetGroupId: withRule));
+
+        foreach (var group in new[] { withAsset, withArchived, withRule })
+        {
+            using var refused = await admin.DeleteAsync($"/asset-groups/{group}", CancellationToken);
+            refused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        }
+
+        (await ListAsync(admin, "/asset-groups")).Length.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task An_Asset_Group_deleted_while_an_Asset_joins_it_waits_and_is_refused()
+    {
+        using var admin = await AdminClientAsync();
+        var group = await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+        await using var other = await OpenDatabaseAsync();
+        await using var joining = await other.BeginTransactionAsync(CancellationToken);
+        await SqlAsync(other, "INSERT INTO assets (id, name, type, asset_group_id, archived) VALUES (gen_random_uuid(), 'Haul truck 7', 'Truck', @p0, false)", Guid.Parse(group));
+
+        var delete = admin.DeleteAsync($"/asset-groups/{group}", CancellationToken);
+        await LockWaitsAsync(1);
+        await joining.CommitAsync(CancellationToken);
+
+        using var deleted = await delete;
+        deleted.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task An_Asset_that_joins_an_Asset_Group_while_it_is_deleted_is_refused_as_an_unknown_group()
+    {
+        using var admin = await AdminClientAsync();
+        var group = await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+        await using var other = await OpenDatabaseAsync();
+        await using var deleting = await other.BeginTransactionAsync(CancellationToken);
+        await SqlAsync(other, "DELETE FROM asset_groups WHERE id = @p0", Guid.Parse(group));
+
+        var create = PostAssetAsync(admin, new { name = "Haul truck 7", type = "Truck", assetGroupId = group });
+        await LockWaitsAsync(1);
+        await deleting.CommitAsync(CancellationToken);
+
+        using var created = await create;
+        created.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await ListAsync(admin, "/assets?includeArchived=true")).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Renaming_an_Asset_Group_while_it_is_deleted_finds_no_group()
+    {
+        using var admin = await AdminClientAsync();
+        var group = await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+        await using var other = await OpenDatabaseAsync();
+        await using var deleting = await other.BeginTransactionAsync(CancellationToken);
+        await SqlAsync(other, "DELETE FROM asset_groups WHERE id = @p0", Guid.Parse(group));
+
+        var rename = admin.PutAsJsonAsync($"/asset-groups/{group}", new { name = "Main depot" }, CancellationToken);
+        await LockWaitsAsync(1);
+        await deleting.CommitAsync(CancellationToken);
+
+        using var renamed = await rename;
+        renamed.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await ListAsync(admin, "/asset-groups")).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Admin_edits_an_Asset_and_moves_it_between_Asset_Groups()
     {
         using var admin = await AdminClientAsync();
@@ -162,11 +256,12 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         using var deleteAsset = await client.DeleteAsync($"/assets/{asset}", CancellationToken);
         using var createGroup = await client.PostAsJsonAsync("/asset-groups", new { name = "Quarry" }, CancellationToken);
         using var renameGroup = await client.PutAsJsonAsync($"/asset-groups/{group}", new { name = "Renamed" }, CancellationToken);
+        using var deleteGroup = await client.DeleteAsync($"/asset-groups/{group}", CancellationToken);
 
         assets.Select(Describe).ShouldBe([("Haul truck 7", "Truck", group, false)]);
         Describe(one).ShouldBe(("Haul truck 7", "Truck", group, false));
         groups.StatusCode.ShouldBe(HttpStatusCode.OK);
-        new[] { createAsset, editAsset, deleteAsset, createGroup, renameGroup }
+        new[] { createAsset, editAsset, deleteAsset, createGroup, renameGroup, deleteGroup }
             .Select(response => response.StatusCode)
             .ShouldAllBe(status => status == HttpStatusCode.Forbidden);
     }

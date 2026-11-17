@@ -6,6 +6,7 @@ using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace FieldTrack.Api.Assets;
 
@@ -51,7 +52,11 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
 
         var asset = new Asset { Name = request.Name, Type = request.Type!.Value, AssetGroupId = request.AssetGroupId };
         db.Assets.Add(asset);
-        await db.SaveChangesAsync(cancellationToken);
+        if (!await TrySaveAsync(cancellationToken))
+        {
+            return UnknownAssetGroup();
+        }
+
         return StatusCode(StatusCodes.Status201Created, ToResponse(asset));
     }
 
@@ -78,7 +83,11 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
         asset.Name = request.Name;
         asset.Type = request.Type!.Value;
         asset.AssetGroupId = request.AssetGroupId;
-        await db.SaveChangesAsync(cancellationToken);
+        if (!await TrySaveAsync(cancellationToken))
+        {
+            return UnknownAssetGroup();
+        }
+
         return ToResponse(asset);
     }
 
@@ -137,6 +146,20 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
 
     private async Task<bool> IsUnknownAssetGroupAsync(Guid? assetGroupId, CancellationToken cancellationToken) =>
         assetGroupId is { } id && !await db.AssetGroups.AnyAsync(group => group.Id == id, cancellationToken);
+
+    // False when the Asset Group was deleted after the check above: the foreign key decides.
+    private async Task<bool> TrySaveAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
+        {
+            return false;
+        }
+    }
 
     private ActionResult UnknownAssetGroup()
     {
