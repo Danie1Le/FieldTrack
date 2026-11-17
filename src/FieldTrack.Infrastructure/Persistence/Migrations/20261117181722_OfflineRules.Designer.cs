@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using NetTopologySuite.Geometries;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
@@ -13,7 +14,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FieldTrack.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(FieldTrackDbContext))]
-    [Migration("20261117105323_OfflineRules")]
+    [Migration("20261117181722_OfflineRules")]
     partial class OfflineRules
     {
         /// <inheritdoc />
@@ -173,6 +174,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("enabled");
 
+                    b.Property<Guid?>("GeofenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("geofence_id");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasColumnType("text")
@@ -222,9 +227,14 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.HasIndex("AssetId")
                         .HasDatabaseName("ix_alert_rules_asset_id");
 
+                    b.HasIndex("GeofenceId")
+                        .HasDatabaseName("ix_alert_rules_geofence_id");
+
                     b.ToTable("alert_rules", null, t =>
                         {
-                            t.HasCheckConstraint("ck_alert_rules_kind", "kind IN ('Threshold', 'Offline')");
+                            t.HasCheckConstraint("ck_alert_rules_geofence", "(kind IN ('GeofenceExit', 'GeofenceEnter')) = (geofence_id IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_alert_rules_kind", "kind IN ('Threshold', 'GeofenceExit', 'GeofenceEnter', 'Offline')");
 
                             t.HasCheckConstraint("ck_alert_rules_offline", "(kind = 'Offline') = (offline_seconds IS NOT NULL) AND (offline_seconds IS NULL OR offline_seconds > 0)");
 
@@ -594,6 +604,42 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("FieldTrack.Infrastructure.Persistence.Geofence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Polygon>("Area")
+                        .IsRequired()
+                        .HasColumnType("geography (Polygon, 4326)")
+                        .HasColumnName("area");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_geofences");
+
+                    b.HasIndex("Area")
+                        .HasDatabaseName("ix_geofences_area");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Area"), "gist");
+
+                    b.ToTable("geofences", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_geofences_kind", "kind IN ('Inclusion', 'Exclusion')");
+                        });
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
                 {
                     b.Property<Guid>("Id")
@@ -798,6 +844,12 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AssetId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .HasConstraintName("fk_alert_rules_assets_asset_id");
+
+                    b.HasOne("FieldTrack.Infrastructure.Persistence.Geofence", null)
+                        .WithMany()
+                        .HasForeignKey("GeofenceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_alert_rules_geofences_geofence_id");
                 });
 
             modelBuilder.Entity("FieldTrack.Domain.Assets.Asset", b =>

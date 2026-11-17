@@ -1,4 +1,7 @@
 using FieldTrack.Domain.Alerts;
+using FieldTrack.Infrastructure.Persistence;
+using NetTopologySuite.Geometries;
+using NetTopologySuite.IO;
 using Npgsql;
 
 namespace FieldTrack.Infrastructure.Ingest;
@@ -20,9 +23,12 @@ public sealed class AlertRuleRunner
     /// </summary>
     public const string ReadVersion = "SELECT version FROM alert_rule_version FOR SHARE";
 
+    // Each rule with its Geofence, if any: Geofence edits bump the version too, so they reload with the rules.
     private const string LoadRules = """
-        SELECT id, name, kind, asset_id, asset_group_id, severity, sensor, operator, threshold, hysteresis
-        FROM alert_rules WHERE enabled
+        SELECT r.id, r.name, r.kind, r.asset_id, r.asset_group_id, r.severity, r.sensor, r.operator, r.threshold, r.hysteresis,
+               g.id, g.name, ST_AsBinary(g.area)
+        FROM alert_rules r LEFT JOIN geofences g ON g.id = r.geofence_id
+        WHERE r.enabled
         """;
 
     private const string LoadStates = """
@@ -162,8 +168,21 @@ public sealed class AlertRuleRunner
     private static async Task<List<AlertRule>> ReadRulesAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         var rules = new List<AlertRule>();
+        // One instance per Geofence, so rules that share it share its prepared geometry (ADR 0005).
+        var geofences = new Dictionary<Guid, Geofence>();
         while (await reader.ReadAsync(cancellationToken))
         {
+            Geofence? geofence = null;
+            if (!reader.IsDBNull(10) && !geofences.TryGetValue(reader.GetGuid(10), out geofence))
+            {
+                geofence = geofences[reader.GetGuid(10)] = new Geofence
+                {
+                    Id = reader.GetGuid(10),
+                    Name = reader.GetString(11),
+                    Area = (Polygon)new WKBReader().Read(reader.GetFieldValue<byte[]>(12)),
+                };
+            }
+
             rules.Add(new AlertRule
             {
                 Id = reader.GetGuid(0),
@@ -178,6 +197,8 @@ public sealed class AlertRuleRunner
                     ? null
                     : new ThresholdSettings(Enum.Parse<Sensor>(reader.GetString(6)), Enum.Parse<ThresholdOperator>(reader.GetString(7)),
                         reader.GetDouble(8), reader.GetDouble(9)),
+                GeofenceId = geofence?.Id,
+                Geofence = geofence,
             });
         }
 
