@@ -35,7 +35,7 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
         var badJson = new ReceivedRejectedMessage(TelemetryPublisher.TopicOf("TRK-007"), [0x7b], RejectReason.BadJson, now, false);
         var unknown = new ReceivedReading(
             TelemetryPublisher.TopicOf("GHOST-1"), "GHOST-1", new Reading(1, 0, now, 51.5, -0.12, null, null, null, null, null), now, [0x7d], false);
-        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), CancellationToken);
+        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
 
         (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Count.ShouldBe(2);
         // The broker's redelivery (DUP) of both, after the batch committed.
@@ -85,7 +85,7 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
 
     private async Task WriteAsync(params ReceivedReading[] readings)
     {
-        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), CancellationToken);
+        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
         await writer.WriteAsync(readings, [], CancellationToken);
     }
 }
