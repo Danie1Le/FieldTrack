@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using FieldTrack.Api.Live;
@@ -61,6 +62,27 @@ public sealed partial class IngestWorker(
     /// </summary>
     public const string ConflictingDuplicatesInstrument = "fieldtrack.ingest.conflicting_duplicates";
 
+    /// <summary>The counter of telemetry messages ingest has processed, stored or rejected: the ingest rate.</summary>
+    public const string MessagesInstrument = "fieldtrack.ingest.messages";
+
+    /// <summary>The histogram of how many messages each batch held.</summary>
+    public const string BatchSizeInstrument = "fieldtrack.ingest.batch_size";
+
+    /// <summary>The histogram of how long a batch took to store, evaluate the Alert Rules and commit.</summary>
+    public const string BatchCommitDurationInstrument = "fieldtrack.ingest.batch_commit_duration";
+
+    /// <summary>The histogram of each message's time from the broker handing it over to its batch committing (ADR 0004: p95 under 200 ms).</summary>
+    public const string ReceiveToCommitDurationInstrument = "fieldtrack.ingest.receive_to_commit_duration";
+
+    /// <summary>The histogram of how long evaluating the Alert Rules took within each batch's transaction.</summary>
+    public const string RuleEvaluationDurationInstrument = "fieldtrack.ingest.rule_evaluation_duration";
+
+    /// <summary>The counter of Alerts raised by ingest.</summary>
+    public const string AlertsRaisedInstrument = "fieldtrack.ingest.alerts_raised";
+
+    /// <summary>The source of the trace spans ingest starts.</summary>
+    public const string ActivitySourceName = "FieldTrack.Ingest";
+
     /// <summary>How long the broker keeps the session, and its queued messages, while the worker is away.</summary>
     public const uint SessionExpirySeconds = 3_600;
 
@@ -76,7 +98,34 @@ public sealed partial class IngestWorker(
     // matching both would be delivered, and so rejected, twice.
     private static readonly string[] _retiredTopicFilters = ["fieldtrack/v1/devices/+/telemetry"];
 
-    // IMeterFactory hands out one Meter per name, so each counter below shares it.
+    // Seconds from 1 ms to 10 s, around ADR 0004's 200 ms target; the default boundaries would put every batch in the first bucket.
+    private static readonly InstrumentAdvice<double> _durationBuckets = new()
+    {
+        HistogramBucketBoundaries = [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1, 2.5, 5, 10],
+    };
+
+    private static readonly ActivitySource _activities = new(ActivitySourceName);
+
+    // IMeterFactory hands out one Meter per name, so each instrument below shares it.
+    private readonly Counter<long> _messages = meters.Create(MeterName).CreateCounter<long>(
+        MessagesInstrument, "{message}", "Telemetry messages processed, stored or rejected.");
+
+    private readonly Histogram<long> _batchSize = meters.Create(MeterName).CreateHistogram<long>(
+        BatchSizeInstrument, "{message}", "Messages per ingest batch.",
+        advice: new InstrumentAdvice<long> { HistogramBucketBoundaries = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000] });
+
+    private readonly Histogram<double> _batchCommitDuration = meters.Create(MeterName).CreateHistogram(
+        BatchCommitDurationInstrument, "s", "Time to store a batch, evaluate the Alert Rules and commit.", advice: _durationBuckets);
+
+    private readonly Histogram<double> _receiveToCommitDuration = meters.Create(MeterName).CreateHistogram(
+        ReceiveToCommitDurationInstrument, "s", "Time from a message's receipt to its batch's commit.", advice: _durationBuckets);
+
+    private readonly Histogram<double> _ruleEvaluationDuration = meters.Create(MeterName).CreateHistogram(
+        RuleEvaluationDurationInstrument, "s", "Time to evaluate the Alert Rules within a batch's transaction.", advice: _durationBuckets);
+
+    private readonly Counter<long> _alertsRaised = meters.Create(MeterName).CreateCounter<long>(
+        AlertsRaisedInstrument, "{alert}", "Alerts raised by ingest.");
+
     private readonly Counter<long> _rejectedMessages = meters.Create(MeterName).CreateCounter<long>(
         RejectedMessagesInstrument, "{message}", "Telemetry messages stored as Rejected messages, by reason.");
 
@@ -184,8 +233,23 @@ public sealed partial class IngestWorker(
             while (true)
             {
                 var batch = await NextBatchAsync(received.Reader, stoppingToken);
+                // The span covers the batch's own work, not the wait for its first message; Npgsql's spans nest in it.
+                using var activity = _activities.StartActivity("ingest batch");
+                var started = Stopwatch.GetTimestamp();
                 var (readings, rejected) = Parse(batch);
                 var written = await writer.WriteAsync(readings, rejected, stoppingToken);
+                var committed = time.GetUtcNow();
+                activity?.SetTag("fieldtrack.ingest.batch_size", batch.Count);
+                _messages.Add(batch.Count);
+                _batchSize.Record(batch.Count);
+                _batchCommitDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds);
+                _ruleEvaluationDuration.Record(written.RuleEvaluation.TotalSeconds);
+                foreach (var message in batch)
+                {
+                    _receiveToCommitDuration.Record(Math.Max(0, (committed - message.ReceivedTime).TotalSeconds));
+                }
+
+                _alertsRaised.Add(written.RaisedAlertIds.Count);
                 foreach (var reason in written.Rejected)
                 {
                     _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
