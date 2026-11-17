@@ -67,6 +67,26 @@ internal sealed class BrokerCounters : IAsyncDisposable
         return counters;
     }
 
+    /// <summary>
+    /// Waits until the broker holds nothing unacknowledged: under ADR 0004 every message it delivered to ingest was committed first, so an empty
+    /// backlog means everything published was processed. Call <see cref="SettleAsync"/> first, so a count from before the publishing cannot pass for empty.
+    /// </summary>
+    /// <returns>False when messages are still unacknowledged after <paramref name="timeout"/>.</returns>
+    public async Task<bool> WaitForEmptyBacklogAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        for (var waited = TimeSpan.Zero; Backlog > 0; waited += _refresh)
+        {
+            if (waited >= timeout)
+            {
+                return false;
+            }
+
+            await Task.Delay(_refresh, cancellationToken);
+        }
+
+        return true;
+    }
+
     /// <summary>Waits for the counts to refresh twice, so they include everything that happened before the call.</summary>
     public static Task SettleAsync(CancellationToken cancellationToken) => Task.Delay(_refresh * 2.5, cancellationToken);
 

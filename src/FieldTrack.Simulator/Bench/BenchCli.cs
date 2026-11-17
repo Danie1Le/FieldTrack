@@ -18,9 +18,9 @@ internal static class BenchCli
     /// <exception cref="SimulatorException">The benchmark is unknown, an option is unusable, or the stack is not ready.</exception>
     public static async Task<bool> RunAsync(string kind, Options options, CancellationToken cancellationToken)
     {
-        if (kind is not ("throughput" or "flood" or "crash"))
+        if (kind is not ("throughput" or "flood" or "crash" or "duplicates"))
         {
-            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood or crash.");
+            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash or duplicates.");
         }
 
         var fleet = FleetFile.Load(options.Require("fleet"));
@@ -44,10 +44,11 @@ internal static class BenchCli
             brokerHost, brokerPort, new BenchDatabase(dataSource), options.Get("state") ?? "simulator-state.json",
             options.Get("out") ?? Path.Combine("bench", "results"), composeProject);
 
-        Console.WriteLine($"Benchmark {kind}: {fleet.Devices.Count} Devices, {duration.TotalSeconds:0} s.");
+        Console.WriteLine($"Benchmark {kind}: {fleet.Devices.Count} Devices{(kind == "duplicates" ? string.Empty : $", {duration.TotalSeconds:0} s")}.");
         var outcome = kind switch
         {
             "flood" => await ThroughputBench.FloodAsync(fleet, target, duration, Console.Out, cancellationToken),
+            "duplicates" => await DuplicateBench.RunAsync(fleet, target, (int)(options.GetNumber("count") ?? 10_000), Console.Out, cancellationToken),
             "crash" => await CrashAsync(fleet, target, options, rate, duration, cancellationToken),
             _ => await ThroughputBench.SustainedAsync(fleet, target, rate, duration, Console.Out, cancellationToken),
         };

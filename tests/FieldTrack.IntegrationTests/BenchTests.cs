@@ -108,6 +108,52 @@ public sealed class BenchTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
+    public async Task Republishing_identical_bytes_stores_each_Reading_once_and_the_key_table_refuses_every_copy()
+    {
+        await SeedAsync();
+        await using var ingest = await StartIngestAsync();
+
+        var outcome = await DuplicateBench.RunAsync(Fleet, Target, count: 300, TextWriter.Null, CancellationToken);
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("published").GetInt64().ShouldBe(300);
+        results.GetProperty("stored").GetInt64().ShouldBe(300);
+        results.GetProperty("derivedKeyConflicts").GetInt64().ShouldBe(300);
+        results.GetProperty("backlogDrained").GetBoolean().ShouldBeTrue();
+        results.GetProperty("onlyOurTraffic").GetBoolean().ShouldBeTrue();
+        results.GetProperty("rejected").GetInt64().ShouldBe(0);
+        outcome.Pass.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Other_traffic_on_the_broker_fails_the_duplicate_run_instead_of_inflating_its_conflict_count()
+    {
+        await SeedAsync();
+        await using var ingest = await StartIngestAsync();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
+        await using var stranger = await TelemetryPublisher.ConnectAsync(Fixture);
+        var noise = Task.Run(
+            async () =>
+            {
+                for (var seq = 1; !stop.IsCancellationRequested; seq++)
+                {
+                    await stranger.PublishAsync("STRANGER-1", TelemetryPublisher.Payload(1, seq, DateTimeOffset.UtcNow));
+                    await Task.Delay(20);
+                }
+            },
+            CancellationToken);
+
+        var outcome = await DuplicateBench.RunAsync(Fleet, Target, count: 300, TextWriter.Null, CancellationToken);
+        await stop.CancelAsync();
+        await noise;
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("onlyOurTraffic").GetBoolean().ShouldBeFalse();
+        results.GetProperty("derivedKeyConflicts").ValueKind.ShouldBe(JsonValueKind.Null);
+        outcome.Pass.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task A_kill_that_does_not_take_the_measured_stack_down_ends_the_run_with_a_failing_result()
     {
         await SeedAsync();
