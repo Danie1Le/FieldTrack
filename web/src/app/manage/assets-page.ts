@@ -1,8 +1,8 @@
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { AssetGroup } from '../control-room/live';
-import { Asset, assetTypes } from './api';
+import { AssetGroup, assetTypes } from '../control-room/live';
+import { Asset } from './api';
 import { Changes } from './changes';
 import { ConfirmAction } from './confirm-action';
 import { Editing } from './editing';

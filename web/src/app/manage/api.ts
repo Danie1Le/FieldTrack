@@ -10,6 +10,3 @@ export interface Asset {
   assetGroupId: string | null;
   archived: boolean;
 }
-
-export const assetTypes: AssetType[] = ['Truck', 'Excavator', 'Generator', 'Sensor'];
-
