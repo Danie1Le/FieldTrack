@@ -44,5 +44,24 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release --no-build
 
-      - name: Build API image
-        run: docker compose build api
+      # Angular 22 needs Node ^22.22.3 or ^24.15.0; keep this equal to web/Dockerfile's node image.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web packages
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web
+        working-directory: web
+        run: npx ng build
+
+      - name: Test web
+        working-directory: web
+        run: npx ng test --watch=false
+
+      - name: Build images
+        run: docker compose build api web
