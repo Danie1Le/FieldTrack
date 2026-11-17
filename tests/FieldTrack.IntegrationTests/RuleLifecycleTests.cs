@@ -72,8 +72,10 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
 
         await ChangeAsync(admin, "detach Device", device, asset, rule);
         await CreateAsync(admin, "/attachments", new { deviceId = next, assetId = asset });
-        // Already past the threshold when fitted: the old Device's breached state must not hold this back.
-        await WriteAsync([Received(0, DateTimeOffset.UtcNow, 112, "TRK-008")]);
+        // Already past the threshold when fitted: the old Device's breached state must not hold this back. Taken a second after the
+        // Attachment: Device times have millisecond precision and an Attachment covers only Device times at or after its own
+        // instant, so a Reading stamped within the attach's millisecond could fall before it and belong to no Asset.
+        await WriteAsync([Received(0, DateTimeOffset.UtcNow.AddSeconds(1), 112, "TRK-008")]);
 
         var active = (await ListAsync(admin, "/alerts?active=true")).ShouldHaveSingleItem();
         active.GetProperty("reading").GetProperty("deviceId").GetString().ShouldBe(next);
