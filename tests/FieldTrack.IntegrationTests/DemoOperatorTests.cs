@@ -19,6 +19,7 @@ public sealed class DemoOperatorTests(FieldTrackFixture fixture) : IntegrationTe
         var tokens = await AuthClient.SignInAsync(client, DemoEmail, DemoPassword);
 
         AuthClient.RolesOf(tokens.AccessToken).ShouldBe(["Operator"]);
+        await WithUsersAsync(async users => (await users.FindByEmailAsync(DemoEmail)).ShouldNotBeNull().DisplayName.ShouldBe(UserSeeder.DemoOperatorDisplayName));
     }
 
     [Fact]

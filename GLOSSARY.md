@@ -96,6 +96,10 @@ _Avoid_: Ack, accept, claim
 To end an Alert, done by the platform when its condition clears or by a user at any time; a Resolved Alert never reopens.
 _Avoid_: Close, dismiss, clear
 
+**Latch**:
+What holds an Alert Rule quiet after a user Resolves its Alert while the condition still holds: the rule raises nothing new for that Asset until the condition clears and breaches again.
+_Avoid_: Snooze, mute, suppression
+
 **Hysteresis**:
 The margin a sensor value must move back past a threshold before a threshold Alert resolves itself, so a value hovering at the threshold does not raise Alert after Alert.
 _Avoid_: Deadband, tolerance, buffer
@@ -117,6 +121,10 @@ _Avoid_: Outage, shutdown, dropout
 **Coverage gap**:
 A simulated period when a Device keeps taking Readings but cannot send them, then sends them late in the same Boot when it reconnects.
 _Avoid_: Dropout, signal loss, buffering
+
+**Injection**:
+One Fault, Power off, Coverage gap or clock problem that a simulator run applies to one Device for a window of time, scripted by a Scenario or drawn at random. The Manifest lists every one with its start and end.
+_Avoid_: Event, incident, chaos
 
 **Manifest**:
 The simulator's record of what one run actually published and injected, used as ground truth to score lost Readings, offline detection and false Alerts.
