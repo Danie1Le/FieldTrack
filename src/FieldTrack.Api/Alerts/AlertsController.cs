@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Security.Claims;
 using FieldTrack.Api.Auth;
 using FieldTrack.Domain.Alerts;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace FieldTrack.Api.Alerts;
@@ -106,8 +108,7 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time) 
                 .SetProperty(alert => alert.ResolveReason, ResolveReason.Manual)
                 .SetProperty(alert => alert.ResolvedBy, user)
                 .SetProperty(alert => alert.Note, note)
-                .SetProperty(alert => alert.Latched, alert => db.AlertRuleStates.Any(state =>
-                    state.AlertRuleId == alert.AlertRuleId && state.AssetId == alert.AssetId && state.Breached)), cancellationToken);
+                .SetProperty(alert => alert.Latched, ConditionHolds()), cancellationToken);
         return await OutcomeAsync(id, resolved, "The Alert is already Resolved.", cancellationToken);
     }
 
@@ -125,17 +126,30 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time) 
     private Task<AlertResponse?> ReadAsync(Guid id, CancellationToken cancellationToken) =>
         Responses(db.Alerts.Where(alert => alert.Id == id)).SingleOrDefaultAsync(cancellationToken);
 
-    private IQueryable<AlertResponse> Responses(IQueryable<Alert> alerts) =>
-        alerts.Select(alert => new AlertResponse(
+    // The Latch (GLOSSARY): whether the Alert's condition holds now, from the rule state ingest keeps. Resolve stores it
+    // and responses show it for Active Alerts, so both use this one definition.
+    private Expression<Func<Alert, bool>> ConditionHolds() =>
+        alert => db.AlertRuleStates.Any(state => state.AlertRuleId == alert.AlertRuleId && state.AssetId == alert.AssetId && state.Breached);
+
+    // Users are named by display name, never email: every signed-in user reads Alerts, the Demo Operator included,
+    // and only Admins see emails (/users).
+    private IQueryable<AlertResponse> Responses(IQueryable<Alert> alerts)
+    {
+        Expression<Func<Alert, bool, AlertResponse>> response = (alert, conditionHolds) => new AlertResponse(
             alert.Id, alert.AlertRuleId, alert.AssetId, alert.Reading, alert.Severity, alert.Message, alert.Status,
             alert.RaisedAt, alert.ResolvedAt, alert.ResolveReason,
-            db.Users.Where(user => user.Id == alert.AcknowledgedBy).Select(user => user.Email).SingleOrDefault(),
+            db.Users.Where(user => user.Id == alert.AcknowledgedBy).Select(user => user.DisplayName).SingleOrDefault(),
             alert.AcknowledgedAt,
-            db.Users.Where(user => user.Id == alert.ResolvedBy).Select(user => user.Email).SingleOrDefault(),
+            db.Users.Where(user => user.Id == alert.ResolvedBy).Select(user => user.DisplayName).SingleOrDefault(),
             alert.Note,
-            // Active: whether the condition holds now, from the rule state. Resolved: whether it held when resolved by hand.
-            alert.Status == AlertStatus.Resolved
-                ? alert.Latched
-                : db.AlertRuleStates.Any(state => state.AlertRuleId == alert.AlertRuleId && state.AssetId == alert.AssetId && state.Breached),
-            alert.CreatedAt, alert.FromBacklog));
+            // Active: whether the condition holds now. Resolved: whether it held when resolved by hand.
+            alert.Status == AlertStatus.Resolved ? alert.Latched : conditionHolds,
+            alert.CreatedAt, alert.FromBacklog);
+        // Splices ConditionHolds in for conditionHolds, so EF runs it as a subquery of this query.
+        var holds = ConditionHolds();
+        var alertParameter = response.Parameters[0];
+        var body = ReplacingExpressionVisitor.Replace(
+            response.Parameters[1], ReplacingExpressionVisitor.Replace(holds.Parameters[0], alertParameter, holds.Body), response.Body);
+        return alerts.Select(Expression.Lambda<Func<Alert, AlertResponse>>(body, alertParameter));
+    }
 }

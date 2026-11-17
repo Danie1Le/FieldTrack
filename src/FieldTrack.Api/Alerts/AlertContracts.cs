@@ -63,12 +63,12 @@ public sealed record AlertRuleResponse(
 /// <param name="RaisedAt">Device time of the Reading that raised it.</param>
 /// <param name="ResolvedAt">When it was Resolved, or null while Active.</param>
 /// <param name="ResolveReason">Why it was Resolved, or null while Active.</param>
-/// <param name="AcknowledgedBy">Email of the user who Acknowledged it, or null.</param>
+/// <param name="AcknowledgedBy">Display name of the user who Acknowledged it, or null. Never an email: only Admins see those.</param>
 /// <param name="AcknowledgedAt">When it was Acknowledged, or null.</param>
-/// <param name="ResolvedBy">Email of the user who Resolved it by hand; null while Active and when the platform Resolved it.</param>
+/// <param name="ResolvedBy">Display name of the user who Resolved it by hand; null while Active and when the platform Resolved it.</param>
 /// <param name="Note">What the user who Resolved it by hand wrote, or null.</param>
 /// <param name="Latched">
-/// The latch (#10). On an Active Alert: its condition still holds, so Resolving it by hand latches the rule and the
+/// The Latch (GLOSSARY, #10). On an Active Alert: its condition still holds, so Resolving it by hand latches the rule and the
 /// UI warns. On a Resolved one: a user Resolved it while the condition held, so the rule raised nothing new until the
 /// condition cleared and breached again.
 /// </param>
