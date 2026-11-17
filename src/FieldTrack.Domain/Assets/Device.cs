@@ -20,7 +20,7 @@ public sealed class Device
 
     /// <summary>
     /// The Received time of the Device's latest stored batch, or null before its first. Ingest sets it
-    /// so offline detection and Asset Status survive a restart (spec #21).
+    /// so offline detection and Asset Status survive a restart (ADR 0005).
     /// </summary>
     public DateTimeOffset? LastReceivedAt { get; set; }
 }

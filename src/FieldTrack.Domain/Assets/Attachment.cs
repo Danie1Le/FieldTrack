@@ -2,7 +2,7 @@ namespace FieldTrack.Domain.Assets;
 
 /// <summary>
 /// The period during which a Device was fitted to an Asset. Kept after it ends, so ingest can stamp
-/// each Reading with the Asset whose Attachment covers its Device time even after the Device moves.
+/// each Reading with the Asset whose Attachment covers its Device time even after the Device moves (spec #21).
 /// </summary>
 public sealed class Attachment
 {
