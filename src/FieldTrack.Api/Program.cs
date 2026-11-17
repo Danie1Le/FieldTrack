@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+using FieldTrack.Api;
 using FieldTrack.Api.Auth;
 using FieldTrack.Api.Health;
 using FieldTrack.Api.Ingest;
@@ -47,9 +47,10 @@ builder.Services.PostConfigure<LoggerFilterOptions>(options =>
         options.Rules.Add(new LoggerFilterRule(provider, "Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning, filter: null));
     }
 });
-// Enums travel by name (e.g. Asset Type "Truck"); numbers are refused so only defined values get in.
+// Enums travel as one member name (e.g. Asset Type "Truck"); numbers and comma-joined names are refused, so only
+// defined values get in.
 builder.Services.AddControllers()
-    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new EnumNameConverter()));
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
