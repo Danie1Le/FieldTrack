@@ -148,6 +148,27 @@ describe('AlertRulesPage', () => {
     await serve([]);
   });
 
+  it('builds the form afresh from each rule it opens, so unsaved edits never reach another rule of the same kind', async () => {
+    const twin: ManagedRule = { ...overheat, id: 'warm', name: 'Engine warm' };
+    view.button('Enable', 'Left the yard').click();
+    api.expectOne({ method: 'PUT', url: '/api/alert-rules/exit' }).flush({ ...leftYard, enabled: true });
+    await serve([overheat, twin]);
+
+    await open(view.button('Edit', 'Engine overheat'));
+    view.root.querySelector<HTMLInputElement>('[name="enabled"]')!.click();
+    view.fill('target', 'group:depot');
+    view.fill('severity', 'Warning');
+    view.fill('hysteresis', '9');
+    await open(view.button('Edit', 'Engine warm'));
+    save();
+
+    const edit = api.expectOne({ method: 'PUT', url: '/api/alert-rules/warm' });
+    const { id: _, ...unchanged } = twin;
+    expect(edit.request.body).toEqual(unchanged);
+    edit.flush(twin);
+    await serve([]);
+  });
+
   it('enables a rule at once and disables one only once the Admin confirms it in the page', async () => {
     view.button('Enable', 'Left the yard').click();
     const enable = api.expectOne({ method: 'PUT', url: '/api/alert-rules/exit' });

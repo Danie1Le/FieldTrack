@@ -5,6 +5,7 @@ import { AssetGroup, Geofence, Sensor } from '../control-room/live';
 import { Asset, ManagedRule } from './api';
 import { Changes } from './changes';
 import { ConfirmAction } from './confirm-action';
+import { Editing } from './editing';
 
 type Kind = ManagedRule['kind'];
 
@@ -49,8 +50,8 @@ export class AlertRulesPage {
   private readonly assets = signal<Asset[]>([]);
   protected readonly groups = signal<AssetGroup[]>([]);
   protected readonly geofences = signal<Geofence[]>([]);
-  /** The rule being edited, 'new' while one is being created, else null. */
-  protected readonly form = signal<ManagedRule | 'new' | null>(null);
+  /** The rule being edited, or 'new' while one is being created. */
+  protected readonly form = new Editing<ManagedRule | 'new'>();
   /** The form's kind, which decides which settings it asks for. */
   protected readonly kind = signal<Kind>('Threshold');
 
@@ -84,12 +85,12 @@ export class AlertRulesPage {
 
   protected open(rule: ManagedRule | 'new'): void {
     this.changes.problems.set([]);
-    this.form.set(rule);
+    this.form.open(rule);
     this.kind.set(rule === 'new' ? 'Threshold' : rule.kind);
   }
 
   protected cancel(): void {
-    this.form.set(null);
+    this.form.close();
     this.changes.problems.set([]);
   }
 
@@ -111,7 +112,7 @@ export class AlertRulesPage {
       geofenceId: values.get('geofenceId'),
       offlineSeconds: numberOf(values.get('offlineSeconds')),
     };
-    const editing = this.form();
+    const editing = this.form.item();
     return this.changes.send(
       editing === 'new'
         ? this.http.post('/api/alert-rules', body)
@@ -130,7 +131,7 @@ export class AlertRulesPage {
   }
 
   private done(): Promise<void> {
-    this.form.set(null);
+    this.form.close();
     return this.load();
   }
 

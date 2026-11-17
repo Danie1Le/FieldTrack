@@ -12,8 +12,8 @@
     <button type="button" class="btn" (click)="open('new')">New Alert Rule</button>
   </header>
 
-  @if (form(); as editing) {
-    @let rule = editing === 'new' ? null : editing;
+  @for (session of form.sessions(); track session.id) {
+    @let rule = session.item === 'new' ? null : session.item;
     <form (submit)="$event.preventDefault(); save($any($event.target))">
       <h3>{{ rule ? 'Edit ' + rule.name : 'New Alert Rule' }}</h3>
       <label>Name <input name="name" required maxlength="200" [value]="rule?.name ?? ''" /></label>
