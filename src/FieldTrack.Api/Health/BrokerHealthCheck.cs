@@ -1,9 +1,9 @@
+using FieldTrack.Api.Messaging;
 using FieldTrack.Infrastructure.Messaging;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Exceptions;
-using MQTTnet.Formatter;
 
 namespace FieldTrack.Api.Health;
 
@@ -21,8 +21,7 @@ public sealed class BrokerHealthCheck(IOptions<BrokerOptions> options) : IHealth
     {
         var broker = options.Value;
         var clientOptions = new MqttClientOptionsBuilder()
-            .WithTcpServer(broker.Host, broker.Port)
-            .WithProtocolVersion(MqttProtocolVersion.V500)
+            .WithBroker(broker)
             .WithClientId($"fieldtrack-health-{Guid.NewGuid():N}")
             .WithCleanStart()
             .WithTimeout(_connectTimeout)
