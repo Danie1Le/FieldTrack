@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -28,6 +29,17 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
     /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
     public DbSet<Attachment> Attachments => Set<Attachment>();
+
+    /// <summary>
+    /// Ends the open Attachments matching <paramref name="which"/> at <paramref name="at"/>, returning how many
+    /// ended. Detach and both Archives end Attachments only through here, so whatever else must follow (resolving
+    /// Alerts, #34) has one place to hook in. The caller holds the transaction.
+    /// </summary>
+    public Task<int> EndOpenAttachmentsAsync(Expression<Func<Attachment, bool>> which, DateTimeOffset at, CancellationToken cancellationToken) =>
+        Attachments
+            .Where(which)
+            .Where(attachment => attachment.DetachedAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(attachment => attachment.DetachedAt, at), cancellationToken);
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder builder)

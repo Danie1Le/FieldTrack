@@ -13,7 +13,7 @@ namespace FieldTrack.Api.Assets;
 [ApiController]
 [Route("assets")]
 [Authorize(Policy = Policies.Read)]
-public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory readingHistory) : ControllerBase
+public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory readingHistory, TimeProvider time) : ControllerBase
 {
     /// <summary>Lists Assets by name, leaving out Archived ones unless <paramref name="includeArchived"/> is true.</summary>
     [HttpGet]
@@ -71,8 +71,9 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
     }
 
     /// <summary>
-    /// Deletes an Asset with no history outright, so mistakes are easy to clean up. An Asset with
-    /// history (Readings) is Archived instead, which keeps the history and hides it from lists.
+    /// Deletes an Asset with no history outright, with its Attachments, so mistakes are easy to clean
+    /// up. An Asset with history (Readings) is Archived instead and its open Attachment ended, which
+    /// keeps the history and hides it from lists.
     /// </summary>
     /// <response code="404">No Asset has this id.</response>
     [HttpDelete("{id:guid}")]
@@ -93,9 +94,12 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
         if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken))
         {
             asset.Archived = true;
+            await db.EndOpenAttachmentsAsync(attachment => attachment.AssetId == id, time.GetUtcNow(), cancellationToken);
         }
         else
         {
+            // No Readings means no history to keep, so its Attachments go with it (#25).
+            await db.Attachments.Where(attachment => attachment.AssetId == id).ExecuteDeleteAsync(cancellationToken);
             db.Assets.Remove(asset);
         }
 

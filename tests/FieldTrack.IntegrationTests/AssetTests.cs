@@ -1,10 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using FieldTrack.Infrastructure.Persistence;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection;
-using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -16,7 +12,7 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         using var admin = await AdminClientAsync();
 
         using var created = await PostAssetAsync(admin, new { name = "Haul truck 7", type = "Truck" });
-        var assets = await ListAssetsAsync(admin);
+        var assets = await ListAsync(admin, "/assets");
 
         created.StatusCode.ShouldBe(HttpStatusCode.Created);
         assets.Select(Describe).ShouldBe([("Haul truck 7", "Truck", null, false)]);
@@ -26,8 +22,8 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     public async Task Admin_creates_and_renames_Asset_Groups()
     {
         using var admin = await AdminClientAsync();
-        var quarry = await CreateAssetGroupAsync(admin, "North quarry");
-        await CreateAssetGroupAsync(admin, "Depot");
+        var quarry = await CreateAsync(admin, "/asset-groups", new { name = "North quarry" });
+        await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
 
         using var renamed = await admin.PutAsJsonAsync($"/asset-groups/{quarry}", new { name = "South quarry" }, CancellationToken);
         var groups = await admin.GetFromJsonAsync<JsonElement[]>("/asset-groups", CancellationToken);
@@ -40,14 +36,14 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     public async Task Admin_edits_an_Asset_and_moves_it_between_Asset_Groups()
     {
         using var admin = await AdminClientAsync();
-        var quarry = await CreateAssetGroupAsync(admin, "North quarry");
-        var depot = await CreateAssetGroupAsync(admin, "Depot");
-        var asset = await CreateAssetAsync(admin, new { name = "Excavator 1", type = "Excavator", assetGroupId = quarry });
+        var quarry = await CreateAsync(admin, "/asset-groups", new { name = "North quarry" });
+        var depot = await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+        var asset = await CreateAsync(admin, "/assets", new { name = "Excavator 1", type = "Excavator", assetGroupId = quarry });
 
         using var moved = await admin.PutAsJsonAsync($"/assets/{asset}", new { name = "Excavator 2", type = "Excavator", assetGroupId = depot }, CancellationToken);
-        var afterMove = await ListAssetsAsync(admin);
+        var afterMove = await ListAsync(admin, "/assets");
         using var removed = await admin.PutAsJsonAsync($"/assets/{asset}", new { name = "Generator 2", type = "Generator" }, CancellationToken);
-        var afterRemoval = await ListAssetsAsync(admin);
+        var afterRemoval = await ListAsync(admin, "/assets");
 
         moved.StatusCode.ShouldBe(HttpStatusCode.OK);
         afterMove.Select(Describe).ShouldBe([("Excavator 2", "Excavator", depot, false)]);
@@ -59,7 +55,7 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     public async Task Edit_refuses_an_unknown_Asset_Group_and_an_unknown_Asset()
     {
         using var admin = await AdminClientAsync();
-        var asset = await CreateAssetAsync(admin, new { name = "Haul truck 7", type = "Truck" });
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
 
         using var unknownGroup = await admin.PutAsJsonAsync($"/assets/{asset}", new { name = "Haul truck 7", type = "Truck", assetGroupId = Guid.NewGuid() }, CancellationToken);
         using var unknownAsset = await admin.PutAsJsonAsync($"/assets/{Guid.NewGuid()}", new { name = "Haul truck 7", type = "Truck" }, CancellationToken);
@@ -74,10 +70,10 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     public async Task Deleting_an_Asset_without_Readings_removes_it()
     {
         using var admin = await AdminClientAsync();
-        var asset = await CreateAssetAsync(admin, new { name = "Haul truck 7", type = "Truck" });
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
 
         using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
-        var assets = await ListAssetsAsync(admin, "?includeArchived=true");
+        var assets = await ListAsync(admin, "/assets?includeArchived=true");
 
         deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         assets.ShouldBeEmpty();
@@ -88,16 +84,14 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     {
         // Readings arrive with #26, which also tests this with a real Reading; until then the
         // "Asset has Readings" seam answers yes.
-        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EveryAssetHasReadings>()));
-        using var admin = api.CreateClient();
-        await AuthClient.AuthorizeAsync(admin, AdminEmail, AdminPassword);
-        var asset = await CreateAssetAsync(admin, new { name = "Haul truck 7", type = "Truck" });
-        await CreateAssetAsync(admin, new { name = "Generator 1", type = "Generator" });
+        await using var api = ApiWhereEverythingHasReadings();
+        using var admin = await AdminClientAsync(api);
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
 
         using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
-        var listed = await ListAssetsAsync(admin);
-        var withArchived = await ListAssetsAsync(admin, "?includeArchived=true");
+        var listed = await ListAsync(admin, "/assets");
+        var withArchived = await ListAsync(admin, "/assets?includeArchived=true");
 
         deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         listed.Select(Describe).ShouldBe([("Generator 1", "Generator", null, false)]);
@@ -118,13 +112,13 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     public async Task Operators_read_Assets_and_Asset_Groups_but_cannot_change_them()
     {
         using var admin = await AdminClientAsync();
-        var group = await CreateAssetGroupAsync(admin, "Depot");
-        var asset = await CreateAssetAsync(admin, new { name = "Haul truck 7", type = "Truck", assetGroupId = group });
+        var group = await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck", assetGroupId = group });
         await AuthClient.CreateUserAsync(admin, "operator@fieldtrack.test", "Operator", "Operator-pass-1");
         using var client = Fixture.Api.CreateClient();
         await AuthClient.AuthorizeAsync(client, "operator@fieldtrack.test", "Operator-pass-1");
 
-        var assets = await ListAssetsAsync(client);
+        var assets = await ListAsync(client, "/assets");
         using var groups = await client.GetAsync("/asset-groups", CancellationToken);
         using var createAsset = await PostAssetAsync(client, new { name = "Generator 1", type = "Generator" });
         using var editAsset = await client.PutAsJsonAsync($"/assets/{asset}", new { name = "Renamed", type = "Truck" }, CancellationToken);
@@ -169,49 +163,15 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         using var response = await PostAssetAsync(admin, asset);
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
-        (await ListAssetsAsync(admin, "?includeArchived=true")).ShouldBeEmpty();
+        (await ListAsync(admin, "/assets?includeArchived=true")).ShouldBeEmpty();
     }
 
     private static Task<HttpResponseMessage> PostAssetAsync(HttpClient client, object asset) =>
         client.PostAsJsonAsync("/assets", asset, CancellationToken);
-
-    private static async Task<string> CreateAssetAsync(HttpClient client, object asset)
-    {
-        using var response = await PostAssetAsync(client, asset);
-        return await ReadIdAsync(response);
-    }
-
-    private static async Task<string> CreateAssetGroupAsync(HttpClient client, string name)
-    {
-        using var response = await client.PostAsJsonAsync("/asset-groups", new { name }, CancellationToken);
-        response.StatusCode.ShouldBe(HttpStatusCode.Created);
-        return await ReadIdAsync(response);
-    }
-
-    private static async Task<string> ReadIdAsync(HttpResponseMessage response)
-    {
-        response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken)).GetProperty("id").GetString()!;
-    }
-
-    private static async Task<JsonElement[]> ListAssetsAsync(HttpClient client, string query = "") =>
-        (await client.GetFromJsonAsync<JsonElement[]>($"/assets{query}", CancellationToken)).ShouldNotBeNull();
 
     private static (string?, string?, string?, bool) Describe(JsonElement asset) => (
         asset.GetProperty("name").GetString(),
         asset.GetProperty("type").GetString(),
         asset.GetProperty("assetGroupId").GetString(),
         asset.GetProperty("archived").GetBoolean());
-
-    private async Task<HttpClient> AdminClientAsync()
-    {
-        var client = Fixture.Api.CreateClient();
-        await AuthClient.AuthorizeAsync(client, AdminEmail, AdminPassword);
-        return client;
-    }
-
-    private sealed class EveryAssetHasReadings : IReadingHistory
-    {
-        public Task<bool> AssetHasReadingsAsync(Guid assetId, CancellationToken cancellationToken) => Task.FromResult(true);
-    }
 }
