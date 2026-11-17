@@ -68,7 +68,14 @@ export class DevicesPage {
   }
 
   protected remove(device: Device): Promise<void> {
-    return this.changes.send(this.http.delete(`/api/devices/${encodeURIComponent(device.id)}`), () => this.done());
+    return this.changes.send(this.http.delete(`/api/devices/${encodeURIComponent(device.id)}`), () => {
+      // Deleted or Archived, the Device leaves the list, so its history panel goes too.
+      if (this.history()?.id === device.id) {
+        this.history.set(null);
+      }
+
+      return this.done();
+    });
   }
 
   protected cancel(): void {

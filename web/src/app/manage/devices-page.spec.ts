@@ -119,15 +119,20 @@ describe('DevicesPage', () => {
     expect(rows[0][2]).toBe('Still attached');
   });
 
-  it('deletes a Device only once the Admin confirms it in the page', async () => {
+  it('deletes a Device only once the Admin confirms it in the page, closing its Attachment history', async () => {
+    view.button('History', 'TRK-009').click();
     view.button('Delete', 'TRK-009').click();
     await view.settle();
     api.expectNone({ method: 'DELETE' });
-    expect(view.text(view.root.querySelector('[role="group"]'))).toContain('Archived instead');
+    const question = view.text(view.root.querySelector('[role="group"]'));
+    expect(question).toContain('Archived instead');
+    expect(question).toContain("its Asset's Active Alerts resolve as Device detached");
 
     view.button('Yes, delete').click();
     api.expectOne({ method: 'DELETE', url: '/api/devices/trk9' }).flush(null, { status: 204, statusText: 'No Content' });
     await serve([device('trk7', 'TRK-007')]);
+
+    expect(view.root.querySelector('[aria-label="Attachment history"]')).toBeNull();
   });
 
   it('shows why the API refused a change, as text', async () => {

@@ -76,7 +76,7 @@
               <button type="button" class="btn" (click)="history.set(device)">History</button>
               <app-confirm-action
                 label="Delete"
-                [question]="'Delete ' + device.serialNumber + '? With Readings it is Archived instead: kept with its history and detached, and its telemetry is rejected from then on.'"
+                [question]="'Delete ' + device.serialNumber + '? With Readings it is Archived instead: kept with its history and detached, so its Asset\'s Active Alerts resolve as Device detached, and its telemetry is rejected from then on.'"
                 [disabled]="changes.busy()"
                 (confirmed)="remove(device)"
               />
