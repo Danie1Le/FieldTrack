@@ -26,7 +26,13 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
     /// Lists the Readings stamped with the Asset whose Device time is in [<paramref name="from"/>, <paramref name="to"/>),
     /// ordered by Device time. Archived Assets keep their history, so they are listed too.
     /// </summary>
-    /// <response code="400">A missing bound, <paramref name="to"/> not after <paramref name="from"/>, a range over 31 days, or one holding more than <see cref="MaxReadings"/> Readings.</response>
+    /// <remarks>
+    /// With <c>thinTo</c>, for display: a range holding more Readings than that is thinned to the first Reading of
+    /// each of <c>thinTo</c> - 1 even slices of Device time between its first and last Reading, then the last one,
+    /// and is never refused for size. A screen draws no more than a few thousand points, and 24 h at demo rate hold
+    /// over 300,000 Readings: thinning here keeps the replay's response small and cheap under load (#126).
+    /// </remarks>
+    /// <response code="400">A missing bound, <paramref name="to"/> not after <paramref name="from"/>, a range over 31 days, <c>thinTo</c> below 2 or above <see cref="MaxReadings"/>, or an unthinned range holding more than <see cref="MaxReadings"/> Readings.</response>
     /// <response code="404">No Asset has this id.</response>
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<ReadingResponse>>(StatusCodes.Status200OK)]
@@ -36,6 +42,7 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
         Guid assetId,
         [Required] DateTimeOffset? from,
         [Required] DateTimeOffset? to,
+        [Range(2, MaxReadings)] int? thinTo,
         CancellationToken cancellationToken)
     {
         // Npgsql writes timestamptz from UTC values only.
@@ -52,7 +59,9 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
         }
 
         // Readings are outside the EF model (ADR 0003), so this reads them with SQL; the index on
-        // (asset_id, device_time) and partition pruning on device_time serve it.
+        // (asset_id, device_time) and partition pruning on device_time serve it. The LIMIT detects a range holding
+        // more than the response may.
+        var limit = thinTo ?? MaxReadings;
         var readings = await db.Database.SqlQuery<ReadingResponse>($"""
             SELECT d.serial_number AS device_serial_number, r.boot, r.seq AS sequence_number, r.device_time, r.received_time,
                    ST_Y(r.location::geometry) AS latitude, ST_X(r.location::geometry) AS longitude,
@@ -61,14 +70,39 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
             JOIN devices d ON d.id = r.device_id
             WHERE r.asset_id = {assetId} AND r.device_time >= {start} AND r.device_time < {end}
             ORDER BY r.device_time, r.device_id, r.boot, r.seq
-            LIMIT {MaxReadings + 1}
+            LIMIT {limit + 1}
             """).ToListAsync(cancellationToken);
-        if (readings.Count > MaxReadings)
+        if (readings.Count <= limit)
+        {
+            return readings;
+        }
+
+        if (thinTo is not { } points)
         {
             ModelState.AddModelError(nameof(to), $"The range holds more than {MaxReadings} Readings; ask for a shorter one.");
             return ValidationProblem(ModelState);
         }
 
-        return readings;
+        // Thinned: one index probe per slice of Device time, so the cost follows thinTo, not how many Readings the
+        // range holds (24 h at demo rate: about 1 s to number every Reading, tens of ms to probe, #126).
+        var slices = points - 1;
+        return await db.Database.SqlQuery<ReadingResponse>($"""
+            WITH span AS (
+                SELECT min(device_time) AS first, max(device_time) AS last FROM readings
+                WHERE asset_id = {assetId} AND device_time >= {start} AND device_time < {end})
+            SELECT d.serial_number AS device_serial_number, r.boot, r.seq AS sequence_number, r.device_time, r.received_time,
+                   ST_Y(r.location::geometry) AS latitude, ST_X(r.location::geometry) AS longitude,
+                   r.speed_kph, r.engine_temp_c, r.fuel_pct, r.vibration_mm_s, r.battery_v
+            FROM span, generate_series(0, {slices}) slice
+            CROSS JOIN LATERAL (
+                SELECT * FROM readings r
+                WHERE r.asset_id = {assetId}
+                  AND r.device_time >= span.first + (span.last - span.first) * slice / {slices}
+                  AND r.device_time < CASE WHEN slice = {slices} THEN {end} ELSE span.first + (span.last - span.first) * (slice + 1) / {slices} END
+                ORDER BY r.device_time
+                LIMIT 1) r
+            JOIN devices d ON d.id = r.device_id
+            ORDER BY slice
+            """).ToListAsync(cancellationToken);
     }
 }

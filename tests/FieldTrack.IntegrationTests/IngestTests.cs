@@ -249,6 +249,33 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
 
         tooMany.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         atTheCap.StatusCode.ShouldBe(HttpStatusCode.OK);
+        // Thinned for display, the same range is read: the cap bounds what one response holds, not what it covers.
+        (await ListAsync(admin, $"/assets/{asset}/readings?{Range(from, from.AddHours(1))}&thinTo=3000")).Length.ShouldBe(3000);
+    }
+
+    [Fact]
+    public async Task Asset_history_thinned_for_display_keeps_the_first_Reading_of_each_even_slice_of_Device_time_and_the_last()
+    {
+        using var admin = await AdminClientAsync();
+        var (device, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        var from = DateTimeOffset.UtcNow.AddHours(-1);
+        await using var database = await OpenDatabaseAsync();
+        // Eleven Readings, Sequence numbers 0 to 10, one a second. Thinned to 4: slices from 0, 3.3 and 6.7 s, and the last.
+        await SqlAsync(database, """
+            INSERT INTO readings (device_id, boot, seq, asset_id, device_time, received_time, location)
+            SELECT @p0, 1, g, @p1, @p2 + g * interval '1 second', now(), ST_SetSRID(ST_MakePoint(g, 0), 4326)::geography
+            FROM generate_series(0, 10) g
+            """, Guid.Parse(device), Guid.Parse(asset), from);
+        var range = Range(from, from.AddHours(1));
+
+        var thinned = await ListAsync(admin, $"/assets/{asset}/readings?{range}&thinTo=4");
+        var roomy = await ListAsync(admin, $"/assets/{asset}/readings?{range}&thinTo=11");
+        using var tooFew = await admin.GetAsync($"/assets/{asset}/readings?{range}&thinTo=1", CancellationToken);
+
+        thinned.Select(reading => reading.GetProperty("sequenceNumber").GetInt64()).ShouldBe([0, 4, 7, 10]);
+        thinned[1].GetProperty("longitude").GetDouble().ShouldBe(4, tolerance: 1e-9);
+        roomy.Length.ShouldBe(11);
+        tooFew.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
