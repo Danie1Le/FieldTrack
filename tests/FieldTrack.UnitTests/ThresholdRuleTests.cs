@@ -198,7 +198,7 @@ public sealed class ThresholdRuleTests
             Temp(1, 1, 99f), Temp(1, 2, 106f), Temp(1, 3, 98f), Temp(1, 4, 111f));
 
         evaluation.ResolveActiveAlertAt.ShouldBe(Temp(1, 1, 0).Reading.DeviceTime);
-        evaluation.Raised.Select(alert => (alert.Reading.SequenceNumber, alert.Status, alert.FromBacklog))
+        evaluation.Raised.Select(alert => (alert.Reading!.SequenceNumber, alert.Status, alert.FromBacklog))
             .ShouldBe([(2L, AlertStatus.Resolved, true), (4L, AlertStatus.Open, false)]);
         evaluation.State!.Breached.ShouldBeTrue();
     }
@@ -316,7 +316,7 @@ public sealed class ThresholdRuleTests
     }
 
     private static RuleEvaluation Evaluate(AlertRule rule, RuleState? state, params StoredReading[] readings) =>
-        RuleEvaluator.Evaluate(rule, _asset, state, readings, new FixedTime(_now));
+        RuleEvaluator.Evaluate(rule, _asset, attachedDeviceId: null, state, readings, new FixedTime(_now));
 
     private static AlertRule Rule(ThresholdSettings? settings) => new()
     {

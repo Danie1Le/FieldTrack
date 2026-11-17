@@ -18,8 +18,8 @@ public sealed class Alert
     /// <summary>The Asset it is about.</summary>
     public Guid AssetId { get; set; }
 
-    /// <summary>The Reading that raised it.</summary>
-    public required ReadingId Reading { get; set; }
+    /// <summary>The Reading that raised it; null for an Offline Alert, which silence raises, not a Reading.</summary>
+    public ReadingId? Reading { get; set; }
 
     /// <summary>The rule's Severity when it was raised.</summary>
     public Severity Severity { get; set; }
@@ -30,10 +30,16 @@ public sealed class Alert
     /// <summary>Where the Alert is in its lifecycle.</summary>
     public AlertStatus Status { get; set; }
 
-    /// <summary>Device time of the Reading that raised it (ADR 0005), so a backlog's Alert shows when it happened.</summary>
+    /// <summary>
+    /// Device time of the Reading that raised it (ADR 0005), so a backlog's Alert shows when it happened; for an
+    /// Offline Alert, the time of the sweep that raised it.
+    /// </summary>
     public DateTimeOffset RaisedAt { get; set; }
 
-    /// <summary>When it was Resolved; for the platform, the Device time of the Reading that cleared it. Null while Active.</summary>
+    /// <summary>
+    /// When it was Resolved; for the platform, the Device time of the Reading that cleared it, or for an Offline Alert
+    /// the platform time the next Reading was evaluated. Null while Active.
+    /// </summary>
     public DateTimeOffset? ResolvedAt { get; set; }
 
     /// <summary>Why it was Resolved; null while Active.</summary>

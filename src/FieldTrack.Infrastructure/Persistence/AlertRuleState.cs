@@ -17,12 +17,12 @@ public sealed class AlertRuleState
     /// <summary>Whether the condition held at the last evaluated Reading.</summary>
     public bool Breached { get; set; }
 
-    /// <summary>The last evaluated Reading's Device, so a straggler from it is recognised.</summary>
-    public Guid LastDeviceId { get; set; }
+    /// <summary>The last evaluated Reading's Device, so a straggler from it is recognised; null with the two below before any.</summary>
+    public Guid? LastDeviceId { get; set; }
 
     /// <summary>The last evaluated Reading's Boot.</summary>
-    public int LastBoot { get; set; }
+    public int? LastBoot { get; set; }
 
     /// <summary>The last evaluated Reading's Sequence number.</summary>
-    public long LastSequenceNumber { get; set; }
+    public long? LastSequenceNumber { get; set; }
 }

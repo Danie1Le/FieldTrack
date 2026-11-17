@@ -3,6 +3,7 @@ using FieldTrack.Infrastructure.Persistence;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace FieldTrack.Infrastructure.Ingest;
 
@@ -26,9 +27,16 @@ public sealed class AlertRuleRunner
     // Each rule with its Geofence, if any: Geofence edits bump the version too, so they reload with the rules.
     private const string LoadRules = """
         SELECT r.id, r.name, r.kind, r.asset_id, r.asset_group_id, r.severity, r.sensor, r.operator, r.threshold, r.hysteresis,
-               g.id, g.name, ST_AsBinary(g.area)
+               g.id, g.name, ST_AsBinary(g.area), r.offline_seconds
         FROM alert_rules r LEFT JOIN geofences g ON g.id = r.geofence_id
         WHERE r.enabled
+        """;
+
+    // ADR 0005 lock order: a sweep that raises locks its Assets, then the version. Returns the Assets still in use.
+    private const string LockSweptAssets = """
+        SELECT a.id FROM assets a JOIN attachments t ON t.asset_id = a.id AND t.detached_at IS NULL
+        WHERE a.id = ANY(@ids) AND NOT a.archived
+        ORDER BY a.id FOR KEY SHARE OF a
         """;
 
     private const string LoadStates = """
@@ -86,8 +94,9 @@ public sealed class AlertRuleRunner
         var states = new Dictionary<(Guid Rule, Guid Asset), RuleState>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            states[(reader.GetGuid(0), reader.GetGuid(1))] =
-                new RuleState(reader.GetBoolean(2), new ReadingId(reader.GetGuid(3), reader.GetInt32(4), reader.GetInt64(5)));
+            // ck_alert_rule_states_last_evaluated keeps the three columns all set or all null.
+            states[(reader.GetGuid(0), reader.GetGuid(1))] = new RuleState(reader.GetBoolean(2),
+                reader.IsDBNull(3) ? null : new ReadingId(reader.GetGuid(3), reader.GetInt32(4), reader.GetInt64(5)));
         }
 
         (_rules, _states, _version) = (rules, states, version);
@@ -104,14 +113,15 @@ public sealed class AlertRuleRunner
         List<Guid> raised = [];
         List<Guid> resolved = [];
         await using var writes = new NpgsqlBatch(transaction.Connection, transaction);
-        foreach (var asset in stored.GroupBy(reading => (reading.AssetId, reading.AssetGroupId)))
+        // One statement read every row, so an Asset's Readings agree on its group and attached Device.
+        foreach (var asset in stored.GroupBy(reading => (reading.AssetId, reading.AssetGroupId, reading.AttachedDeviceId)))
         {
-            var (assetId, assetGroupId) = asset.Key;
+            var (assetId, assetGroupId, attachedDeviceId) = asset.Key;
             foreach (var rule in _rules.Where(rule => rule.Targets(assetId, assetGroupId)))
             {
                 var key = (rule.Id, assetId);
                 var state = _states.GetValueOrDefault(key);
-                var evaluation = RuleEvaluator.Evaluate(rule, assetId, state, asset.Select(reading => reading.Reading), _time);
+                var evaluation = RuleEvaluator.Evaluate(rule, assetId, attachedDeviceId, state, asset.Select(reading => reading.Reading), _time);
                 // Resolve before inserting: the unique index allows one Active Alert per rule and Asset.
                 if (evaluation.ResolveActiveAlertAt is { } resolveAt)
                 {
@@ -127,9 +137,7 @@ public sealed class AlertRuleRunner
                 if (evaluation.State is { } newState && newState != state)
                 {
                     changed[key] = newState;
-                    writes.BatchCommands.Add(Command(SaveState,
-                        ("rule", rule.Id), ("asset", assetId), ("breached", newState.Breached), ("device", newState.LastEvaluated.DeviceId),
-                        ("boot", newState.LastEvaluated.Boot), ("seq", newState.LastEvaluated.SequenceNumber)));
+                    writes.BatchCommands.Add(Save(rule.Id, assetId, newState));
                 }
             }
         }
@@ -156,6 +164,117 @@ public sealed class AlertRuleRunner
         return new RuleOutcome(changed, raised, resolved);
     }
 
+    /// <summary>
+    /// Brings the enabled rules and rule state up to date for a sweep, over <paramref name="connection"/> outside any
+    /// batch: reads the Alert Rule version and reloads both when it moved. A sweep may come before any batch, or after a
+    /// change no batch has seen yet. Call it before reading what the sweep judges, so that is no older than the rules.
+    /// </summary>
+    public async Task RefreshAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        long version;
+        await using (var read = new NpgsqlCommand(ReadVersion, connection))
+        {
+            version = (long)(await read.ExecuteScalarAsync(cancellationToken))!;
+        }
+
+        var reload = ReloadCommands(version);
+        if (reload.Length == 0)
+        {
+            return;
+        }
+
+        await using var batch = new NpgsqlBatch(connection);
+        foreach (var command in reload)
+        {
+            batch.BatchCommands.Add(command);
+        }
+
+        await using var reader = await batch.ExecuteReaderAsync(cancellationToken);
+        await ReloadAsync(reader, version, cancellationToken);
+    }
+
+    /// <summary>
+    /// The sweep for Offline rules (ADR 0005), after <see cref="RefreshAsync"/>: checks the enabled rules against each of
+    /// <paramref name="assets"/>, the Assets in use with a Device attached, and raises an Offline Alert for each that has
+    /// been silent for the rule's seconds at <paramref name="at"/>, the sweep time, in a transaction of its own over
+    /// <paramref name="connection"/>. Nothing is raised before <paramref name="caughtUpAt"/>, when ingest caught up with the
+    /// broker backlog. Returns the ids of the Alerts raised.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> SweepAsync(
+        NpgsqlConnection connection, IReadOnlyList<AttachedAsset> assets, DateTimeOffset at, DateTimeOffset? caughtUpAt,
+        CancellationToken cancellationToken)
+    {
+        var raises = new List<(AlertRule Rule, Guid AssetId, RuleEvaluation Evaluation)>();
+        foreach (var asset in assets)
+        {
+            var tick = new SweepTick(at, asset.AttachedAt, asset.LastReceivedAt, caughtUpAt);
+            foreach (var rule in _rules.Where(rule => rule.Targets(asset.AssetId, asset.AssetGroupId)))
+            {
+                var evaluation = RuleEvaluator.Sweep(rule, asset.AssetId, _states.GetValueOrDefault((rule.Id, asset.AssetId)), tick, _time);
+                if (evaluation.Raised.Count > 0)
+                {
+                    raises.Add((rule, asset.AssetId, evaluation));
+                }
+            }
+        }
+
+        if (raises.Count == 0)
+        {
+            return [];
+        }
+
+        // ADR 0005 lock order, as a batch: the Assets, then the version. Every detach, Archive and rule change bumps the
+        // version before it touches Attachments, rules, Alerts or rule state, so if the version has not moved since the
+        // refresh, nothing this sweep judged by has changed, and a change that comes later waits for this commit and sees
+        // its Alert. If it has moved, raise nothing: the next sweep, a second later, reloads and judges again.
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        HashSet<Guid> lockedAssets = [];
+        long version;
+        await using (var locks = new NpgsqlBatch(connection, transaction)
+        {
+            BatchCommands = { Ids(LockSweptAssets, raises.Select(raise => raise.AssetId)), new(ReadVersion) },
+        })
+        await using (var reader = await locks.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                lockedAssets.Add(reader.GetGuid(0));
+            }
+
+            await reader.NextResultAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            version = reader.GetInt64(0);
+        }
+
+        if (version != _version)
+        {
+            return [];
+        }
+
+        var changed = new Dictionary<(Guid Rule, Guid Asset), RuleState>();
+        List<Guid> raised = [];
+        await using var writes = new NpgsqlBatch(connection, transaction);
+        foreach (var (rule, assetId, evaluation) in raises.Where(raise => lockedAssets.Contains(raise.AssetId)))
+        {
+            foreach (var alert in evaluation.Raised)
+            {
+                writes.BatchCommands.Add(Insert(alert));
+                raised.Add(alert.Id);
+            }
+
+            changed[(rule.Id, assetId)] = evaluation.State!;
+            writes.BatchCommands.Add(Save(rule.Id, assetId, evaluation.State!));
+        }
+
+        if (writes.BatchCommands.Count > 0)
+        {
+            await writes.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        Keep(changed);
+        return raised;
+    }
     /// <summary>Takes the rule states of a committed batch into memory.</summary>
     public void Keep(IReadOnlyDictionary<(Guid Rule, Guid Asset), RuleState> committed)
     {
@@ -192,6 +311,7 @@ public sealed class AlertRuleRunner
                 AssetGroupId = reader.IsDBNull(4) ? null : reader.GetGuid(4),
                 Severity = Enum.Parse<Severity>(reader.GetString(5)),
                 Enabled = true,
+                OfflineSeconds = reader.IsDBNull(13) ? null : reader.GetInt32(13),
                 // ck_alert_rules_threshold keeps the four settings all set and in range, or all null.
                 ThresholdSettings = reader.IsDBNull(6)
                     ? null
@@ -205,14 +325,28 @@ public sealed class AlertRuleRunner
         return rules;
     }
 
+    private static NpgsqlBatchCommand Save(Guid ruleId, Guid assetId, RuleState state) =>
+        Command(SaveState,
+            ("rule", ruleId), ("asset", assetId), ("breached", state.Breached),
+            ("device", (object?)state.LastEvaluated?.DeviceId ?? DBNull.Value), ("boot", (object?)state.LastEvaluated?.Boot ?? DBNull.Value),
+            ("seq", (object?)state.LastEvaluated?.SequenceNumber ?? DBNull.Value));
+
     private static NpgsqlBatchCommand Insert(Alert alert) =>
         Command(InsertAlert,
             ("id", alert.Id), ("rule", alert.AlertRuleId), ("asset", alert.AssetId),
-            ("device", alert.Reading.DeviceId), ("boot", alert.Reading.Boot), ("seq", alert.Reading.SequenceNumber),
+            ("device", (object?)alert.Reading?.DeviceId ?? DBNull.Value), ("boot", (object?)alert.Reading?.Boot ?? DBNull.Value),
+            ("seq", (object?)alert.Reading?.SequenceNumber ?? DBNull.Value),
             ("severity", alert.Severity.ToString()), ("message", alert.Message), ("status", alert.Status.ToString()),
             ("raised_at", alert.RaisedAt), ("resolved_at", (object?)alert.ResolvedAt ?? DBNull.Value),
             ("resolve_reason", (object?)alert.ResolveReason?.ToString() ?? DBNull.Value),
             ("created_at", alert.CreatedAt), ("from_backlog", alert.FromBacklog));
+
+    private static NpgsqlBatchCommand Ids(string sql, IEnumerable<Guid> ids)
+    {
+        var command = new NpgsqlBatchCommand(sql);
+        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, ids.Distinct().ToArray());
+        return command;
+    }
 
     private static NpgsqlBatchCommand Command(string sql, params (string Name, object Value)[] parameters)
     {
