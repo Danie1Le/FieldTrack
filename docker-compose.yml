@@ -31,6 +31,21 @@ services:
       - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
 
+  lgtm:
+    # Prometheus, Tempo, Loki and Grafana in one container, fed straight by the API over OTLP (#48, no Collector).
+    # Local only: Azure uses the Application Insights connection string instead. Grafana opens without a sign-in.
+    # Not in TestImages: no test starts it.
+    image: grafana/otel-lgtm:0.40.0
+    ports:
+      # Loopback only: Grafana and the OTLP receivers have no authentication.
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    # Telemetry is not kept across `docker compose down`.
+    volumes:
+      - ./docker/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/fieldtrack.yaml:ro
+      - ./docker/grafana/dashboards:/fieldtrack/dashboards:ro
+
   api:
     build:
       context: .
@@ -48,6 +63,12 @@ services:
       FIELDTRACK_ADMIN_EMAIL: ${FIELDTRACK_ADMIN_EMAIL:-}
       # Temporary password only: the first Admin must replace it at first sign-in (POST /auth/change-password, #61).
       FIELDTRACK_ADMIN_PASSWORD: ${FIELDTRACK_ADMIN_PASSWORD:-}
+      # Metrics, traces and logs go straight to the lgtm container (#48). Application Insights, set by the
+      # Azure deployment, takes precedence over this endpoint.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      # The default 60 s would leave the dashboard empty for a minute after every start.
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
     ports:
       # Loopback only: Development serves the developer exception page over plain HTTP.
       - "127.0.0.1:8080:8080"

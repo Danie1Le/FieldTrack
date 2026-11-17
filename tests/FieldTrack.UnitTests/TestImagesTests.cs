@@ -12,6 +12,8 @@ public sealed partial class TestImagesTests
         var composeImages = ImageLine()
             .Matches(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "docker-compose.yml")))
             .Select(match => match.Groups["image"].Value)
+            // No test starts the local Grafana stack (#48).
+            .Where(image => !image.StartsWith("grafana/otel-lgtm:", StringComparison.Ordinal))
             .Order();
 
         var testImages = typeof(TestImages)
