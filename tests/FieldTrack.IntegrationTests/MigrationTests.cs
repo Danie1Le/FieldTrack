@@ -1,3 +1,4 @@
+using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Telemetry;
 using Npgsql;
 
@@ -8,6 +9,8 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     private const string AssetId = "00000000-0000-0000-0000-000000000002";
     private const string AssetGroupId = "00000000-0000-0000-0000-000000000003";
     private const string AlertRuleId = "00000000-0000-0000-0000-000000000004";
+    // The seeded Admin, for columns that name a user.
+    private const string AnyUser = "(SELECT id FROM users LIMIT 1)";
 
     [Fact]
     public async Task Startup_in_development_creates_the_database_with_PostGIS_3_6()
@@ -141,9 +144,9 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     [InlineData("'Resolved'", "NULL", "NULL", false)]
     [InlineData("'Resolved'", "now()", "NULL", false)]
     [InlineData("'Open'", "now()", "'Cleared'", false)]
-    [InlineData("'Acknowledged'", "NULL", "'Manual'", false)]
+    [InlineData("'Open'", "NULL", "'Cleared'", false)]
     [InlineData("'Open'", "NULL", "NULL", true)]
-    [InlineData("'Resolved'", "now()", "'Manual'", true)]
+    [InlineData("'Resolved'", "now()", "'RuleChanged'", true)]
     public async Task Database_refuses_an_Alert_whose_status_and_resolution_disagree(string status, string resolvedAt, string resolveReason, bool fromBacklog)
     {
         await InsertRuleAsync();
@@ -154,13 +157,57 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
         failure.ConstraintName.ShouldBe("ck_alerts_resolution");
     }
 
+    [Theory]
+    [InlineData("'Open'", AnyUser, "now()")]
+    [InlineData("'Acknowledged'", "NULL", "NULL")]
+    [InlineData("'Acknowledged'", AnyUser, "NULL")]
+    [InlineData("'Acknowledged'", "NULL", "now()")]
+    public async Task Database_refuses_an_Alert_whose_status_and_acknowledgement_disagree(string status, string acknowledgedBy, string acknowledgedAt)
+    {
+        await InsertRuleAsync();
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(InsertAlert(
+            ("status", status), ("acknowledged_by", acknowledgedBy), ("acknowledged_at", acknowledgedAt))));
+
+        failure.ConstraintName.ShouldBe("ck_alerts_status_acknowledged");
+    }
+
+    [Theory]
+    [InlineData("'Manual'", "NULL", "NULL", false)]
+    [InlineData("'Cleared'", AnyUser, "NULL", false)]
+    [InlineData("'Cleared'", "NULL", "'n'", false)]
+    [InlineData("'Cleared'", "NULL", "NULL", true)]
+    public async Task Database_refuses_a_resolving_user_note_or_latch_on_an_Alert_not_Resolved_by_hand(
+        string resolveReason, string resolvedBy, string note, bool latched)
+    {
+        await InsertRuleAsync();
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(Resolved(
+            ("resolve_reason", resolveReason), ("resolved_by", resolvedBy), ("note", note), ("latched", latched ? "true" : "false"))));
+
+        failure.ConstraintName.ShouldBe("ck_alerts_resolved_by");
+    }
+
+    [Fact]
+    public async Task Database_keeps_an_Alert_Resolved_by_hand_with_its_user_note_and_latch_and_refuses_a_note_longer_than_MaxNoteLength()
+    {
+        await InsertRuleAsync();
+        (string, string)[] byHand = [("resolve_reason", "'Manual'"), ("resolved_by", AnyUser), ("latched", "true")];
+        await ExecuteAsync(Resolved([.. byHand, ("note", $"repeat('n', {Alert.MaxNoteLength})")]));
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(Resolved([.. byHand, ("note", $"repeat('n', {Alert.MaxNoteLength + 1})")])));
+
+        failure.SqlState.ShouldBe(PostgresErrorCodes.StringDataRightTruncation);
+    }
+
     [Fact]
     public async Task Database_allows_one_Active_Alert_per_Alert_Rule_and_Asset_besides_any_number_of_Resolved_ones()
     {
         await InsertRuleAsync();
         await ExecuteAsync($"{Resolved()};{Resolved(("from_backlog", "true"))};{InsertAlert()}");
 
-        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(InsertAlert(("status", "'Acknowledged'"))));
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(InsertAlert(
+            ("status", "'Acknowledged'"), ("acknowledged_by", AnyUser), ("acknowledged_at", "now()"))));
 
         failure.ConstraintName.ShouldBe("ix_alerts_alert_rule_id_asset_id_active");
     }
@@ -170,7 +217,7 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     {
         await InsertRuleAsync();
         await ExecuteAsync(InsertAlert());
-        await ExecuteAsync("UPDATE alerts SET status = 'Resolved', resolved_at = now(), resolve_reason = 'Manual'");
+        await ExecuteAsync("UPDATE alerts SET status = 'Resolved', resolved_at = now(), resolve_reason = 'Cleared'");
 
         await ExecuteAsync(InsertAlert());
 
