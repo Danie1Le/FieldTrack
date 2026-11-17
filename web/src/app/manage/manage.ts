@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet, Routes } from '@angular/router';
 import { AuthService } from '../auth/auth';
+import { AlertRulesPage } from './alert-rules-page';
 import { AssetsPage } from './assets-page';
 import { DevicesPage } from './devices-page';
 
@@ -15,6 +16,7 @@ import { DevicesPage } from './devices-page';
       <nav aria-label="Management screens">
         <a class="btn" routerLink="assets" routerLinkActive="current" ariaCurrentWhenActive="page">Assets</a>
         <a class="btn" routerLink="devices" routerLinkActive="current" ariaCurrentWhenActive="page">Devices</a>
+        <a class="btn" routerLink="alert-rules" routerLinkActive="current" ariaCurrentWhenActive="page">Alert Rules</a>
       </nav>
       <nav class="links">
         <a class="btn" routerLink="/geofences">Geofences</a>
@@ -47,6 +49,7 @@ export const manageRoutes: Routes = [
       { path: '', pathMatch: 'full', redirectTo: 'assets' },
       { path: 'assets', component: AssetsPage, title: 'Assets · FieldTrack' },
       { path: 'devices', component: DevicesPage, title: 'Devices · FieldTrack' },
+      { path: 'alert-rules', component: AlertRulesPage, title: 'Alert Rules · FieldTrack' },
     ],
   },
 ];
