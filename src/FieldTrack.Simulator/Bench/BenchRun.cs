@@ -8,8 +8,10 @@ namespace FieldTrack.Simulator.Bench;
 /// <param name="ReadingsAtStart">How many Readings the database held before the run.</param>
 /// <param name="ClockOffsets">The database clock's offset from this machine's before and after the run.</param>
 /// <param name="TickToPubackMs">Per Reading, milliseconds from the Device's tick to the broker's PUBACK, which ingest sends only after commit and WAL flush.</param>
+/// <param name="SideTaskFailure">Why the task that ran beside the publishing failed (which also ended the publishing early), or null.</param>
 internal sealed record MeasuredRun(
-    RunManifest Manifest, IReadOnlyList<double> Backlog, long BrokerReceived, double? DrainSeconds, long ReadingsAtStart, ClockOffsets ClockOffsets, IReadOnlyList<double> TickToPubackMs)
+    RunManifest Manifest, IReadOnlyList<double> Backlog, long BrokerReceived, double? DrainSeconds, long ReadingsAtStart, ClockOffsets ClockOffsets, IReadOnlyList<double> TickToPubackMs,
+    string? SideTaskFailure = null)
 {
     /// <summary>Readings the Manifest lists.</summary>
     public long Published => Manifest.Published;
@@ -32,7 +34,8 @@ internal static class BenchRun
 
     /// <summary>
     /// Publishes <paramref name="rate"/> Readings per second (flat out when null) for <paramref name="duration"/> and waits for them to be stored.
-    /// <paramref name="during"/>, if given, runs beside the publishing and is cancelled when it ends (the crash benchmark kills ingest there).
+    /// <paramref name="during"/>, if given, runs beside the publishing and is cancelled when it ends (the crash benchmark kills ingest there);
+    /// if it fails, the publishing stops at once (there is nothing left to measure) and the failure is in <see cref="MeasuredRun.SideTaskFailure"/>.
     /// </summary>
     public static async Task<MeasuredRun> RunAsync(
         FleetFile fleet, BenchTarget target, string bench, double? rate, TimeSpan duration, Func<CancellationToken, Task>? during, TextWriter log, CancellationToken cancellationToken)
@@ -46,7 +49,7 @@ internal static class BenchRun
         using var publishing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var backlog = new List<double>();
         var sampling = SampleBacklogAsync(counters, backlog, log, publishing.Token);
-        var alongside = during?.Invoke(publishing.Token) ?? Task.CompletedTask;
+        var alongside = AlongsideAsync(during, publishing);
 
         var tickToPuback = new List<double>();
         var options = new RunOptions(
@@ -61,7 +64,7 @@ internal static class BenchRun
         RunManifest manifest;
         try
         {
-            manifest = await FleetRunner.RunAsync(fleet, options, log, TimeProvider.System, cancellationToken);
+            manifest = await FleetRunner.RunAsync(fleet, options, log, TimeProvider.System, publishing.Token);
         }
         finally
         {
@@ -69,12 +72,35 @@ internal static class BenchRun
             await sampling;
         }
 
-        // A failure of the side task (a container that would not restart) must fail the benchmark, not pass quietly.
-        await alongside;
+        // A failure of the side task (a container that would not restart) must fail the benchmark, not pass quietly: the caller judges it.
+        var sideTaskFailure = await alongside;
         var offsetAfter = await target.Database.ClockOffsetAsync(cancellationToken);
         var drain = await WaitForStoredAsync(target.Database, manifest, cancellationToken);
         await BrokerCounters.SettleAsync(cancellationToken);
-        return new MeasuredRun(manifest, backlog, counters.PublishesReceived - receivedBefore, drain, readingsAtStart, new ClockOffsets(offsetBefore, offsetAfter), tickToPuback);
+        return new MeasuredRun(manifest, backlog, counters.PublishesReceived - receivedBefore, drain, readingsAtStart, new ClockOffsets(offsetBefore, offsetAfter), tickToPuback, sideTaskFailure);
+    }
+
+    private static async Task<string?> AlongsideAsync(Func<CancellationToken, Task>? during, CancellationTokenSource publishing)
+    {
+        if (during is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            await during(publishing.Token);
+            return null;
+        }
+        catch (OperationCanceledException) when (publishing.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception exception)
+        {
+            await publishing.CancelAsync();
+            return exception.Message;
+        }
     }
 
     private static async Task SampleBacklogAsync(BrokerCounters counters, List<double> samples, TextWriter log, CancellationToken stop)

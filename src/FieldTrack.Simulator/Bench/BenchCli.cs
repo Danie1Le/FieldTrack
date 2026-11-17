@@ -61,6 +61,14 @@ internal static class BenchCli
     {
         var kills = CrashSchedule.Plan((int)(options.GetNumber("kills") ?? 10), duration, new Random());
         var ingest = await DockerIngest.FindAsync(target.ComposeProject, ApiAddress(options), cancellationToken);
+
+        // A probe kill before anything is published: if /health does not go down, nothing a run would measure is a crash, so it does not start.
+        var probe = await ingest.KillAndRestartAsync(cancellationToken);
+        if (!probe.WentDown)
+        {
+            throw new SimulatorException($"Killing container {probe.Container} did not take {ApiAddress(options)}health down, so it is not the stack being measured. Not starting the run.");
+        }
+
         return await CrashBench.RunAsync(fleet, target, rate, duration, kills, ingest.KillAndRestartAsync, Console.Out, cancellationToken);
     }
 
