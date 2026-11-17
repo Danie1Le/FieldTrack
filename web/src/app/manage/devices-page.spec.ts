@@ -79,6 +79,26 @@ describe('DevicesPage', () => {
     await serve([device('trk9', 'TRK-009')]);
   });
 
+  it('builds the attach form afresh for each Device, so an unsaved choice never attaches another Device', async () => {
+    view.button('Detach', 'TRK-007').click();
+    await view.settle();
+    view.button('Yes, detach').click();
+    api.expectOne({ method: 'POST', url: '/api/attachments/now/detach' }).flush(null);
+    await serve([device('trk7', 'TRK-007'), device('trk9', 'TRK-009')], []);
+
+    view.button('Attach', 'TRK-007').click();
+    await view.settle();
+    view.fill('assetId', 'truck8');
+    view.button('Attach', 'TRK-009').click();
+    await view.settle();
+    view.button('Save').click();
+
+    const attach = api.expectOne({ method: 'POST', url: '/api/attachments' });
+    expect(attach.request.body).toEqual({ deviceId: 'trk9', assetId: 'truck7' });
+    attach.flush(attachment('new', 'trk9', 'truck7', '2026-11-17T11:00:00Z'));
+    await serve([device('trk9', 'TRK-009')]);
+  });
+
   it('detaches a Device only once the Admin confirms it in the page', async () => {
     view.button('Detach', 'TRK-007').click();
     await view.settle();

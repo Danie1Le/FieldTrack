@@ -28,7 +28,8 @@
       </form>
     }
 
-    @if (attaching(); as device) {
+    @for (session of attaching.sessions(); track session) {
+      @let device = session.item;
       <form (submit)="$event.preventDefault(); attach($any($event.target))">
         <h3>Attach {{ device.serialNumber }}</h3>
         @if (freeAssets().length) {
@@ -70,7 +71,7 @@
                   (confirmed)="detach(attachment)"
                 />
               } @else {
-                <button type="button" class="btn" (click)="cancel(); attaching.set(device)">Attach</button>
+                <button type="button" class="btn" (click)="cancel(); attaching.open(device)">Attach</button>
               }
               <button type="button" class="btn" (click)="history.set(device)">History</button>
               <app-confirm-action
