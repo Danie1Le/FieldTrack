@@ -82,12 +82,20 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     [Fact]
     public async Task Deleting_an_Asset_with_Readings_Archives_it_and_lists_hide_it_unless_asked()
     {
-        // Readings arrive with #26, which also tests this with a real Reading; until then the
-        // "Asset has Readings" seam answers yes.
-        await using var api = ApiWhereEverythingHasReadings();
+        await using var api = await StartIngestAsync();
         using var admin = await AdminClientAsync(api);
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
         await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+        var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
+        await CreateAsync(admin, "/attachments", new { deviceId = device, assetId = asset });
+        await using (var publisher = await TelemetryPublisher.ConnectAsync(Fixture))
+        {
+            await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+        }
+
+        await EventuallyAsync(
+            () => ListAsync(admin, "/devices"),
+            devices => devices.Single().GetProperty("lastReceivedAt").ValueKind != JsonValueKind.Null);
 
         using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
         var listed = await ListAsync(admin, "/assets");

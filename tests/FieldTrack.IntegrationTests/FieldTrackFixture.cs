@@ -52,6 +52,12 @@ public sealed class FieldTrackFixture : IAsyncLifetime
     /// <summary>The API host, running against the test containers in the Development environment.</summary>
     public FieldTrackApiFactory Api { get; private set; } = null!;
 
+    /// <summary>Host name of the test broker.</summary>
+    public string BrokerHost => _broker.Hostname;
+
+    /// <summary>Port of the test broker on <see cref="BrokerHost"/>.</summary>
+    public int BrokerPort => _broker.GetMappedPublicPort(MqttPort);
+
     /// <summary>Connection string for the database the API host migrates and uses.</summary>
     public string DatabaseConnectionString =>
         new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString()) { Database = "fieldtrack" }.ConnectionString;
@@ -61,7 +67,7 @@ public sealed class FieldTrackFixture : IAsyncLifetime
     {
         await Task.WhenAll(_postgres.StartAsync(), _broker.StartAsync());
 
-        Api = new FieldTrackApiFactory(DatabaseConnectionString, _broker.Hostname, _broker.GetMappedPublicPort(MqttPort));
+        Api = new FieldTrackApiFactory(DatabaseConnectionString, BrokerHost, BrokerPort);
         Api.StartServer();
 
         await using var connection = new NpgsqlConnection(DatabaseConnectionString);

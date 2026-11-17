@@ -10,8 +10,6 @@ namespace FieldTrack.IntegrationTests;
 
 public sealed class DatabaseMaintenanceTests(FieldTrackFixture fixture) : IntegrationTest(fixture)
 {
-    private static readonly TimeSpan _patience = TimeSpan.FromSeconds(15);
-
     [Fact]
     public async Task Startup_creates_daily_Reading_partitions_from_7_days_back_to_7_days_ahead()
     {
@@ -139,20 +137,5 @@ public sealed class DatabaseMaintenanceTests(FieldTrackFixture fixture) : Integr
         var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
         await connection.OpenAsync(CancellationToken);
         return connection;
-    }
-
-    private static async Task<T> EventuallyAsync<T>(Func<Task<T>> read, Func<T, bool> done)
-    {
-        var deadline = DateTime.UtcNow + _patience;
-        while (true)
-        {
-            var value = await read();
-            if (done(value) || DateTime.UtcNow > deadline)
-            {
-                return value;
-            }
-
-            await Task.Delay(100, CancellationToken);
-        }
     }
 }
