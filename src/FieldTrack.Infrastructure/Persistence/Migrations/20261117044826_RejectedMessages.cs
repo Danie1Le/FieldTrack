@@ -18,7 +18,8 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                 {
                     id = table.Column<long>(type: "bigint", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    topic = table.Column<string>(type: "text", nullable: false),
+                    topic = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
+                    topic_clipped = table.Column<bool>(type: "boolean", nullable: false),
                     payload = table.Column<byte[]>(type: "bytea", nullable: false),
                     reason = table.Column<string>(type: "text", nullable: false),
                     received_time = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
@@ -28,6 +29,16 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     table.PrimaryKey("pk_rejected_messages", x => x.id);
                     table.CheckConstraint("ck_rejected_messages_reason", "reason IN ('BadJson', 'MissingField', 'PositionOutOfRange', 'TooFarAhead', 'TooLate', 'UnknownTopicVersion', 'UnknownSerialNumber', 'ArchivedDevice')");
                 });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_rejected_messages_received_time",
+                table: "rejected_messages",
+                column: "received_time");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_rejected_messages_topic_received_time",
+                table: "rejected_messages",
+                columns: new[] { "topic", "received_time" });
         }
 
         /// <inheritdoc />

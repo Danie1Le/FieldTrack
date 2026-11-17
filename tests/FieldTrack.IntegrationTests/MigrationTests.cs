@@ -1,3 +1,4 @@
+using FieldTrack.Domain.Telemetry;
 using Npgsql;
 
 namespace FieldTrack.IntegrationTests;
@@ -50,16 +51,27 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     public async Task Database_keeps_a_Rejected_message_by_reason_name_and_refuses_an_unknown_reason()
     {
         await ExecuteAsync("""
-            INSERT INTO rejected_messages (topic, payload, reason, received_time)
-            VALUES ('fieldtrack/v2/devices/TRK-007/telemetry', '\x7b7d', 'UnknownTopicVersion', now())
+            INSERT INTO rejected_messages (topic, topic_clipped, payload, reason, received_time)
+            VALUES ('fieldtrack/v2/devices/TRK-007/telemetry', false, '\x7b7d', 'UnknownTopicVersion', now())
             """);
 
         var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync("""
-            INSERT INTO rejected_messages (topic, payload, reason, received_time)
-            VALUES ('fieldtrack/v1/devices/TRK-007/telemetry', '\x7b7d', 'Unreadable', now())
+            INSERT INTO rejected_messages (topic, topic_clipped, payload, reason, received_time)
+            VALUES ('fieldtrack/v1/devices/TRK-007/telemetry', false, '\x7b7d', 'Unreadable', now())
             """));
 
         failure.ConstraintName.ShouldBe("ck_rejected_messages_reason");
+    }
+
+    [Fact]
+    public async Task Database_refuses_a_Rejected_message_topic_longer_than_MaxTopicLength()
+    {
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync($"""
+            INSERT INTO rejected_messages (topic, topic_clipped, payload, reason, received_time)
+            VALUES (repeat('x', {RejectedMessage.MaxTopicLength + 1}), false, '\x7b7d', 'UnknownSerialNumber', now())
+            """));
+
+        failure.SqlState.ShouldBe(PostgresErrorCodes.StringDataRightTruncation);
     }
 
     private async Task ExecuteAsync(string sql)

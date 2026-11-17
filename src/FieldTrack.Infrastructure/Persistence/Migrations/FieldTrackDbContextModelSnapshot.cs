@@ -184,11 +184,22 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Topic")
                         .IsRequired()
-                        .HasColumnType("text")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("topic");
+
+                    b.Property<bool>("TopicClipped")
+                        .HasColumnType("boolean")
+                        .HasColumnName("topic_clipped");
 
                     b.HasKey("Id")
                         .HasName("pk_rejected_messages");
+
+                    b.HasIndex("ReceivedTime")
+                        .HasDatabaseName("ix_rejected_messages_received_time");
+
+                    b.HasIndex("Topic", "ReceivedTime")
+                        .HasDatabaseName("ix_rejected_messages_topic_received_time");
 
                     b.ToTable("rejected_messages", null, t =>
                         {
