@@ -6,7 +6,8 @@ namespace FieldTrack.Domain.Alerts;
 /// <summary>
 /// The rules engine (ADR 0005): given an Alert Rule, one Asset's rule state and that Asset's newly stored
 /// Readings, works out the new rule state and the Alerts to raise and resolve. No I/O, so ingest can run it
-/// inside the batch transaction and tests can drive it directly.
+/// inside the batch transaction and tests can drive it directly. It takes a whole batch rather than one Reading so
+/// that a backlog's breach can be raised and resolved together; every rule kind goes through this one entry point.
 /// </summary>
 public static class RuleEvaluator
 {
@@ -21,12 +22,14 @@ public static class RuleEvaluator
     /// <param name="time">The platform clock, for <see cref="Alert.CreatedAt"/>.</param>
     public static RuleEvaluation Evaluate(AlertRule rule, Guid assetId, RuleState? state, IEnumerable<StoredReading> readings, TimeProvider time)
     {
-        DateTimeOffset? activeAlertClearedAt = null;
+        DateTimeOffset? resolveActiveAlertAt = null;
         var raised = new List<Alert>();
-        // ADR 0005: each Device's Readings in (Boot, Sequence number) order, never Device time; GroupBy keeps the
-        // Devices in arrival order, and a Device swap counts as newer.
+        // ADR 0005: each Device's Readings in (Boot, Sequence number) order, never Device time. The Device evaluated
+        // last goes first, so its stragglers are judged against its own last Reading; any other Device counts as newer.
+        var lastDevice = state?.LastEvaluated.DeviceId;
         var ordered = readings
             .GroupBy(stored => stored.DeviceId)
+            .OrderBy(device => device.Key != lastDevice)
             .SelectMany(device => device.OrderBy(stored => stored.Reading.Boot).ThenBy(stored => stored.Reading.SequenceNumber));
         foreach (var stored in ordered)
         {
@@ -36,9 +39,7 @@ public static class RuleEvaluator
                 continue;
             }
 
-            // Unknown state counts as clear.
-            var wasBreached = state?.Breached ?? false;
-            if (BreachedAfter(rule, stored.Reading, wasBreached) is not { } breached)
+            if (Transition(rule, stored.Reading, state?.Breached) is not (var wasBreached, var breached))
             {
                 continue;
             }
@@ -61,38 +62,46 @@ public static class RuleEvaluator
                 }
                 else
                 {
-                    activeAlertClearedAt = stored.Reading.DeviceTime;
+                    resolveActiveAlertAt = stored.Reading.DeviceTime;
                 }
             }
         }
 
-        return new RuleEvaluation(state, activeAlertClearedAt, raised);
+        return new RuleEvaluation(state, resolveActiveAlertAt, raised);
     }
 
-    /// <summary>Whether the condition holds after <paramref name="reading"/>, or null when the Reading changes nothing.</summary>
-    private static bool? BreachedAfter(AlertRule rule, Reading reading, bool breached) =>
-        rule.Kind switch
+    /// <summary>
+    /// Whether the condition held before and holds after <paramref name="reading"/>, given the stored
+    /// <paramref name="breached"/> (null when unknown), or null when the Reading changes nothing. Each kind decides
+    /// what unknown means, so a kind can take its first Reading as a baseline instead of a transition.
+    /// </summary>
+    private static (bool Was, bool Now)? Transition(AlertRule rule, Reading reading, bool? breached) =>
+        rule switch
         {
-            AlertRuleKind.Threshold => ThresholdBreachedAfter(rule, reading, breached),
-            _ => throw new ArgumentOutOfRangeException(nameof(rule), rule.Kind, "Unknown Alert Rule kind."),
+            { Kind: AlertRuleKind.Threshold, ThresholdSettings: { } threshold } => ThresholdTransition(threshold, reading, breached),
+            // A kind without its settings evaluates nothing rather than fail the ingest batch; the schema refuses it.
+            _ => null,
         };
 
     // #10: deadband only. With > 105 and Hysteresis 5, breach above 105 and clear below 100; mirrored for <.
-    // A Reading without the sensor neither raises nor clears.
-    private static bool? ThresholdBreachedAfter(AlertRule rule, Reading reading, bool breached)
+    // ADR 0005: unknown state counts as clear. A Reading without the sensor neither raises nor clears.
+    private static (bool Was, bool Now)? ThresholdTransition(ThresholdSettings settings, Reading reading, bool? breached)
     {
-        if (ValueOf(rule.Sensor!.Value, reading) is not { } value)
+        if (SensorOf(settings.Sensor).Value(reading) is not { } value)
         {
             return null;
         }
 
-        var (threshold, hysteresis) = (rule.Threshold!.Value, rule.Hysteresis!.Value);
-        return rule.Operator switch
+        // Compared at the float precision the Device sends, so a Reading of exactly 10.1 is not past a threshold of 10.1.
+        var was = breached ?? false;
+        var (threshold, hysteresis) = (settings.Threshold, settings.Hysteresis);
+        var now = settings.Operator switch
         {
-            ThresholdOperator.GreaterThan => breached ? value >= threshold - hysteresis : value > threshold,
-            ThresholdOperator.LessThan => breached ? value <= threshold + hysteresis : value < threshold,
-            _ => throw new ArgumentOutOfRangeException(nameof(rule), rule.Operator, "Unknown threshold operator."),
+            ThresholdOperator.GreaterThan => was ? value >= (float)(threshold - hysteresis) : value > (float)threshold,
+            ThresholdOperator.LessThan => was ? value <= (float)(threshold + hysteresis) : value < (float)threshold,
+            _ => throw new ArgumentOutOfRangeException(nameof(settings), settings.Operator, "Unknown threshold operator."),
         };
+        return (was, now);
     }
 
     private static Alert Raise(AlertRule rule, Guid assetId, StoredReading stored, TimeProvider time)
@@ -105,40 +114,36 @@ public static class RuleEvaluator
             AssetId = assetId,
             Reading = stored.Id,
             Severity = rule.Severity,
-            Message = Message(rule, stored.Reading),
+            Message = Message(rule.ThresholdSettings!, stored.Reading),
             Status = AlertStatus.Open,
             RaisedAt = stored.Reading.DeviceTime,
             CreatedAt = createdAt,
         };
     }
 
-    private static string Message(AlertRule rule, Reading reading)
+    private static string Message(ThresholdSettings settings, Reading reading)
     {
-        var (label, unit) = rule.Sensor switch
+        var (label, unit, value) = SensorOf(settings.Sensor);
+        var (threshold, hysteresis) = (settings.Threshold, settings.Hysteresis);
+        var (side, clears, clearsAt) = settings.Operator switch
         {
-            Sensor.SpeedKph => ("Speed", "km/h"),
-            Sensor.EngineTempC => ("Engine temp", "°C"),
-            Sensor.FuelPct => ("Fuel", "%"),
-            Sensor.VibrationMmS => ("Vibration", "mm/s"),
-            Sensor.BatteryV => ("Battery", "V"),
-            _ => throw new ArgumentOutOfRangeException(nameof(rule), rule.Sensor, "Unknown sensor."),
+            ThresholdOperator.GreaterThan => ("above", "below", threshold - hysteresis),
+            ThresholdOperator.LessThan => ("below", "above", threshold + hysteresis),
+            _ => throw new ArgumentOutOfRangeException(nameof(settings), settings.Operator, "Unknown threshold operator."),
         };
-        var (threshold, hysteresis) = (rule.Threshold!.Value, rule.Hysteresis!.Value);
-        var (side, clears, clearsAt) = rule.Operator == ThresholdOperator.GreaterThan
-            ? ("above", "below", threshold - hysteresis)
-            : ("below", "above", threshold + hysteresis);
         return string.Create(CultureInfo.InvariantCulture,
-            $"{label} {ValueOf(rule.Sensor!.Value, reading):0.##} {unit}, {side} {threshold:0.##} (clears {clears} {clearsAt:0.##})");
+            $"{label} {value(reading):0.##} {unit}, {side} {threshold:0.##} (clears {clears} {clearsAt:0.##})");
     }
 
-    private static double? ValueOf(Sensor sensor, Reading reading) =>
+    // The one table of sensors: how people read it and where a Reading carries it.
+    private static (string Label, string Unit, Func<Reading, float?> Value) SensorOf(Sensor sensor) =>
         sensor switch
         {
-            Sensor.SpeedKph => reading.SpeedKph,
-            Sensor.EngineTempC => reading.EngineTempC,
-            Sensor.FuelPct => reading.FuelPct,
-            Sensor.VibrationMmS => reading.VibrationMmS,
-            Sensor.BatteryV => reading.BatteryV,
+            Sensor.SpeedKph => ("Speed", "km/h", reading => reading.SpeedKph),
+            Sensor.EngineTempC => ("Engine temp", "°C", reading => reading.EngineTempC),
+            Sensor.FuelPct => ("Fuel", "%", reading => reading.FuelPct),
+            Sensor.VibrationMmS => ("Vibration", "mm/s", reading => reading.VibrationMmS),
+            Sensor.BatteryV => ("Battery", "V", reading => reading.BatteryV),
             _ => throw new ArgumentOutOfRangeException(nameof(sensor), sensor, "Unknown sensor."),
         };
 }
