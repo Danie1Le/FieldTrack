@@ -5,4 +5,10 @@ public enum AlertRuleKind
 {
     /// <summary>A sensor value past a threshold, with Hysteresis before it clears.</summary>
     Threshold,
+
+    /// <summary>An Asset seen inside the rule's Geofence and then outside it.</summary>
+    GeofenceExit,
+
+    /// <summary>An Asset seen outside the rule's Geofence and then inside it.</summary>
+    GeofenceEnter,
 }
