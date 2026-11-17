@@ -61,6 +61,15 @@ public sealed class FleetFileTests
     }
 
     [Fact]
+    public void The_committed_bench_fleet_has_200_Devices_that_random_walk()
+    {
+        var fleet = FleetFile.Load(Path.Combine(AppContext.BaseDirectory, "fleets", "bench.json"));
+
+        fleet.Devices.Count.ShouldBe(200);
+        fleet.Devices.ShouldAllBe(device => device.Route == null && device.Position == null);
+    }
+
+    [Fact]
     public void A_Device_with_neither_route_nor_position_is_allowed_and_random_walks()
     {
         var fleet = FleetFile.Parse("""{ "devices": [ { "serial": "TRK-001", "assetType": "Truck" } ] }""", Base);
