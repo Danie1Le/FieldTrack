@@ -87,6 +87,7 @@ describe('SignIn', () => {
 
   it("shows the Demo Operator's credentials in demo mode and signs in with them", async () => {
     api.expectOne('/api/auth/demo-operator').flush({ email: 'demo@example.com', password: '<b>Demo-pass-1</b>' });
+    await new Promise((resolve) => setTimeout(resolve)); // lets AuthService.demoOperator() resolve
     await fixture.whenStable();
 
     const demo = page.querySelector('.demo')!;
@@ -104,6 +105,7 @@ describe('SignIn', () => {
 
   it('offers no Demo Operator outside demo mode', async () => {
     api.expectOne('/api/auth/demo-operator').flush(null, { status: 404, statusText: 'Not Found' });
+    await new Promise((resolve) => setTimeout(resolve));
     await fixture.whenStable();
 
     expect(page.querySelector('.demo')).toBeNull();
