@@ -28,7 +28,7 @@ public sealed partial class IngestWorker(
     TimeProvider time,
     IMeterFactory meters,
     ILogger<IngestWorker> logger,
-    IIngestFaultInjector? faults = null) : BackgroundService
+    IIngestCrashPoints? crashes = null) : BackgroundService
 {
     /// <summary>
     /// Every Device's telemetry topic, <c>fieldtrack/{version}/devices/{serialNumber}/telemetry</c>, in every
@@ -53,7 +53,7 @@ public sealed partial class IngestWorker(
 
     /// <summary>
     /// The counter of Readings dropped as conflicting duplicates: the same key as the stored copy but a different content
-    /// hash, which a correct Device never sends, so it points at a Device bug (spec #21).
+    /// hash, which a correct Device never sends, so it points at a Device bug (ADR 0001).
     /// </summary>
     public const string ConflictingDuplicatesInstrument = "fieldtrack.ingest.conflicting_duplicates";
 
@@ -143,7 +143,7 @@ public sealed partial class IngestWorker(
             return Task.CompletedTask;
         };
 
-        await using var writer = await ReadingWriter.OpenAsync(dataSource, time, stoppingToken, faults);
+        await using var writer = await ReadingWriter.OpenAsync(dataSource, time, stoppingToken, crashes);
         var connected = await client.ConnectAsync(ClientOptions(), stoppingToken);
         // MQTTnet returns a refused CONNACK (bad credentials, say) instead of throwing.
         if (connected.ResultCode != MqttClientConnectResultCode.Success)
@@ -177,7 +177,7 @@ public sealed partial class IngestWorker(
 
                 _identicalDuplicates.Add(written.IdenticalDuplicates);
                 _conflictingDuplicates.Add(written.ConflictingDuplicates);
-                faults?.Reached(IngestFaultPoint.AfterCommit);
+                crashes?.Reached(IngestCrashPoint.AfterCommit);
 
                 // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
                 // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.

@@ -339,7 +339,7 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task A_Rejected_message_redelivered_after_its_batch_committed_is_stored_and_counted_once()
     {
-        var clientId = $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+        var clientId = NewIngestClientId();
         await using var api = await StartIngestAsync(clientId: clientId);
         using var admin = await AdminClientAsync(api);
         var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
@@ -370,7 +370,7 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task A_session_still_subscribed_to_the_retired_v1_filter_receives_each_message_once()
     {
-        var clientId = $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+        var clientId = NewIngestClientId();
         // The filter ingest subscribed to before Rejected messages, kept by a session that outlived the upgrade.
         await TelemetryPublisher.CreateIngestSessionAsync(Fixture, clientId, "fieldtrack/v1/devices/+/telemetry");
         await using var api = await StartIngestAsync(clientId: clientId);

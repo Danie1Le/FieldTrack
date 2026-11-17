@@ -27,13 +27,7 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     /// </summary>
     public static async Task CreateIngestSessionAsync(FieldTrackFixture fixture, string clientId, string topicFilter = IngestWorker.TopicFilter)
     {
-        using var client = new MqttClientFactory().CreateMqttClient();
-        client.ApplicationMessageReceivedAsync += args =>
-        {
-            args.AutoAcknowledge = false;
-            return Task.CompletedTask;
-        };
-        await client.ConnectAsync(IngestSessionOptions(fixture, clientId), TestContext.Current.CancellationToken);
+        using var client = await ConnectWithoutAcknowledgingAsync(fixture, clientId);
         await client.SubscribeAsync(topicFilter, MqttQualityOfServiceLevel.AtLeastOnce, TestContext.Current.CancellationToken);
         await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
     }
@@ -44,14 +38,20 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     /// </summary>
     public static async Task TakeOverIngestSessionAsync(FieldTrackFixture fixture, string clientId)
     {
-        using var client = new MqttClientFactory().CreateMqttClient();
+        using var client = await ConnectWithoutAcknowledgingAsync(fixture, clientId);
+        await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+    }
+
+    private static async Task<IMqttClient> ConnectWithoutAcknowledgingAsync(FieldTrackFixture fixture, string clientId)
+    {
+        var client = new MqttClientFactory().CreateMqttClient();
         client.ApplicationMessageReceivedAsync += args =>
         {
             args.AutoAcknowledge = false;
             return Task.CompletedTask;
         };
         await client.ConnectAsync(IngestSessionOptions(fixture, clientId), TestContext.Current.CancellationToken);
-        await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+        return client;
     }
 
     /// <summary>A contract payload with the required fields and any extra JSON members in <paramref name="more"/>.</summary>

@@ -157,9 +157,9 @@ public sealed class ReadingWriter : IAsyncDisposable
             LEFT JOIN reading_keys k ON k.device_id = f.device_id AND k.boot = f.boot AND k.seq = f.seq
             WHERE s.ordinal <> f.ordinal OR k.device_id IS NOT NULL
         )
-        -- Every kind of row from one statement (FULL JOIN ON false is a typed UNION): each stored Rejected message's
-        -- reason, then each duplicate's hash match, each with nulls in the other columns, then each Reading to
-        -- evaluate, in receive order.
+        -- Every kind of row from one statement (FULL JOIN ON false is a typed UNION), with nulls in the other kinds'
+        -- columns: each stored Rejected message's reason and each duplicate's hash match, in no particular order,
+        -- then each Reading to evaluate, in receive order.
         SELECT j.reason, u.identical, e.*
         FROM rejected j FULL JOIN duplicates u ON false FULL JOIN evaluated e ON false
         ORDER BY e.ordinal NULLS FIRST
@@ -178,24 +178,24 @@ public sealed class ReadingWriter : IAsyncDisposable
 
     private readonly NpgsqlConnection _connection;
     private readonly AlertRuleRunner _rules;
-    private readonly IIngestFaultInjector? _faults;
+    private readonly IIngestCrashPoints? _crashes;
 
-    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules, IIngestFaultInjector? faults) =>
-        (_connection, _rules, _faults) = (connection, rules, faults);
+    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules, IIngestCrashPoints? crashes) =>
+        (_connection, _rules, _crashes) = (connection, rules, crashes);
 
     /// <summary>
     /// Opens a connection from <paramref name="dataSource"/>, prepares its stage table and loads the rule state.
-    /// <paramref name="time"/> stamps the Alerts it creates; <paramref name="faults"/> is the crash tests' hook.
+    /// <paramref name="time"/> stamps the Alerts it creates; <paramref name="crashes"/> is the crash tests' hook.
     /// </summary>
     public static async Task<ReadingWriter> OpenAsync(
-        NpgsqlDataSource dataSource, TimeProvider time, CancellationToken cancellationToken, IIngestFaultInjector? faults = null)
+        NpgsqlDataSource dataSource, TimeProvider time, CancellationToken cancellationToken, IIngestCrashPoints? crashes = null)
     {
         var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         try
         {
             await using var command = new NpgsqlCommand(CreateStage, connection);
             await command.ExecuteNonQueryAsync(cancellationToken);
-            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken), faults);
+            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken), crashes);
         }
         catch
         {
@@ -258,7 +258,7 @@ public sealed class ReadingWriter : IAsyncDisposable
             await import.CompleteAsync(cancellationToken);
         }
 
-        _faults?.Reached(IngestFaultPoint.AfterCopy);
+        _crashes?.Reached(IngestCrashPoint.AfterStage);
 
         // Separate statements, so each sees what committed while the one before waited on a lock.
         await using (var locks = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(LockDevices), new(LockAssets) } })
@@ -299,7 +299,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         }
 
         var ruleStates = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
-        _faults?.Reached(IngestFaultPoint.AfterEvaluation);
+        _crashes?.Reached(IngestCrashPoint.AfterEvaluation);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(ruleStates);
         return new WrittenBatch(reasons, identical, conflicting);

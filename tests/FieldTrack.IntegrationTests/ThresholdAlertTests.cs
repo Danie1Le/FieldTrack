@@ -175,9 +175,6 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
         new(TelemetryPublisher.TopicOf(serialNumber), serialNumber, new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null),
             DateTimeOffset.UtcNow, [(byte)seq], Redelivered: false);
 
-    private static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
-        TelemetryPublisher.Payload(1, seq, deviceTime, more: FormattableString.Invariant($",\"engineTempC\":{engineTempC}"));
-
     private static DateTimeOffset Millis(DateTimeOffset time) => DateTimeOffset.FromUnixTimeMilliseconds(time.ToUnixTimeMilliseconds());
 
 #pragma warning disable IDE1006 // JSON property names
