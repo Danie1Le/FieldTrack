@@ -61,6 +61,19 @@ public sealed class OfflineRuleTests
     }
 
     [Fact]
+    public void Silence_is_judged_at_the_sweep_time_even_when_the_sweep_runs_later()
+    {
+        var sweepAt = _lastReceivedAt.AddSeconds(60);
+        _time.Advance(TimeSpan.FromSeconds(62));
+
+        Sweep(null, Tick(_lastReceivedAt) with { At = sweepAt.AddSeconds(-1) }).Raised.ShouldBeEmpty();
+        var alert = Sweep(null, Tick(_lastReceivedAt) with { At = sweepAt }).Raised.ShouldHaveSingleItem();
+
+        alert.RaisedAt.ShouldBe(sweepAt);
+        alert.CreatedAt.ShouldBe(_time.GetUtcNow());
+    }
+
+    [Fact]
     public void A_Device_that_never_sent_a_Reading_counts_silence_from_the_attach()
     {
         var attachedAt = _lastReceivedAt;
@@ -178,8 +191,8 @@ public sealed class OfflineRuleTests
         Evaluate(null, Reading(1, 8)).State.ShouldBeNull();
     }
 
-    private static SweepTick Tick(DateTimeOffset? lastReceivedAt, DateTimeOffset? attachedAt = null) =>
-        new(attachedAt ?? _attachedAt, lastReceivedAt, _caughtUpAt);
+    private SweepTick Tick(DateTimeOffset? lastReceivedAt, DateTimeOffset? attachedAt = null) =>
+        new(_time.GetUtcNow(), attachedAt ?? _attachedAt, lastReceivedAt, _caughtUpAt);
 
     private RuleEvaluation Sweep(RuleState? state, SweepTick tick) => RuleEvaluator.Sweep(_silent, _asset, state, tick, _time);
 

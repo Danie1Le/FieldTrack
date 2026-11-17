@@ -95,11 +95,11 @@ public static class RuleEvaluator
     /// <param name="rule">An enabled rule that targets the Asset.</param>
     /// <param name="assetId">An Asset with a Device attached.</param>
     /// <param name="state">The rule state for this rule and Asset, or null before its first evaluation.</param>
-    /// <param name="tick">The Asset's Device and how long the worker has been caught up.</param>
-    /// <param name="time">The platform clock: the sweep time.</param>
+    /// <param name="tick">The sweep time, the Asset's Device and how long the worker has been caught up.</param>
+    /// <param name="time">The platform clock, for <see cref="Alert.CreatedAt"/>.</param>
     public static RuleEvaluation Sweep(AlertRule rule, Guid assetId, RuleState? state, SweepTick tick, TimeProvider time)
     {
-        var now = time.GetUtcNow();
+        var now = tick.At;
         // A breached rule already raised, or was latched by a manual resolve, and waits for a Reading to clear it.
         // ADR 0005 restart grace: nothing is raised while ingest is still draining the broker backlog.
         if (rule is not { Kind: AlertRuleKind.Offline, OfflineSeconds: { } seconds } || state is { Breached: true } || tick.CaughtUpAt is not { } caughtUpAt)
@@ -124,7 +124,7 @@ public static class RuleEvaluator
             Message = string.Create(CultureInfo.InvariantCulture, $"No Reading received for {seconds} s"),
             Status = AlertStatus.Open,
             RaisedAt = now,
-            CreatedAt = now,
+            CreatedAt = time.GetUtcNow(),
         };
         return new RuleEvaluation(new RuleState(true, state?.LastEvaluated), null, [alert]);
     }
