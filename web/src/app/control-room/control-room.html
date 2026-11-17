@@ -76,7 +76,14 @@
     </div>
   </section>
 
-  <app-fleet-map class="map" [assets]="fleet.assets()" [selected]="selected()" [focus]="focus()" (select)="select($event)" />
+  <app-fleet-map
+    class="map"
+    [assets]="fleet.assets()"
+    [geofences]="fleet.geofences()"
+    [selected]="selected()"
+    [focus]="focus()"
+    (select)="select($event)"
+  />
 
   <app-alert-feed class="panel alerts" role="region" aria-label="Alert feed" />
 </div>

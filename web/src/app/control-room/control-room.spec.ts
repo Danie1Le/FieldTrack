@@ -27,7 +27,7 @@ describe('ControlRoom', () => {
   it('counts the Active Alerts on the Alerts tab', async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
     const alerts = signal([alert('a', 'Open'), alert('b', 'Acknowledged'), alert('c', 'Resolved')]);
-    const fleet = { start: () => {}, assets: signal([]), groups: signal([]), rules: signal([]), alerts, connection: signal('live') };
+    const fleet = { start: () => {}, assets: signal([]), groups: signal([]), rules: signal([]), geofences: signal([]), alerts, connection: signal('live') };
     TestBed.configureTestingModule({ providers: [{ provide: AuthService, useValue: {} }] });
     TestBed.overrideComponent(ControlRoom, { set: { providers: [{ provide: LiveFleet, useValue: fleet }] } });
     const fixture = TestBed.createComponent(ControlRoom);

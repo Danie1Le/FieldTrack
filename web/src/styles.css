@@ -41,3 +41,6 @@ button { cursor: pointer; }
 .mk-alerting span { transform: rotate(-45deg); }
 .mk-offline { background: var(--panel); color: var(--offline); border: 3px solid var(--offline); }
 .mk-sel { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* Geofences (geofence-layer.ts): Leaflet draws them as SVG paths; CSS outranks the stroke and fill it sets. */
+.gf { stroke: var(--accent); fill: var(--accent); fill-opacity: .08; }
