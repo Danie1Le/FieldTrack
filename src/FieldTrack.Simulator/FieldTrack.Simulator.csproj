@@ -7,6 +7,10 @@
     <ProjectReference Include="..\FieldTrack.Domain\FieldTrack.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" />
+  </ItemGroup>
+
   <!-- Internal types stay internal; the test projects exercise them directly. -->
   <ItemGroup>
     <InternalsVisibleTo Include="FieldTrack.UnitTests" />

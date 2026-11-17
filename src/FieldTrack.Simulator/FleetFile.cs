@@ -27,7 +27,8 @@ internal sealed record FleetDevice(
     IReadOnlyList<Sensor> Sensors);
 
 /// <summary>
-/// The fleet file: every simulated Device, so a demo and a benchmark start from one setup (spec #21). A Device with a <c>route</c> follows it, one with a <c>position</c> reports from there,
+/// The fleet file: every simulated Device, shared by <c>seed</c> and <c>run</c> so a demo and a benchmark start
+/// from one setup (spec #21). A Device with a <c>route</c> follows it, one with a <c>position</c> reports from there,
 /// and one with neither random-walks.
 /// </summary>
 internal sealed partial class FleetFile
