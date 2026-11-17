@@ -101,8 +101,14 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
 
     private static object Overheat(string assetId) => new
     {
-        name = "Engine overheat", kind = "Threshold", assetId, severity = "Critical",
-        sensor = "EngineTempC", @operator = "GreaterThan", threshold = 105, hysteresis = 5,
+        name = "Engine overheat",
+        kind = "Threshold",
+        assetId,
+        severity = "Critical",
+        sensor = "EngineTempC",
+        @operator = "GreaterThan",
+        threshold = 105,
+        hysteresis = 5,
     };
 
     private static async Task<(string Device, string Asset)> AttachedDeviceAsync(HttpClient admin, string serialNumber)
