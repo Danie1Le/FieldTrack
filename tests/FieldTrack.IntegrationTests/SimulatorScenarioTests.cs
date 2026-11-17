@@ -109,6 +109,12 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         manifest.RatePerSecond.ShouldBeNull();
         var total = Fleet.Devices.Sum(device => Published(manifest, device.Serial));
         total.ShouldBeGreaterThan(90, "a paced run of 2 s at 30 a second publishes about 60");
+        // The unpaced loop itself: every Device, not just the busiest, outruns any paced share of 30 a second (20 each in 2 s).
+        foreach (var device in Fleet.Devices)
+        {
+            Published(manifest, device.Serial).ShouldBeGreaterThan(40, device.Serial);
+        }
+
         var stored = await EventuallyAsync(() => ReadingsAsync(admin, assets["Truck 1"]), readings => readings.Length >= Published(manifest, "TRK-001"));
         stored.Length.ShouldBe((int)Published(manifest, "TRK-001"));
     }

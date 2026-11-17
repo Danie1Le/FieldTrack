@@ -24,8 +24,9 @@ internal static class SimulatorCli
               --duration passes or Ctrl+C. --rate max publishes as fast as the broker acknowledges, with noise and no
               injections. Each start raises every Device's Boot (kept in --state) and restarts its Sequence numbers
               at 0. --scenario injects the Faults, Power offs, Coverage gaps and clock problems a file scripts (seconds
-              from the start); the three rates (events per Device-hour) inject them at random. The Manifest lists what was
-              published and every injection window. MQTT is plain TCP without credentials: point it only at a local or
+              from the start); the three rates (events per Device-hour) inject them at random, dropping a draw that
+              would overlap one already running, so long windows at high rates come in under their rate. Only paced
+              runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP without credentials: point it only at a local or
               trusted-network broker.
 
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
