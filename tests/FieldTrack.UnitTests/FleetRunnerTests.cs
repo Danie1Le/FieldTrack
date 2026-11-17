@@ -23,6 +23,24 @@ public sealed class FleetRunnerTests : IDisposable
         File.Exists(manifestPath).ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task Maximum_mode_injects_nothing_so_a_Scenario_or_random_rates_are_refused()
+    {
+        var fleet = FleetFile.Parse("""{ "devices": [ { "serial": "TRK-001", "assetType": "Truck", "sensors": ["fuelPct"] } ] }""", _directory);
+        var scenario = Scenario.Parse("""{ "injections": [ { "device": "TRK-001", "kind": "powerOff", "atSeconds": 1, "durationSeconds": 1 } ] }""", fleet);
+        var state = Path.Combine(_directory, "state.json");
+        var manifest = Path.Combine(_directory, "manifest.json");
+
+        var withScenario = await Should.ThrowAsync<SimulatorException>(
+            () => FleetRunner.RunAsync(fleet, new RunOptions("127.0.0.1", 1, null, null, state, manifest, scenario), TextWriter.Null, TimeProvider.System, TestContext.Current.CancellationToken));
+        var withRates = await Should.ThrowAsync<SimulatorException>(
+            () => FleetRunner.RunAsync(fleet, new RunOptions("127.0.0.1", 1, null, null, state, manifest, null, new RandomRates(1, 0, 0)), TextWriter.Null, TimeProvider.System, TestContext.Current.CancellationToken));
+
+        withScenario.Message.ShouldContain("--rate max");
+        withRates.Message.ShouldContain("--rate max");
+        File.Exists(state).ShouldBeFalse("nothing started, so no Boot was raised");
+    }
+
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
     // GetUtcNow is called once when the run starts and once per Reading, so failing the second call fails the Device mid-run.

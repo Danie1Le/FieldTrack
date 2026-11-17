@@ -4,8 +4,10 @@ using System.Text.Json.Serialization;
 namespace FieldTrack.Simulator;
 
 /// <summary>
-/// One simulated Device in one Boot: it builds the payloads a real Device would publish and counts how many reached
-/// the broker. Sensor values are plausible and steady; noise and Faults come with Scenarios (#43).
+/// One simulated Device: it takes the Readings a real Device would, keeps them until the broker acknowledges them and counts
+/// how many it did. Sensor values are plausible and steady, with Gaussian noise where the fleet file asks for it, and the Device
+/// suffers the <see cref="Injection"/>s of its schedule (Faults, Power offs, Coverage gaps, clock problems). A Power off ends its
+/// Boot and starts the next.
 /// </summary>
 internal sealed class SimulatedDevice
 {
@@ -47,16 +49,23 @@ internal sealed class SimulatedDevice
 
     /// <summary>
     /// Starts <paramref name="spec"/> in <paramref name="boot"/>, moving as its fleet entry says: along its route, fixed at its
-    /// position, or as a random walk when it has neither.
+    /// position, or as a random walk when it has neither. It suffers what <paramref name="scenario"/> scripts for it plus what
+    /// <paramref name="rates"/> draws at random, and asks <paramref name="raiseBoot"/> for each new Boot after a Power off.
     /// </summary>
     /// <exception cref="SimulatorException">The Device's route file cannot be read.</exception>
-    public static SimulatedDevice Start(FleetDevice spec, int boot) => new(spec, boot, spec switch
+    public static SimulatedDevice Start(FleetDevice spec, int boot, Scenario? scenario = null, RandomRates? rates = null, Func<int>? raiseBoot = null)
     {
-        { Route: { } route } => new RouteMotion(GpxRoute.Load(route), spec.SpeedKph),
-        { Position: { } position } => new FixedMotion(position),
-        // Every walker starts at the same centre; fine for the demo's one, worth an offset when Scenarios (#43) add more.
-        _ => new RandomWalkMotion(RandomWalkMotion.DefaultCentre, spec.SpeedKph, RandomWalkMotion.DefaultRadiusMeters, new Random(SeedFor(spec.Serial))),
-    });
+        IMotion motion = spec switch
+        {
+            { Route: { } route } => new RouteMotion(GpxRoute.Load(route), spec.SpeedKph),
+            { Position: { } position } => new FixedMotion(position),
+            // Every walker starts at the same centre and wanders its own way (each seeds from its serial): enough for a demo or a flood.
+            _ => new RandomWalkMotion(RandomWalkMotion.DefaultCentre, spec.SpeedKph, RandomWalkMotion.DefaultRadiusMeters, new Random(SeedFor(spec.Serial))),
+        };
+        // Seeded from the Boot too, so each run (which raises the Boot) draws differently while a replay of the same state file draws the same.
+        var random = rates is { Any: true } ? new RandomInjections(rates, spec.Sensors, new Random(SeedFor($"{spec.Serial}/injections/{boot}"))) : null;
+        return new SimulatedDevice(spec, boot, motion, new InjectionSchedule(random, scenario?.InjectionsFor(spec.Serial)), raiseBoot);
+    }
 
     /// <summary>The Device's serial number.</summary>
     public string Serial => _spec.Serial;
@@ -143,7 +152,7 @@ internal sealed class SimulatedDevice
     }
 
     // Seeded from the serial, so a Device wanders the same way every run; string.GetHashCode is randomised per process.
-    private static int SeedFor(string serial) => serial.Aggregate(17, (hash, c) => (hash * 31) + c);
+    private static int SeedFor(string key) => key.Aggregate(17, (hash, c) => (hash * 31) + c);
 
     // Drains half a percent a minute (a leak multiplies that while it lasts), then tops up when it gets low, so a long run never ends on an empty tank.
     private double FuelPct(TimeSpan elapsed)

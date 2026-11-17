@@ -8,6 +8,8 @@ namespace FieldTrack.Simulator;
 /// </summary>
 internal static class BootState
 {
+    private static readonly Lock _gate = new();
+
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     /// <summary>
@@ -20,17 +22,21 @@ internal static class BootState
     /// </exception>
     public static IReadOnlyDictionary<string, int> Raise(string path, IEnumerable<string> serials)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        using var exclusive = Lock(path);
-        var state = Read(path);
-        var raised = serials.ToDictionary(serial => serial, serial => state.GetValueOrDefault(serial) + 1);
-        foreach (var (serial, boot) in raised)
+        // Devices of one run power-cycle on their own threads; the file lock below would turn the second one into an error.
+        lock (_gate)
         {
-            state[serial] = boot;
-        }
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            using var exclusive = Lock(path);
+            var state = Read(path);
+            var raised = serials.ToDictionary(serial => serial, serial => state.GetValueOrDefault(serial) + 1);
+            foreach (var (serial, boot) in raised)
+            {
+                state[serial] = boot;
+            }
 
-        Write(path, state);
-        return raised;
+            Write(path, state);
+            return raised;
+        }
     }
 
     private static Dictionary<string, int> Read(string path)
