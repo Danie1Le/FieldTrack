@@ -17,7 +17,9 @@
 <nav class="tabs" aria-label="Control room view">
   <button type="button" [attr.aria-pressed]="tab() === 'map'" (click)="tab.set('map')">Map</button>
   <button type="button" [attr.aria-pressed]="tab() === 'assets'" (click)="tab.set('assets')">Assets</button>
-  <button type="button" [attr.aria-pressed]="tab() === 'alerts'" (click)="tab.set('alerts')">Alerts</button>
+  <button type="button" [attr.aria-pressed]="tab() === 'alerts'" (click)="tab.set('alerts')">
+    Alerts <span class="mono tab-count">{{ activeAlerts() }}</span>
+  </button>
 </nav>
 
 <div class="columns" [attr.data-tab]="tab()">
@@ -76,8 +78,5 @@
 
   <app-fleet-map class="map" [assets]="fleet.assets()" [selected]="selected()" [focus]="focus()" (select)="select($event)" />
 
-  <section class="panel column alerts" aria-label="Alert feed">
-    <header><strong>Alert feed</strong></header>
-    <p class="muted placeholder">The Alert feed is not built yet.</p>
-  </section>
+  <app-alert-feed class="panel alerts" role="region" aria-label="Alert feed" />
 </div>
