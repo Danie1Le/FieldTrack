@@ -1,0 +1,23 @@
+# Layer over docker-compose.yml for benchmarks (#44):
+#   docker compose -f docker-compose.yml -f bench/docker-compose.bench.yml up --build -d
+# Start from an empty database (`docker compose down -v`): insert cost grows with the table, and every result says how many Readings it began with.
+services:
+  postgres:
+    command:
+      - postgres
+      # `bench` reads each batch's commit time from Postgres (ingest latency).
+      - -c
+      - track_commit_timestamp=on
+      # Sized for 2,000 Readings/s: room to cache the hot partition and the Reading key index, and no WAL-forced checkpoint every few
+      # minutes. It does not remove commit stalls on Docker Desktop (#44 results). Every result records these settings.
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - max_wal_size=4GB
+  mosquitto:
+    # `bench` reads the broker's $SYS counters (PUBLISH messages received, queued messages); refresh them every second instead of every 10.
+    # Appended to a copy of the base config, which stays unchanged for every other environment.
+    command:
+      - sh
+      - -c
+      - cp /mosquitto/config/mosquitto.conf /tmp/bench.conf && printf '\nsys_interval 1\n' >> /tmp/bench.conf && exec /usr/sbin/mosquitto -c /tmp/bench.conf

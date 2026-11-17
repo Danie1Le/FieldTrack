@@ -32,6 +32,15 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
         await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
     }
 
+    /// <summary>Discards the broker session of <paramref name="clientId"/> and everything queued for it; nothing happens when there is none.</summary>
+    public static async Task DropIngestSessionAsync(FieldTrackFixture fixture, string clientId)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var client = new MqttClientFactory().CreateMqttClient();
+        await client.ConnectAsync(Options(fixture, clientId).WithCleanStart().WithSessionExpiryInterval(0).Build(), timeout.Token);
+        await client.DisconnectAsync(cancellationToken: timeout.Token);
+    }
+
     /// <summary>
     /// Connects to the ingest worker's broker session and leaves again without acknowledging anything. The broker
     /// drops the worker's connection, so its PUBACKs never arrive, as if it had crashed.
