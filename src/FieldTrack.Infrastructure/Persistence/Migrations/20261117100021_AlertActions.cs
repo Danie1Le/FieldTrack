@@ -11,6 +11,27 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<string>(
+                name: "display_name",
+                table: "users",
+                type: "character varying(100)",
+                maxLength: 100,
+                nullable: true);
+
+            // Users created before display names get their email's local part; an Admin can tell them apart by it.
+            migrationBuilder.Sql("UPDATE users SET display_name = left(split_part(coalesce(email, user_name, ''), '@', 1), 100)");
+
+            migrationBuilder.AlterColumn<string>(
+                name: "display_name",
+                table: "users",
+                type: "character varying(100)",
+                maxLength: 100,
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "character varying(100)",
+                oldMaxLength: 100,
+                oldNullable: true);
+
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "acknowledged_at",
                 table: "alerts",
@@ -106,6 +127,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
             migrationBuilder.DropCheckConstraint(
                 name: "ck_alerts_status_acknowledged",
                 table: "alerts");
+
+            migrationBuilder.DropColumn(
+                name: "display_name",
+                table: "users");
 
             migrationBuilder.DropColumn(
                 name: "acknowledged_at",

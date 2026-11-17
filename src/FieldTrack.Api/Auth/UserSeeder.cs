@@ -17,6 +17,12 @@ public static partial class UserSeeder
     /// <summary>Configuration key for the password of the Admin created when no Admin exists.</summary>
     public const string AdminPasswordKey = "FIELDTRACK_ADMIN_PASSWORD";
 
+    /// <summary>The display name of the first Admin, who has no other name to show.</summary>
+    public const string AdminDisplayName = "Admin";
+
+    /// <summary>The display name of the Demo Operator, set again on every start in demo mode.</summary>
+    public const string DemoOperatorDisplayName = "Demo Operator";
+
     /// <summary>
     /// Ensures both roles exist, creates an Admin from configuration when none exists (it must change
     /// the configured password at first sign-in, like any user with a temporary password), and in demo
@@ -73,7 +79,7 @@ public static partial class UserSeeder
 
         // The configured password sits in .env or deployment settings, so it is only a temporary
         // password: the Admin replaces it at first sign-in (#61).
-        var admin = new FieldTrackUser { UserName = email, Email = email, MustChangePassword = true };
+        var admin = new FieldTrackUser { UserName = email, Email = email, DisplayName = AdminDisplayName, MustChangePassword = true };
         EnsureSucceeded(await users.CreateAsync(admin, password));
         EnsureSucceeded(await users.AddToRoleAsync(admin, Roles.Admin));
     }
@@ -90,7 +96,7 @@ public static partial class UserSeeder
         var demo = await users.FindByEmailAsync(email);
         if (demo is null)
         {
-            demo = new FieldTrackUser { UserName = email, Email = email };
+            demo = new FieldTrackUser { UserName = email, Email = email, DisplayName = DemoOperatorDisplayName };
             EnsureSucceeded(await users.CreateAsync(demo, password));
             EnsureSucceeded(await users.AddToRoleAsync(demo, Roles.Operator));
         }
@@ -108,8 +114,9 @@ public static partial class UserSeeder
 
         // The password is public and fixed by the deploy, so the Demo Operator never changes it,
         // and a lockout would only let visitors lock each other out. SetLockoutEnabledAsync saves
-        // the user, the cleared flag included.
+        // the user, these fields included.
         demo.MustChangePassword = false;
+        demo.DisplayName = DemoOperatorDisplayName;
         EnsureSucceeded(await users.SetLockoutEnabledAsync(demo, false));
     }
 
