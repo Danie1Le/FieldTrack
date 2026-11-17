@@ -448,15 +448,5 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
     private static string Range(DateTimeOffset from, DateTimeOffset to) =>
         $"from={Uri.EscapeDataString(Format(from))}&to={Uri.EscapeDataString(Format(to))}";
 
-    /// <summary>Waits until <paramref name="count"/> sessions on the database are waiting for a lock.</summary>
-    private async Task LockWaitsAsync(int count)
-    {
-        await using var database = await OpenDatabaseAsync();
-        var waiting = await EventuallyAsync(
-            async () => (long)(await SqlAsync(database, "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"))!,
-            waiting => waiting >= count);
-        waiting.ShouldBe(count);
-    }
-
     private static string Format(DateTimeOffset time) => time.ToString("O", CultureInfo.InvariantCulture);
 }
