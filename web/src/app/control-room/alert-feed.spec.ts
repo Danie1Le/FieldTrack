@@ -48,7 +48,7 @@ describe('AlertFeed', () => {
       rules: signal<AlertRule[]>([
         {
           id: 'rule-1', name: 'Engine overheat', kind: 'Threshold', assetId: 'truck-1', assetGroupId: null, severity: 'Critical',
-          enabled: true, sensor: 'EngineTempC', operator: 'GreaterThan', threshold: 105, hysteresis: 5,
+          enabled: true, sensor: 'EngineTempC', operator: 'GreaterThan', threshold: 105, hysteresis: 5, geofenceId: null,
         },
       ]),
       connection: signal('live'),

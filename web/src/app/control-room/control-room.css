@@ -30,6 +30,11 @@
   margin-right: 8px;
 }
 
+a.btn {
+  color: inherit;
+  text-decoration: none;
+}
+
 .connection {
   color: var(--offline);
   font-weight: 600;

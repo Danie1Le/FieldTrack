@@ -3,12 +3,13 @@ import { DestroyRef, Injectable, InjectionToken, inject, signal } from '@angular
 import { HubConnectionBuilder } from '@microsoft/signalr';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../auth/auth';
-import { Alert, AlertRule, AlertStatus, AssetGroup, LiveAsset } from './live';
+import { Alert, AlertRule, AlertStatus, AssetGroup, Geofence, LiveAsset } from './live';
 
 /** The part of SignalR's HubConnection the Control room uses; tests fake it at this boundary. */
 export interface LiveHubConnection {
   on(event: 'AssetsUpdated', handler: (assets: LiveAsset[]) => void): void;
   on(event: 'AlertRaised' | 'AlertUpdated', handler: (alert: Alert) => void): void;
+  on(event: 'GeofencesChanged', handler: () => void): void;
   onreconnecting(handler: () => void): void;
   onreconnected(handler: () => void): void;
   onclose(handler: (error?: Error) => void): void;
@@ -56,12 +57,15 @@ export class LiveFleet {
   private retry?: ReturnType<typeof setTimeout>;
   /** One buffer per running load(): pushes that arrive meanwhile, replayed over its snapshot, which may be older than them. */
   private readonly pushedDuringLoads = new Set<(() => void)[]>();
+  /** Counts Geofence reads, so only the newest one is applied. */
+  private geofenceReads = 0;
 
   readonly assets = signal<LiveAsset[]>([]);
   /** Active and Resolved Alerts, unordered; the Alert feed sorts them. */
   readonly alerts = signal<Alert[]>([]);
   readonly groups = signal<AssetGroup[]>([]);
   readonly rules = signal<AlertRule[]>([]);
+  readonly geofences = signal<Geofence[]>([]);
   readonly connection = signal<'connecting' | 'live' | 'reconnecting'>('connecting');
 
   constructor() {
@@ -73,6 +77,8 @@ export class LiveFleet {
     this.hub.on('AssetsUpdated', (changed) => this.pushed(() => this.merge(changed)));
     this.hub.on('AlertRaised', (alert) => this.pushed(() => this.mergeAlerts([alert])));
     this.hub.on('AlertUpdated', (alert) => this.pushed(() => this.mergeAlerts([alert])));
+    // A failed reload drops the connection, so the reconnect path loads again.
+    this.hub.on('GeofencesChanged', () => void this.loadGeofences().catch(() => this.hub.stop()));
     this.hub.onreconnecting(() => this.connection.set('reconnecting'));
     this.hub.onreconnected(() => void this.load());
     this.hub.onclose(() => {
@@ -129,6 +135,7 @@ export class LiveFleet {
         // Two reads, so a long History cannot crowd Active Alerts out of the API's newest-first limit.
         firstValueFrom(this.http.get<Alert[]>('/api/alerts?active=true')),
         firstValueFrom(this.http.get<Alert[]>('/api/alerts?active=false')),
+        this.loadGeofences(),
       ]);
       this.assets.set(assets);
       this.alerts.set([...active, ...resolved]);
@@ -141,6 +148,18 @@ export class LiveFleet {
       await this.hub.stop();
     } finally {
       this.pushedDuringLoads.delete(pushed);
+    }
+  }
+
+  /**
+   * Reads the Geofences. The push carries no change to replay, so reads are ordered instead: a read answering after a
+   * newer one is dropped, as it may predate the change that the newer one was sent for.
+   */
+  private async loadGeofences(): Promise<void> {
+    const read = ++this.geofenceReads;
+    const geofences = await firstValueFrom(this.http.get<Geofence[]>('/api/geofences'));
+    if (read === this.geofenceReads) {
+      this.geofences.set(geofences);
     }
   }
 

@@ -1,4 +1,7 @@
-/** Shapes the API sends to the Control room: `GET /assets/live`, `GET /alerts`, `GET /alert-rules` and the hub's pushes. */
+/**
+ * Shapes the API sends to the Control room: `GET /assets/live`, `GET /alerts`, `GET /alert-rules`, `GET /geofences`
+ * and the hub's pushes.
+ */
 
 /** Asset Status (GLOSSARY): No device > Alerting > Offline > Normal, computed by the API. */
 export type AssetStatus = 'NoDevice' | 'Alerting' | 'Offline' | 'Normal';
@@ -89,8 +92,8 @@ export interface Alert {
 export interface AlertRule {
   id: string;
   name: string;
-  /** The API's `AlertRuleKind` names; Offline arrives with #33. */
-  kind: 'Threshold' | 'Offline';
+  /** The API's `AlertRuleKind` names. */
+  kind: 'Threshold' | 'Offline' | 'GeofenceExit' | 'GeofenceEnter';
   assetId: string | null;
   assetGroupId: string | null;
   severity: 'Warning' | 'Critical';
@@ -99,4 +102,21 @@ export interface AlertRule {
   operator: 'GreaterThan' | 'LessThan' | null;
   threshold: number | null;
   hysteresis: number | null;
+  /** The Geofence a Geofence rule watches. */
+  geofenceId: string | null;
+}
+
+/** A GeoJSON Polygon (RFC 7946): rings of `[longitude, latitude]` positions, each closed, the outer ring first. */
+export interface GeoJsonPolygon {
+  type: 'Polygon';
+  coordinates: number[][][];
+}
+
+/** A Geofence (`GeofenceResponse`): a named area that affects Assets only through an Alert Rule that names it. */
+export interface Geofence {
+  id: string;
+  name: string;
+  /** Inclusion: Assets are meant to stay inside; Exclusion: meant to stay out. The map draws Exclusion dashed. */
+  kind: 'Inclusion' | 'Exclusion';
+  area: GeoJsonPolygon;
 }

@@ -110,6 +110,9 @@ public sealed class UserTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
         using var response = await AuthClient.PostUserAsync(admin, AdminEmail, "Operator", AuthClient.TemporaryPassword);
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        // The email is the username, so the Admin gets one message, not "email taken" and "username taken".
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        problem.RootElement.GetProperty("errors").EnumerateObject().Select(error => error.Name).ShouldBe(["DuplicateEmail"]);
     }
 
     [Fact]
