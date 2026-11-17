@@ -186,6 +186,40 @@ describe('AssetDetail', () => {
     expect(page.querySelector('[role=alert]')!.textContent).toContain('The range must span at most <i>31</i> days.');
   });
 
+  it('clears the previous Asset and its Alerts when the page is reused for another id', async () => {
+    await load();
+    expect(page.querySelector('h1')!.textContent).toContain('Haul truck 7');
+
+    fixture.componentRef.setInput('id', 'truck-8');
+    await settled();
+
+    expect(page.querySelector('h1')!.textContent).toBe('Asset');
+    expect(page.textContent).not.toContain('Engine temp 108');
+  });
+
+  it('drops the answer for a previous id that arrives after the answer for the new id', async () => {
+    const stale = [
+      api.expectOne('/api/assets/truck-7'),
+      api.expectOne('/api/alerts?assetId=truck-7'),
+    ];
+    api.expectOne('/api/alert-rules').flush([]);
+    api.expectOne((r) => r.url === '/api/assets/truck-7/readings').flush([]);
+    fixture.componentRef.setInput('id', 'truck-8');
+    await settled();
+
+    api.expectOne('/api/assets/truck-8').flush({ id: 'truck-8', name: 'Loader 8', type: 'Loader', assetGroupId: null, archived: false });
+    api.expectOne('/api/alert-rules').flush([]);
+    api.expectOne('/api/alerts?assetId=truck-8').flush([]);
+    api.expectOne((r) => r.url === '/api/assets/truck-8/readings').flush([]);
+    await settled();
+    stale[0].flush({ id: 'truck-7', name: 'Haul truck 7', type: 'Truck', assetGroupId: null, archived: false });
+    stale[1].flush([alert]);
+    await settled();
+
+    expect(page.querySelector('h1')!.textContent).toContain('Loader 8');
+    expect(page.textContent).not.toContain('Engine temp 108');
+  });
+
   it('says so when the range has no Readings', async () => {
     await load([]);
 

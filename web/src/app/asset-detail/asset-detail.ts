@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { Alert, AlertRule, AssetType, Reading, ResolveReason } from '../control-room/live';
+import { Alert, AlertRule, AssetType, Reading, reasonLabels } from '../control-room/live';
 import { positionAt, ruleLines } from './replay';
 import { ReplayMap } from './replay-map';
 import { SensorChart } from './sensor-chart';
@@ -20,15 +20,6 @@ interface Asset {
 const day = 86_400_000;
 /** How often a playing replay moves on, in real milliseconds. */
 const tick = 100;
-
-const reasonLabels: Record<ResolveReason, string> = {
-  Cleared: 'Cleared',
-  Manual: 'Manual',
-  RuleChanged: 'Rule changed',
-  RuleDisabled: 'Rule disabled',
-  AssetArchived: 'Asset archived',
-  DeviceDetached: 'Device detached',
-};
 
 /** A time as a `datetime-local` input shows it: local time to the minute. */
 function localInput(time: number): string {
@@ -68,8 +59,9 @@ export class AssetDetail {
 
   private readonly http = inject(HttpClient);
   private player?: ReturnType<typeof setInterval>;
-  /** Counts history reads, so only the latest one's answer is shown. */
+  /** Count reads, so only the latest one's answer is shown. */
   private reads = 0;
+  private assetReads = 0;
 
   protected readonly asset = signal<Asset | null>(null);
   protected readonly rules = signal<AlertRule[]>([]);
@@ -147,17 +139,25 @@ export class AssetDetail {
   }
 
   private async loadAsset(id: string): Promise<void> {
+    const read = ++this.assetReads;
+    this.asset.set(null);
+    this.rules.set([]);
+    this.alerts.set([]);
     try {
       const [asset, rules, alerts] = await Promise.all([
         firstValueFrom(this.http.get<Asset>(`/api/assets/${encodeURIComponent(id)}`)),
         firstValueFrom(this.http.get<AlertRule[]>('/api/alert-rules')),
         firstValueFrom(this.http.get<Alert[]>('/api/alerts', { params: { assetId: id } })),
       ]);
-      this.asset.set(asset);
-      this.rules.set(rules);
-      this.alerts.set(alerts);
+      if (read === this.assetReads) {
+        this.asset.set(asset);
+        this.rules.set(rules);
+        this.alerts.set(alerts);
+      }
     } catch (error) {
-      this.problem.set(refusal(error));
+      if (read === this.assetReads) {
+        this.problem.set(refusal(error));
+      }
     }
   }
 
