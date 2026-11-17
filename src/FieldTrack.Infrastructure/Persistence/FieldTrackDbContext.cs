@@ -50,7 +50,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     public Task CreateReadingPartitionsAsync(DateOnly first, DateOnly last, CancellationToken cancellationToken)
     {
         // One implicit transaction; the advisory lock makes concurrent runs take turns instead of racing on the names.
-        var sql = new StringBuilder("SELECT pg_advisory_xact_lock(hashtext('readings partitions'));");
+        // CREATE ... PARTITION OF takes ACCESS EXCLUSIVE on readings, and ingest would queue behind a CREATE waiting
+        // on a long reader, so give up after 5 s: partitions exist days ahead and the job retries next hour.
+        var sql = new StringBuilder("SELECT pg_advisory_xact_lock(hashtext('readings partitions'));SET LOCAL lock_timeout = '5s';");
         for (var day = first; day <= last; day = day.AddDays(1))
         {
             sql.Append(CultureInfo.InvariantCulture,
