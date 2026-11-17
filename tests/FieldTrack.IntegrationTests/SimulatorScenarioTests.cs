@@ -103,9 +103,8 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         var assets = await SeedAsync();
         await using var ingest = await StartIngestAsync();
 
-        // How many Readings a flood is depends on the machine: a CI runner publishes tens of thousands in 2 s, and ingest there
-        // stores only a few hundred a second once the broker backs up. The run stops after FloodSize acknowledged Readings so
-        // that what is waited for below does not depend on the machine.
+        // How many Readings a flood is depends on the machine: a CI runner publishes tens of thousands in 2 s. The run stops after FloodSize acknowledged
+        // Readings so that what is waited for below does not depend on the machine.
         const int FloodSize = 1000;
         using var enough = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
         var acknowledged = 0;
