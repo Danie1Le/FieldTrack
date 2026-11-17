@@ -110,7 +110,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // Stored by name so hand-written SQL and exports read it without a lookup. The check keeps
             // hand-written SQL to the same names; renaming an AssetType member needs a data migration.
             asset.Property(a => a.Type).HasConversion<string>();
-            asset.ToTable(table => table.HasCheckConstraint("ck_assets_type", In<AssetType>("type")));
+            asset.ToTable(table => table.HasCheckConstraint("ck_assets_type", EnumNamesCheck<AssetType>("type")));
             // An Asset Group that still has Assets cannot be deleted (#24).
             asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -141,22 +141,33 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             attachment.HasIndex(a => new { a.AssetId, a.AttachedAt });
         });
 
-        // Enums are stored by name like Asset Type, with checks, because ingest writes Alerts with hand-written SQL.
+        // Enums are stored by name with checks, like Asset Type, because ingest reads rules and writes Alerts with
+        // hand-written SQL (ADR 0005). Enum names in SQL come from nameof, so a rename reaches every check.
         builder.Entity<AlertRule>(rule =>
         {
             rule.Property(r => r.Kind).HasConversion<string>();
             rule.Property(r => r.Severity).HasConversion<string>();
-            rule.Property(r => r.Sensor).HasConversion<string>();
-            rule.Property(r => r.Operator).HasConversion<string>();
+            // Plain column names; ThresholdSettings refuses bad values in C#, the checks below in SQL.
+            rule.ComplexProperty(r => r.ThresholdSettings, settings =>
+            {
+                settings.Property(s => s.Sensor).HasColumnName("sensor").HasConversion<string>();
+                settings.Property(s => s.Operator).HasColumnName("operator").HasConversion<string>();
+                settings.Property(s => s.Threshold).HasColumnName("threshold");
+                settings.Property(s => s.Hysteresis).HasColumnName("hysteresis");
+            });
             rule.ToTable(table =>
             {
-                table.HasCheckConstraint("ck_alert_rules_kind", In<AlertRuleKind>("kind"));
-                table.HasCheckConstraint("ck_alert_rules_severity", In<Severity>("severity"));
-                table.HasCheckConstraint("ck_alert_rules_sensor", In<Sensor>("sensor"));
-                table.HasCheckConstraint("ck_alert_rules_operator", In<ThresholdOperator>("operator"));
+                table.HasCheckConstraint("ck_alert_rules_kind", EnumNamesCheck<AlertRuleKind>("kind"));
+                table.HasCheckConstraint("ck_alert_rules_severity", EnumNamesCheck<Severity>("severity"));
+                table.HasCheckConstraint("ck_alert_rules_sensor", EnumNamesCheck<Sensor>("sensor"));
+                table.HasCheckConstraint("ck_alert_rules_operator", EnumNamesCheck<ThresholdOperator>("operator"));
                 table.HasCheckConstraint("ck_alert_rules_target", "(asset_id IS NULL) <> (asset_group_id IS NULL)");
+                // double precision holds NaN and ±Infinity; Postgres sorts NaN above Infinity, so the upper bound on
+                // hysteresis refuses both.
                 table.HasCheckConstraint("ck_alert_rules_threshold",
-                    "kind <> 'Threshold' OR (sensor IS NOT NULL AND operator IS NOT NULL AND threshold IS NOT NULL AND hysteresis IS NOT NULL AND hysteresis >= 0)");
+                    $"kind <> '{nameof(AlertRuleKind.Threshold)}' OR (sensor IS NOT NULL AND operator IS NOT NULL"
+                    + " AND threshold IS NOT NULL AND threshold NOT IN ('NaN', 'Infinity', '-Infinity')"
+                    + " AND hysteresis IS NOT NULL AND hysteresis >= 0 AND hysteresis < 'Infinity')");
             });
             // A rule on one Asset goes with it when the Asset is deleted outright, which happens only while it has no
             // Readings and so no Alerts; an Asset with history is Archived instead (#24).
@@ -172,9 +183,15 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             alert.Property(a => a.ResolveReason).HasConversion<string>();
             alert.ToTable(table =>
             {
-                table.HasCheckConstraint("ck_alerts_severity", In<Severity>("severity"));
-                table.HasCheckConstraint("ck_alerts_status", In<AlertStatus>("status"));
-                table.HasCheckConstraint("ck_alerts_resolve_reason", In<ResolveReason>("resolve_reason"));
+                table.HasCheckConstraint("ck_alerts_severity", EnumNamesCheck<Severity>("severity"));
+                table.HasCheckConstraint("ck_alerts_status", EnumNamesCheck<AlertStatus>("status"));
+                table.HasCheckConstraint("ck_alerts_resolve_reason", EnumNamesCheck<ResolveReason>("resolve_reason"));
+                // Ingest and manual resolve write these with SQL: a Resolved Alert has its time and reason, an Active
+                // one neither, and only a breach that cleared inside its batch is from backlog.
+                table.HasCheckConstraint("ck_alerts_resolution",
+                    $"(status = '{nameof(AlertStatus.Resolved)}') = (resolved_at IS NOT NULL)"
+                    + " AND (resolved_at IS NULL) = (resolve_reason IS NULL)"
+                    + $" AND (NOT from_backlog OR resolve_reason IS NOT DISTINCT FROM '{nameof(ResolveReason.Cleared)}')");
             });
             // Alerts are history: their rule and Asset are kept (disabled, Archived), never deleted under them.
             alert.HasOne<AlertRule>().WithMany().HasForeignKey(a => a.AlertRuleId).OnDelete(DeleteBehavior.Restrict);
@@ -182,8 +199,10 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // At most one Active Alert per Alert Rule and Asset (#10, ADR 0005).
             alert.HasIndex(a => new { a.AlertRuleId, a.AssetId })
                 .IsUnique()
-                .HasFilter("status <> 'Resolved'")
+                .HasFilter($"status <> '{nameof(AlertStatus.Resolved)}'")
                 .HasDatabaseName("ix_alerts_alert_rule_id_asset_id_active");
+            // The partial index above cannot serve a rule's whole history: the delete check and its foreign key use this.
+            alert.HasIndex(a => a.AlertRuleId);
             // The Alert feed, newest first, and an Asset's Alert history.
             alert.HasIndex(a => a.RaisedAt);
             alert.HasIndex(a => new { a.AssetId, a.RaisedAt });
@@ -199,7 +218,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     }
 
     /// <summary>A check that <paramref name="column"/> holds a member name of <typeparamref name="TEnum"/> (or null).</summary>
-    private static string In<TEnum>(string column)
+    private static string EnumNamesCheck<TEnum>(string column)
         where TEnum : struct, Enum =>
         $"{column} IN ({string.Join(", ", Enum.GetNames<TEnum>().Select(name => $"'{name}'"))})";
 }
