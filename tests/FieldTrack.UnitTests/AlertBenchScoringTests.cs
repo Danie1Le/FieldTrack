@@ -78,6 +78,16 @@ public sealed class AlertBenchScoringTests
             .ShouldBe(2, "A's first window by an Alert open inside it, B's by an Alert raised before it and still open; A's second window by none: one resolved at its start, one raised at its end");
     }
 
+    [Theory]
+    [InlineData(10, 54, 44, 10, 10, true)]
+    [InlineData(0, 54, 0, 0, 0, false)]
+    [InlineData(10, 0, 0, 10, 10, false)]
+    [InlineData(10, 54, 60, 10, 10, false)]
+    [InlineData(10, 54, 0, 10, 0, false)]
+    public void The_A_B_passes_only_with_Fault_windows_noise_false_Alerts_and_no_real_Fault_lost(
+        int windows, int falseWithout, int falseWith, int caughtWithout, int caughtWith, bool expected) =>
+        HysteresisScore.Passes(windows, falseWithout, falseWith, caughtWithout, caughtWith).ShouldBe(expected);
+
     [Fact]
     public void An_Alert_of_another_Device_does_not_match_a_dropout()
     {

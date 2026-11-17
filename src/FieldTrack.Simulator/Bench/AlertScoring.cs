@@ -117,6 +117,13 @@ internal static class HysteresisScore
             all.Any(alert => alert.Serial == device.Key && alert.RaisedAt < window.End && (alert.ResolvedAt is null || alert.ResolvedAt > window.Start))));
     }
 
+    /// <summary>
+    /// Whether the A/B shows what it is for: there are Fault windows to lose, noise made the 0-Hysteresis arm raise false Alerts, the Hysteresis arm
+    /// raised no more of them, and it caught as many Fault windows. Without a Fault window a rule that never raises would pass.
+    /// </summary>
+    public static bool Passes(int faultWindows, int falseWithout, int falseWith, int caughtWithout, int caughtWith) =>
+        faultWindows > 0 && falseWithout > 0 && falseWith <= falseWithout && caughtWith >= caughtWithout;
+
     /// <summary>The share of the <paramref name="without"/> false Alerts that <paramref name="with"/> removed, in percent; null when there were none to remove.</summary>
     public static double? ReductionPercent(int without, int with) => without == 0 ? null : 100.0 * (without - with) / without;
 }

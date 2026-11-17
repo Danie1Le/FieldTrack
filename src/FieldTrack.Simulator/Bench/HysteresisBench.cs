@@ -53,9 +53,8 @@ internal static class HysteresisBench
                 withHysteresis = real,
                 falseAlertReductionPercent = reduction,
             },
-            // The experiment means something only when noise made the 0-Hysteresis arm raise false Alerts; the Hysteresis must not add any
-            // and must not lose a real one (a rule that never raises would otherwise pass).
-            pass: score.Missing == 0 && plain.FalseAlerts > 0 && real.FalseAlerts <= plain.FalseAlerts && real.FaultWindowsCaught >= plain.FaultWindowsCaught,
+            pass: score.Missing == 0 && HysteresisScore.Passes(
+                faults.Values.Sum(windows => windows.Count), plain.FalseAlerts, real.FalseAlerts, plain.FaultWindowsCaught, real.FaultWindowsCaught),
             cancellationToken);
 
         HysteresisArm Arm(IEnumerable<Guid> ruleIds, double arm)
