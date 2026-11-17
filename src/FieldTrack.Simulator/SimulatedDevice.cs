@@ -9,20 +9,32 @@ namespace FieldTrack.Simulator;
 /// </summary>
 internal sealed class SimulatedDevice
 {
+    /// <summary>The engine temperature of a healthy Device, in °C.</summary>
+    public const double NormalEngineTempC = 85;
+
+    private const double FuelDrainPctPerMinute = 0.5;
+
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     private readonly FleetDevice _spec;
     private readonly IMotion _motion;
+    private readonly InjectionSchedule _injections;
     private readonly Random _random;
     private readonly Queue<byte[]> _outbox = new();
     private long _captured;
+    private double _fuelDrained;
+    private TimeSpan _fuelAt;
 
-    /// <summary>A Device with the traits of <paramref name="spec"/> that is in <paramref name="boot"/> and moves as <paramref name="motion"/> says.</summary>
-    public SimulatedDevice(FleetDevice spec, int boot, IMotion motion)
+    /// <summary>
+    /// A Device with the traits of <paramref name="spec"/> that is in <paramref name="boot"/>, moves as <paramref name="motion"/> says
+    /// and suffers what <paramref name="injections"/> schedules (nothing when null).
+    /// </summary>
+    public SimulatedDevice(FleetDevice spec, int boot, IMotion motion, InjectionSchedule? injections = null)
     {
         _spec = spec;
         Boot = boot;
         _motion = motion;
+        _injections = injections ?? new InjectionSchedule();
         _random = new Random(SeedFor($"{spec.Serial}/noise/{boot}"));
     }
 
@@ -73,8 +85,29 @@ internal sealed class SimulatedDevice
     // Seeded from the serial, so a Device wanders the same way every run; string.GetHashCode is randomised per process.
     private static int SeedFor(string serial) => serial.Aggregate(17, (hash, c) => (hash * 31) + c);
 
-    // Drains half a percent a minute, then tops up when it gets low, so a long run never ends on an empty tank.
-    private static double FuelPct(TimeSpan elapsed) => 90 - ((elapsed.TotalMinutes * 0.5) % 75);
+    // Drains half a percent a minute (a leak multiplies that while it lasts), then tops up when it gets low, so a long run never ends on an empty tank.
+    private double FuelPct(TimeSpan elapsed)
+    {
+        var leaked = _injections.All
+            .Where(injection => injection.Kind == InjectionKind.FuelLeak)
+            .Sum(leak => leak.OverlapWith(_fuelAt, elapsed).TotalMinutes * (leak.Amount - 1));
+        _fuelDrained += FuelDrainPctPerMinute * ((elapsed - _fuelAt).TotalMinutes + leaked);
+        _fuelAt = elapsed;
+        return 90 - (_fuelDrained % 75);
+    }
+
+    // An Overheat Fault spends its first 40% ramping from the normal temperature to its peak, the next 30% at the peak, the last 30% cooling.
+    private double EngineTempC(TimeSpan elapsed)
+    {
+        if (_injections.Active(InjectionLane.Overheat, elapsed) is not { } overheat)
+        {
+            return NormalEngineTempC;
+        }
+
+        var progress = (elapsed - overheat.Start) / (overheat.End - overheat.Start);
+        var level = progress switch { < 0.4 => progress / 0.4, < 0.7 => 1, _ => (1 - progress) / 0.3 };
+        return NormalEngineTempC + ((overheat.Amount - NormalEngineTempC) * level);
+    }
 
     private byte[] Build(DateTimeOffset now, TimeSpan elapsed)
     {
@@ -82,7 +115,7 @@ internal sealed class SimulatedDevice
         var message = new Message(
             Boot, _captured++, now.ToUnixTimeMilliseconds(), Math.Round(motion.Position.Lat, 6), Math.Round(motion.Position.Lon, 6),
             Value(Sensor.SpeedKph, motion.SpeedKph),
-            Value(Sensor.EngineTempC, 85),
+            Value(Sensor.EngineTempC, EngineTempC(elapsed)),
             Value(Sensor.FuelPct, FuelPct(elapsed)),
             Value(Sensor.VibrationMmS, 2),
             Value(Sensor.BatteryV, 13.8));
