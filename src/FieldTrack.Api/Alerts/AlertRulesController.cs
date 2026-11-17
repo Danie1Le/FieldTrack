@@ -119,13 +119,12 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        // An ingest batch reads the enabled rules FOR KEY SHARE and holds that lock until it commits, so this lock
-        // waits for a batch that may raise an Alert for the rule, and the check below then sees its Alert.
+        // Bumping the version waits for a running ingest batch, so the check below sees any Alert it raised for the rule,
+        // and the next batch reloads without the rule instead of failing on its foreign key. Every other change of the
+        // rule bumps the version first too, so the delete's row lock comes after it on every path (ADR 0005).
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.BumpAlertRuleVersionAsync(cancellationToken);
-        // Not FromSql on AlertRules: EF 10 maps the optional ThresholdSettings to wrong column names there.
-        var locked = await db.Database.SqlQuery<Guid>($"""SELECT id AS "Value" FROM alert_rules WHERE id = {id} FOR UPDATE""").ToListAsync(cancellationToken);
-        if (locked.Count == 0)
+        if (!await db.AlertRules.AnyAsync(rule => rule.Id == id, cancellationToken))
         {
             return NotFound();
         }
