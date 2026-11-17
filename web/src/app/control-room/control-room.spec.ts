@@ -29,6 +29,7 @@ describe('ControlRoom', () => {
   const admin = signal(false);
 
   beforeEach(() => {
+    admin.set(false);
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
     const fleet = { start: () => {}, assets: signal([]), groups: signal([]), rules: signal([]), geofences: signal([]), alerts, connection: signal('live') };
     TestBed.configureTestingModule({ providers: [provideRouter([]), { provide: AuthService, useValue: { isAdmin: admin } }] });
@@ -63,7 +64,6 @@ describe('ControlRoom', () => {
   });
 
   it('offers the management screens to Admins only', async () => {
-    admin.set(false);
     const fixture = TestBed.createComponent(ControlRoom);
     const link = () => (fixture.nativeElement as HTMLElement).querySelector('a[href="/manage"]');
 
@@ -73,5 +73,17 @@ describe('ControlRoom', () => {
     admin.set(true);
     await fixture.whenStable();
     expect(link()!.textContent!.trim()).toBe('Manage');
+  });
+
+  it('offers the users page to Admins only', async () => {
+    const fixture = TestBed.createComponent(ControlRoom);
+    const link = () => (fixture.nativeElement as HTMLElement).querySelector('a[href="/users"]');
+
+    await fixture.whenStable();
+    expect(link()).toBeNull();
+
+    admin.set(true);
+    await fixture.whenStable();
+    expect(link()!.textContent!.trim()).toBe('Users');
   });
 });
