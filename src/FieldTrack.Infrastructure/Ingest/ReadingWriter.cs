@@ -97,7 +97,8 @@ public sealed class ReadingWriter : IAsyncDisposable
             FROM (SELECT device_id, max(received_time) AS received_time FROM staged GROUP BY device_id) r
             WHERE d.id = r.device_id
         )
-        -- The new Readings of Assets in use, in receive order, for rule evaluation (ADR 0005).
+        -- The new Readings of Assets in use, in receive order, for rule evaluation (ADR 0005). A backlog Reading
+        -- stamped with an Asset Archived since is stored but evaluates no rule.
         SELECT s.device_id, r.asset_id, a.asset_group_id, s.boot, s.seq, s.device_time, s.lat, s.lon,
                s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
         FROM stored r
@@ -106,6 +107,17 @@ public sealed class ReadingWriter : IAsyncDisposable
         WHERE NOT a.archived
         ORDER BY s.ordinal
         """;
+
+    // One row of Store's final SELECT; edit the two together.
+    private static AssetReading ReadStored(NpgsqlDataReader reader)
+    {
+        var reading = new Reading(
+            reader.GetInt32(3), reader.GetInt64(4), reader.GetFieldValue<DateTimeOffset>(5), reader.GetDouble(6), reader.GetDouble(7),
+            Sensor(8), Sensor(9), Sensor(10), Sensor(11), Sensor(12));
+        return new AssetReading(reader.GetGuid(1), reader.IsDBNull(2) ? null : reader.GetGuid(2), new StoredReading(reader.GetGuid(0), reading));
+
+        float? Sensor(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
+    }
 
     private readonly NpgsqlConnection _connection;
     private readonly AlertRuleRunner _rules;
@@ -165,32 +177,36 @@ public sealed class ReadingWriter : IAsyncDisposable
             await import.CompleteAsync(cancellationToken);
         }
 
-        // Separate statements, so each sees what committed while the one before waited on a lock.
+        // Separate statements, so each sees what committed while the one before waited on a lock. The rules are read
+        // in the same round trip, after storing.
+        var store = new NpgsqlBatchCommand(Store);
         await using var batch = new NpgsqlBatch(_connection, transaction)
         {
-            BatchCommands = { new(LockDevices), new(LockAssets), new(Store) },
+            BatchCommands = { new(LockDevices), new(LockAssets), store, new(AlertRuleRunner.LoadRules) },
         };
         var stored = new List<AssetReading>();
+        List<AlertRule> rules;
         await using (var reader = await batch.ExecuteReaderAsync(cancellationToken))
         {
-            // Skip the lock statements' results; the last one holds the stored Readings.
-            await reader.NextResultAsync(cancellationToken);
-            await reader.NextResultAsync(cancellationToken);
+            // Result sets come in command order: skip the lock statements' to reach Store's, then the rules follow.
+            for (var skip = batch.BatchCommands.IndexOf(store); skip > 0; skip--)
+            {
+                await reader.NextResultAsync(cancellationToken);
+            }
+
             while (await reader.ReadAsync(cancellationToken))
             {
-                var reading = new Reading(
-                    reader.GetInt32(3), reader.GetInt64(4), reader.GetFieldValue<DateTimeOffset>(5), reader.GetDouble(6), reader.GetDouble(7),
-                    Sensor(reader, 8), Sensor(reader, 9), Sensor(reader, 10), Sensor(reader, 11), Sensor(reader, 12));
-                stored.Add(new AssetReading(reader.GetGuid(1), reader.IsDBNull(2) ? null : reader.GetGuid(2), new StoredReading(reader.GetGuid(0), reading)));
+                stored.Add(ReadStored(reader));
             }
+
+            await reader.NextResultAsync(cancellationToken);
+            rules = await AlertRuleRunner.ReadRulesAsync(reader, cancellationToken);
         }
 
-        var ruleStates = await _rules.EvaluateAsync(transaction, stored, cancellationToken);
+        var ruleStates = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(ruleStates);
     }
-
-    private static float? Sensor(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _connection.DisposeAsync();

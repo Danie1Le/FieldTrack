@@ -14,12 +14,18 @@ public sealed class AlertRuleRunner
         SELECT alert_rule_id, asset_id, breached, last_device_id, last_boot, last_sequence_number FROM alert_rule_states
         """;
 
-    // shortcut: rules are read again every batch that stored Readings, so a new or edited rule applies from the
-    // next batch; #34 swaps this for ADR 0005's version row. A rule deleted after this read fails the batch on the
-    // foreign key of its Alert or rule state, and the redelivered batch reads the rules again.
-    private const string LoadRules = """
+    /// <summary>
+    /// Reads the enabled rules; <see cref="ReadingWriter"/> runs it in its batch, after storing, and hands the rows to
+    /// <see cref="ReadRulesAsync"/>. The key share lock makes a rule delete wait for the batch to commit, so the delete
+    /// then sees the batch's Alert (409) or deletes cleanly, instead of failing the batch on a foreign key.
+    /// </summary>
+    // shortcut: rules are read again every batch, so a new or edited rule applies from the next batch; #34 swaps this
+    // for ADR 0005's version row. Fine for Threshold rules only: Geofence rules (#32, after #34) must not rebuild
+    // their prepared geometries per batch.
+    public const string LoadRules = """
         SELECT id, name, kind, asset_id, asset_group_id, severity, sensor, operator, threshold, hysteresis
         FROM alert_rules WHERE enabled
+        FOR KEY SHARE
         """;
 
     // Conditional, so a manual resolve that got there first wins (#10).
@@ -65,20 +71,14 @@ public sealed class AlertRuleRunner
     }
 
     /// <summary>
-    /// Evaluates the enabled rules against <paramref name="stored"/>, the Readings a batch stored for Assets in use, in
-    /// receive order, and writes the outcome in <paramref name="transaction"/>. Returns the rule states to keep once
-    /// the transaction commits; pass them to <see cref="Keep"/>.
+    /// Evaluates <paramref name="rules"/>, the enabled rules, against <paramref name="stored"/>, the Readings a batch
+    /// stored for Assets in use, in receive order, and writes the outcome in <paramref name="transaction"/>. Returns
+    /// the rule states to keep once the transaction commits; pass them to <see cref="Keep"/>.
     /// </summary>
     public async Task<IReadOnlyDictionary<(Guid Rule, Guid Asset), RuleState>> EvaluateAsync(
-        NpgsqlTransaction transaction, IReadOnlyList<AssetReading> stored, CancellationToken cancellationToken)
+        NpgsqlTransaction transaction, IReadOnlyList<AlertRule> rules, IReadOnlyList<AssetReading> stored, CancellationToken cancellationToken)
     {
         var changed = new Dictionary<(Guid Rule, Guid Asset), RuleState>();
-        if (stored.Count == 0)
-        {
-            return changed;
-        }
-
-        var rules = await LoadRulesAsync(transaction, cancellationToken);
         await using var writes = new NpgsqlBatch(transaction.Connection, transaction);
         foreach (var asset in stored.GroupBy(reading => (reading.AssetId, reading.AssetGroupId)))
         {
@@ -89,9 +89,9 @@ public sealed class AlertRuleRunner
                 var state = _states.GetValueOrDefault(key);
                 var evaluation = RuleEvaluator.Evaluate(rule, assetId, state, asset.Select(reading => reading.Reading), _time);
                 // Resolve before inserting: the unique index allows one Active Alert per rule and Asset.
-                if (evaluation.ActiveAlertClearedAt is { } clearedAt)
+                if (evaluation.ResolveActiveAlertAt is { } resolveAt)
                 {
-                    writes.BatchCommands.Add(Command(ResolveActive, ("at", clearedAt), ("rule", rule.Id), ("asset", assetId)));
+                    writes.BatchCommands.Add(Command(ResolveActive, ("at", resolveAt), ("rule", rule.Id), ("asset", assetId)));
                 }
 
                 foreach (var alert in evaluation.Raised)
@@ -126,11 +126,10 @@ public sealed class AlertRuleRunner
         }
     }
 
-    private static async Task<List<AlertRule>> LoadRulesAsync(NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    /// <summary>Reads the rows of <see cref="LoadRules"/> from the current result set of <paramref name="reader"/>.</summary>
+    public static async Task<List<AlertRule>> ReadRulesAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         var rules = new List<AlertRule>();
-        await using var command = new NpgsqlCommand(LoadRules, transaction.Connection, transaction);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             rules.Add(new AlertRule
@@ -142,10 +141,11 @@ public sealed class AlertRuleRunner
                 AssetGroupId = reader.IsDBNull(4) ? null : reader.GetGuid(4),
                 Severity = Enum.Parse<Severity>(reader.GetString(5)),
                 Enabled = true,
-                Sensor = reader.IsDBNull(6) ? null : Enum.Parse<Sensor>(reader.GetString(6)),
-                Operator = reader.IsDBNull(7) ? null : Enum.Parse<ThresholdOperator>(reader.GetString(7)),
-                Threshold = reader.IsDBNull(8) ? null : reader.GetDouble(8),
-                Hysteresis = reader.IsDBNull(9) ? null : reader.GetDouble(9),
+                // ck_alert_rules_threshold keeps the four settings all set and in range, or all null.
+                ThresholdSettings = reader.IsDBNull(6)
+                    ? null
+                    : new ThresholdSettings(Enum.Parse<Sensor>(reader.GetString(6)), Enum.Parse<ThresholdOperator>(reader.GetString(7)),
+                        reader.GetDouble(8), reader.GetDouble(9)),
             });
         }
 

@@ -94,8 +94,8 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        // An ingest batch that wrote an Alert or rule state for the rule holds a key share lock on it (the foreign
-        // key) until it commits, so this lock waits for it and the check below then sees its Alert.
+        // An ingest batch reads the enabled rules FOR KEY SHARE and holds that lock until it commits, so this lock
+        // waits for a batch that may raise an Alert for the rule, and the check below then sees its Alert.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // Not FromSql on AlertRules: EF 10 maps the optional ThresholdSettings to wrong column names there.
         var locked = await db.Database.SqlQuery<Guid>($"""SELECT id AS "Value" FROM alert_rules WHERE id = {id} FOR UPDATE""").ToListAsync(cancellationToken);

@@ -114,8 +114,65 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
         alert.GetProperty("fromBacklog").GetBoolean().ShouldBeTrue();
     }
 
-    private static ReceivedReading Received(long seq, DateTimeOffset deviceTime, float engineTempC) =>
-        new("TRK-007", new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null), DateTimeOffset.UtcNow, [(byte)seq]);
+    [Fact]
+    public async Task A_batch_redelivered_after_commit_from_the_Device_swapped_out_raises_no_second_Alert_and_keeps_the_rule_state()
+    {
+        using var admin = await AdminClientAsync();
+        var first = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
+        var second = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-008" });
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        var attachment = await CreateAsync(admin, "/attachments", new { deviceId = first, assetId = asset });
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        ReceivedReading[] breach = [Received(0, DateTimeOffset.UtcNow, 110)];
+        await WriteAsync(breach);
+        using (var detached = await admin.PostAsync($"/attachments/{attachment}/detach", content: null, CancellationToken))
+        {
+            detached.EnsureSuccessStatusCode();
+        }
+
+        await CreateAsync(admin, "/attachments", new { deviceId = second, assetId = asset });
+        await WriteAsync([Received(0, DateTimeOffset.UtcNow.AddSeconds(1), 90, "TRK-008")]);
+
+        // Committed but never acknowledged, so the broker delivers it again to a new ingest session. Only the store
+        // statement's duplicate filter stops it: another Device's Reading always counts as newer (ADR 0005).
+        await WriteAsync(breach);
+
+        var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
+        alert.GetProperty("status").GetString().ShouldBe("Resolved");
+        await using var database = await OpenDatabaseAsync();
+        (await SqlAsync(database, "SELECT last_device_id FROM alert_rule_states")).ShouldBe(Guid.Parse(second));
+    }
+
+    [Fact]
+    public async Task A_backlog_Reading_stamped_with_an_Archived_Asset_is_stored_but_evaluates_no_rule()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var t = DateTimeOffset.UtcNow;
+        await WriteAsync([Received(0, t, 90)]);
+        using (var archived = await admin.DeleteAsync($"/assets/{asset}", CancellationToken))
+        {
+            archived.EnsureSuccessStatusCode();
+        }
+
+        // Taken before the Archive ended the Attachment, so stamped with the Archived Asset.
+        await WriteAsync([Received(1, t.AddMilliseconds(1), 120)]);
+
+        (await ListAsync(admin, "/alerts")).ShouldBeEmpty();
+        await using var database = await OpenDatabaseAsync();
+        (await SqlAsync(database, "SELECT asset_id FROM readings WHERE seq = 1")).ShouldBe(Guid.Parse(asset));
+    }
+
+    // A fresh writer per call, as a new ingest session would open.
+    private async Task WriteAsync(IReadOnlyList<ReceivedReading> readings)
+    {
+        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
+        await writer.WriteAsync(readings, CancellationToken);
+    }
+
+    private static ReceivedReading Received(long seq, DateTimeOffset deviceTime, float engineTempC, string serialNumber = "TRK-007") =>
+        new(serialNumber, new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null), DateTimeOffset.UtcNow, [(byte)seq]);
 
     private static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
         TelemetryPublisher.Payload(1, seq, deviceTime, more: FormattableString.Invariant($",\"engineTempC\":{engineTempC}"));
