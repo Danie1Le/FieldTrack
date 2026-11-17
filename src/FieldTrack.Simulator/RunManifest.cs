@@ -12,6 +12,7 @@ internal sealed record PublishedRange(int Boot, long FirstSequence, long LastSeq
 /// <summary>
 /// One <see cref="Injection"/> as the run applied it: a Fault, Power off, Coverage gap or clock problem in force from
 /// <paramref name="Start"/> up to, not including, <paramref name="End"/>. A Reading taken inside the window is affected by it.
+/// Listed only when the Device stepped at or after its start; times share one clock with the Readings' own (run start + elapsed).
 /// </summary>
 /// <param name="Kind">What it did.</param>
 /// <param name="Start">When it started.</param>
@@ -42,15 +43,18 @@ internal sealed record RunManifest(DateTimeOffset StartedAt, DateTimeOffset Ende
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    /// <summary>The Manifest of a run that ended with <paramref name="devices"/> in the state they were left in.</summary>
+    /// <summary>
+    /// The Manifest of a run that ended with <paramref name="devices"/> in the state they were left in. <paramref name="endedAt"/>
+    /// must be <paramref name="startedAt"/> plus the run's elapsed time, the clock the Devices step by.
+    /// </summary>
     public static RunManifest Of(DateTimeOffset startedAt, DateTimeOffset endedAt, double? ratePerSecond, IEnumerable<SimulatedDevice> devices)
     {
         var length = endedAt - startedAt;
         return new(startedAt, endedAt, ratePerSecond, [.. devices.Select(device => new ManifestDevice(
             device.Serial,
             device.Ranges,
-            // An injection that never started is not in the Manifest; one still running is cut at the end of the run.
-            [.. device.Injections.Where(injection => injection.Start < length).OrderBy(injection => injection.Start).Select(injection =>
+            // An injection the Device never reached is not in the Manifest; one still running is cut at the end of the run.
+            [.. device.Injections.Where(injection => injection.Start <= device.LastStep).OrderBy(injection => injection.Start).Select(injection =>
                 new ManifestWindow(injection.Kind, startedAt + injection.Start, startedAt + (injection.End < length ? injection.End : length), injection.Amount))]))]);
     }
 

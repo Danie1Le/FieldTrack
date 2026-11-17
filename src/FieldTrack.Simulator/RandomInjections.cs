@@ -8,14 +8,12 @@ internal sealed record RandomRates(double FaultsPerHour, double PowerOffsPerHour
 {
     /// <summary>No random injection at all: only a Scenario injects.</summary>
     public static RandomRates None { get; } = new(0, 0, 0);
-
-    /// <summary>Whether any kind has a rate above zero.</summary>
-    public bool Any => FaultsPerHour > 0 || PowerOffsPerHour > 0 || CoverageGapsPerHour > 0;
 }
 
 /// <summary>
 /// Draws the random Faults, Power offs and Coverage gaps of one Device. Each tick of the Device is one independent draw per kind,
-/// with probability rate x time since the previous tick, so a rate means the same however fast the Device publishes.
+/// with probability rate x time since the previous tick, so a rate means the same however fast the Device publishes. An
+/// instance and its <see cref="Random"/> (not thread-safe) belong to one Device, which steps on its own task.
 /// </summary>
 internal sealed class RandomInjections(RandomRates rates, IReadOnlyList<Sensor> sensors, Random random)
 {

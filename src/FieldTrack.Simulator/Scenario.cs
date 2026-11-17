@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace FieldTrack.Simulator;
 
@@ -13,14 +14,16 @@ internal sealed class Scenario
     private const double MaxSeconds = 4_000_000;
     private const double MaxClockAmount = 1_000_000_000;
 
-    private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { AllowDuplicateProperties = false };
+    // An unknown property is refused: a typo such as "durationSecond" would otherwise quietly script a different run.
+    private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
+    {
+        AllowDuplicateProperties = false,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+    };
 
     private readonly Dictionary<string, List<Injection>> _injections;
 
     private Scenario(Dictionary<string, List<Injection>> injections) => _injections = injections;
-
-    /// <summary>The Scenario with nothing in it: the run injects only what random injection draws.</summary>
-    public static Scenario None { get; } = new([]);
 
     /// <summary>What happens to the Device with <paramref name="serial"/>, in the order the file lists it.</summary>
     public IReadOnlyList<Injection> InjectionsFor(string serial) => _injections.GetValueOrDefault(serial) ?? [];
@@ -95,6 +98,12 @@ internal sealed class Scenario
         RequireSensor(kind, device, where);
         var start = TimeSpan.FromSeconds(dto.AtSeconds.Value);
         var end = dto.DurationSeconds is { } seconds ? start + TimeSpan.FromSeconds(seconds) : TimeSpan.MaxValue;
+        // TimeSpan rounds to 100 ns, so a tiny duration can still leave a window that covers nothing.
+        if (end <= start)
+        {
+            throw new SimulatorException($"{where}: durationSeconds {dto.DurationSeconds} rounds to no time at all.");
+        }
+
         return (device, new Injection(kind, start, end, AmountOf(kind, dto.Amount, where)));
     }
 

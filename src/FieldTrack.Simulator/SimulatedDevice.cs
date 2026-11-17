@@ -29,7 +29,6 @@ internal sealed class SimulatedDevice
     private readonly List<PublishedRange> _earlierBoots = [];
     private bool _poweredOff;
     private bool _hasCoverage = true;
-    private TimeSpan _lastStep;
     private long _captured;
     private double _fuelDrained;
     private TimeSpan _fuelAt;
@@ -80,6 +79,9 @@ internal sealed class SimulatedDevice
     /// <summary>What was injected into the Device so far, scripted or drawn, in the order it was scheduled.</summary>
     public IReadOnlyList<Injection> Injections => _injections.All;
 
+    /// <summary>How far into the run the Device last stepped, or null before its first step; it acts on nothing later.</summary>
+    public TimeSpan? LastStep { get; private set; }
+
     /// <summary>
     /// Advances the Device to <paramref name="elapsed"/> into the run, <paramref name="now"/> by the wall clock: it takes a Reading
     /// unless a Power off has it switched off, and starts its new Boot when a Power off ends. A Power off that began and ended
@@ -89,12 +91,12 @@ internal sealed class SimulatedDevice
     {
         _injections.Advance(elapsed);
         var off = _injections.Active(InjectionLane.Connection, elapsed) is { Kind: InjectionKind.PowerOff };
-        if (off || _injections.All.Any(injection => injection.Kind == InjectionKind.PowerOff && injection.OverlapWith(_lastStep, elapsed) > TimeSpan.Zero))
+        if (off || _injections.All.Any(injection => injection.Kind == InjectionKind.PowerOff && injection.OverlapWith(LastStep ?? TimeSpan.Zero, elapsed) > TimeSpan.Zero))
         {
             PowerOff();
         }
 
-        _lastStep = elapsed;
+        LastStep = elapsed;
         if (off)
         {
             return;
