@@ -35,6 +35,20 @@ public sealed class FleetFileTests
     }
 
     [Fact]
+    public void A_Device_lists_the_noise_sigma_of_each_sensor_that_has_one()
+    {
+        var fleet = FleetFile.Parse("""
+            { "devices": [
+              { "serial": "A", "assetType": "Truck", "sensors": ["engineTempC", "fuelPct"], "noise": { "engineTempC": 1.5 } },
+              { "serial": "B", "assetType": "Truck", "sensors": ["fuelPct"] }
+            ] }
+            """, Base);
+
+        fleet.Devices[0].Noise.ShouldBe(new Dictionary<Sensor, double> { [Sensor.EngineTempC] = 1.5 });
+        fleet.Devices[1].Noise.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void The_committed_demo_fleet_loads_and_its_routes_exist()
     {
         var fleet = FleetFile.Load(Path.Combine(AppContext.BaseDirectory, "fleets", "demo.json"));
@@ -73,6 +87,9 @@ public sealed class FleetFileTests
     [InlineData("""{ "devices": [ { "serial": "A", "assetName": " ", "assetType": "Truck" } ] }""", "assetName")]
     [InlineData("""{ "devices": [ { "serial": "A", "assetName": "", "assetType": "Truck" } ] }""", "assetName")]
     [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "assetName": "Haul" }, { "serial": "B", "assetType": "Truck", "assetName": "Haul" } ] }""", "Devices A and B both use Asset 'Haul'")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "sensors": ["fuelPct"], "noise": { "rpm": 1 } } ] }""", "unknown sensor 'rpm'")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "sensors": ["fuelPct"], "noise": { "engineTempC": 1 } } ] }""", "noise on engineTempC")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "sensors": ["fuelPct"], "noise": { "fuelPct": -1 } } ] }""", "sigma")]
     [InlineData("""{ "devices": [ null ] }""", "no serial")]
     [InlineData("not json", "not valid JSON")]
     public void A_fleet_file_that_breaks_a_rule_is_refused_with_the_reason(string json, string reason)
