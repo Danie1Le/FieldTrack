@@ -32,9 +32,10 @@ export const routes: Routes = [
   },
   {
     path: 'manage',
-    // Lazy, so only Admins download the management screens.
+    // Lazy behind canMatch, which runs before the router loads children (canActivate runs after), so only Admins
+    // download the management screens.
     loadChildren: () => import('./manage/manage').then((m) => m.manageRoutes),
-    canActivate: [adminGuard],
+    canMatch: [adminGuard],
   },
   { path: '**', redirectTo: '' },
 ];
