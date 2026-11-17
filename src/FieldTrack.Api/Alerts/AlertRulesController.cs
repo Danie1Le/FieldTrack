@@ -40,7 +40,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AlertRuleResponse>> Create(AlertRuleRequest request, CancellationToken cancellationToken)
     {
-        if (await RefusalAsync(request, cancellationToken) is { } refusal)
+        if (await RefusalAsync(request, currentAssetId: null, cancellationToken) is { } refusal)
         {
             return refusal;
         }
@@ -52,9 +52,12 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
         return StatusCode(StatusCodes.Status201Created, ToResponse(rule));
     }
 
-    /// <summary>Edits an Alert Rule.</summary>
-    /// <remarks>Resolving the rule's Active Alerts and restarting its rule state on an edit come with #34.</remarks>
-    /// <response code="400">Not exactly one known target, an Archived Asset, or a Threshold rule missing a setting.</response>
+    /// <summary>
+    /// Edits an Alert Rule. A rule whose Asset has been Archived can still be edited, so an Admin can disable it;
+    /// only moving a rule onto an Archived Asset is refused.
+    /// </summary>
+    /// <remarks>An edit leaves the rule's existing Alerts and rule state as they are (#34).</remarks>
+    /// <response code="400">Not exactly one known target, a move to an Archived Asset, or a Threshold rule missing a setting.</response>
     /// <response code="404">No Alert Rule has this id.</response>
     [HttpPut("{id:guid}")]
     [Authorize(Policy = Policies.Manage)]
@@ -68,7 +71,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
             return NotFound();
         }
 
-        if (await RefusalAsync(request, cancellationToken) is { } refusal)
+        if (await RefusalAsync(request, rule.AssetId, cancellationToken) is { } refusal)
         {
             return refusal;
         }
@@ -94,8 +97,9 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
         // An ingest batch that wrote an Alert or rule state for the rule holds a key share lock on it (the foreign
         // key) until it commits, so this lock waits for it and the check below then sees its Alert.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var rule = await db.AlertRules.FromSql($"SELECT * FROM alert_rules WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
-        if (rule is null)
+        // Not FromSql on AlertRules: EF 10 maps the optional ThresholdSettings to wrong column names there.
+        var locked = await db.Database.SqlQuery<Guid>($"""SELECT id AS "Value" FROM alert_rules WHERE id = {id} FOR UPDATE""").ToListAsync(cancellationToken);
+        if (locked.Count == 0)
         {
             return NotFound();
         }
@@ -105,19 +109,20 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
             return Problem("The Alert Rule has raised Alerts; disable it instead.", statusCode: StatusCodes.Status409Conflict);
         }
 
-        db.AlertRules.Remove(rule);
-        await db.SaveChangesAsync(cancellationToken);
+        await db.AlertRules.Where(rule => rule.Id == id).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return NoContent();
     }
 
-    private async Task<ActionResult?> RefusalAsync(AlertRuleRequest request, CancellationToken cancellationToken)
+    // currentAssetId: the Asset an edited rule targets now, which may stay even once Archived.
+    private async Task<ActionResult?> RefusalAsync(AlertRuleRequest request, Guid? currentAssetId, CancellationToken cancellationToken)
     {
         if ((request.AssetId is null) == (request.AssetGroupId is null))
         {
             ModelState.AddModelError(nameof(AlertRuleRequest.AssetId), "Give exactly one of assetId and assetGroupId.");
         }
-        else if (request.AssetId is { } assetId && !await db.Assets.AnyAsync(asset => asset.Id == assetId && !asset.Archived, cancellationToken))
+        else if (request.AssetId is { } assetId && assetId != currentAssetId
+                 && !await db.Assets.AnyAsync(asset => asset.Id == assetId && !asset.Archived, cancellationToken))
         {
             ModelState.AddModelError(nameof(AlertRuleRequest.AssetId), "No Asset in use has this id.");
         }
@@ -131,6 +136,12 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
             ModelState.AddModelError(nameof(AlertRuleRequest.Threshold), "A Threshold rule needs sensor, operator, threshold and hysteresis.");
         }
 
+        // The JSON options read "NaN" and "Infinity" from strings; such a threshold would never breach.
+        if (request.Threshold is { } threshold && !double.IsFinite(threshold))
+        {
+            ModelState.AddModelError(nameof(AlertRuleRequest.Threshold), "The threshold must be a finite number.");
+        }
+
         return ModelState.IsValid ? null : ValidationProblem(ModelState);
     }
 
@@ -142,13 +153,13 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
         rule.AssetGroupId = request.AssetGroupId;
         rule.Severity = request.Severity!.Value;
         rule.Enabled = request.Enabled;
-        rule.Sensor = request.Sensor;
-        rule.Operator = request.Operator;
-        rule.Threshold = request.Threshold;
-        rule.Hysteresis = request.Hysteresis;
+        // RefusalAsync has checked every setting, so the settings cannot refuse them.
+        rule.ThresholdSettings = rule.Kind == AlertRuleKind.Threshold
+            ? new ThresholdSettings(request.Sensor!.Value, request.Operator!.Value, request.Threshold!.Value, request.Hysteresis!.Value)
+            : null;
     }
 
     private static AlertRuleResponse ToResponse(AlertRule rule) =>
         new(rule.Id, rule.Name, rule.Kind, rule.AssetId, rule.AssetGroupId, rule.Severity, rule.Enabled,
-            rule.Sensor, rule.Operator, rule.Threshold, rule.Hysteresis);
+            rule.ThresholdSettings?.Sensor, rule.ThresholdSettings?.Operator, rule.ThresholdSettings?.Threshold, rule.ThresholdSettings?.Hysteresis);
 }
