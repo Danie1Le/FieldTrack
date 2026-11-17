@@ -92,8 +92,8 @@ export interface Alert {
 export interface AlertRule {
   id: string;
   name: string;
-  /** The API's `AlertRuleKind` names; Offline arrives with #33. */
-  kind: 'Threshold' | 'Offline';
+  /** The API's `AlertRuleKind` names. */
+  kind: 'Threshold' | 'Offline' | 'GeofenceExit' | 'GeofenceEnter';
   assetId: string | null;
   assetGroupId: string | null;
   severity: 'Warning' | 'Critical';
@@ -102,6 +102,8 @@ export interface AlertRule {
   operator: 'GreaterThan' | 'LessThan' | null;
   threshold: number | null;
   hysteresis: number | null;
+  /** The Geofence a Geofence rule watches. */
+  geofenceId: string | null;
 }
 
 /** A GeoJSON Polygon (RFC 7946): rings of `[longitude, latitude]` positions, each closed, the outer ring first. */

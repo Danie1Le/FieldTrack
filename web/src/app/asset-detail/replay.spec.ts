@@ -31,6 +31,7 @@ describe('ruleLines', () => {
     operator: 'GreaterThan',
     threshold: 105,
     hysteresis: 5,
+    geofenceId: null,
     ...changes,
   });
   const truck = { id: 'truck', assetGroupId: 'depot' };

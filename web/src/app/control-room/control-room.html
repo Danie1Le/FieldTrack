@@ -10,6 +10,9 @@
   @if (fleet.connection() !== 'live') {
     <span class="connection" role="status">{{ fleet.connection() === 'connecting' ? 'Connecting…' : 'Reconnecting…' }}</span>
   }
+  @if (auth.isAdmin()) {
+    <a class="btn" routerLink="/geofences">Geofences</a>
+  }
   <button type="button" class="btn" (click)="auth.signOut()">Sign out</button>
 </header>
 

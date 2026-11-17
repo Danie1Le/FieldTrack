@@ -45,6 +45,24 @@ export class AuthService {
   /** True while this tab holds an access token. */
   readonly signedIn = computed(() => this.access() !== null);
 
+  /**
+   * True when the access token's `role` claim names Admin. It only decides what the dashboard offers: the API checks
+   * the role on every change (ADR 0002).
+   */
+  readonly isAdmin = computed(() => {
+    const payload = this.access()?.token.split('.')[1];
+    if (!payload) {
+      return false;
+    }
+
+    try {
+      const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+      return ([] as unknown[]).concat(claims.role).includes('Admin');
+    } catch {
+      return false;
+    }
+  });
+
   /** Signs in with email and password. */
   async signIn(email: string, password: string): Promise<SignInOutcome> {
     try {

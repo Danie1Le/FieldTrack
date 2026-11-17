@@ -1,5 +1,6 @@
 import { Component, DestroyRef, ElementRef, afterRenderEffect, inject, input, output, untracked } from '@angular/core';
 import * as L from 'leaflet';
+import { baseMap } from '../base-map';
 import { geofenceLayer } from '../geofences/geofence-layer';
 import { kindLetter, onMap, statusLabels } from './asset-status';
 import { Geofence, LiveAsset } from './live';
@@ -37,27 +38,12 @@ export class FleetMap {
 
   private readonly host: HTMLElement = inject(ElementRef).nativeElement;
   private readonly markers = new Map<string, L.Marker>();
-  private readonly map = L.map(this.host, { zoomControl: false }).setView([52.2, -1.1], 6);
+  // On narrow screens the map sits behind a tab: baseMap re-measures whenever it is shown or resized.
+  private readonly map = baseMap(this.host, () => this.fitOnce());
   private readonly areas = L.layerGroup().addTo(this.map);
   private fitted = false;
 
   constructor() {
-    L.control.zoom({ position: 'bottomleft' }).addTo(this.map);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(this.map);
-    // On narrow screens the map sits behind a tab: re-measure whenever it is shown or resized.
-    const resized = new ResizeObserver(() => {
-      this.map.invalidateSize();
-      this.fitOnce();
-    });
-    resized.observe(this.host);
-    inject(DestroyRef).onDestroy(() => {
-      resized.disconnect();
-      this.map.remove();
-    });
-
     afterRenderEffect(() => this.draw(this.assets(), this.selected()));
     afterRenderEffect(() => {
       this.areas.clearLayers();

@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { AuthService } from '../auth/auth';
 import { ControlRoom } from './control-room';
 import { Alert } from './live';
@@ -24,12 +25,20 @@ const alert = (id: string, status: Alert['status']): Alert => ({
 });
 
 describe('ControlRoom', () => {
-  it('counts the Active Alerts on the Alerts tab', async () => {
+  const alerts = signal<Alert[]>([]);
+  const admin = signal(false);
+
+  beforeEach(() => {
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
-    const alerts = signal([alert('a', 'Open'), alert('b', 'Acknowledged'), alert('c', 'Resolved')]);
     const fleet = { start: () => {}, assets: signal([]), groups: signal([]), rules: signal([]), geofences: signal([]), alerts, connection: signal('live') };
-    TestBed.configureTestingModule({ providers: [{ provide: AuthService, useValue: {} }] });
+    TestBed.configureTestingModule({ providers: [provideRouter([]), { provide: AuthService, useValue: { isAdmin: admin } }] });
     TestBed.overrideComponent(ControlRoom, { set: { providers: [{ provide: LiveFleet, useValue: fleet }] } });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('counts the Active Alerts on the Alerts tab', async () => {
+    alerts.set([alert('a', 'Open'), alert('b', 'Acknowledged'), alert('c', 'Resolved')]);
     const fixture = TestBed.createComponent(ControlRoom);
     const tab = () => [...(fixture.nativeElement as HTMLElement).querySelectorAll('nav button')].at(-1)!.textContent!.trim();
 
@@ -39,5 +48,17 @@ describe('ControlRoom', () => {
     alerts.update((list) => [...list, alert('d', 'Open')]);
     await fixture.whenStable();
     expect(tab()).toBe('Alerts 3');
+  });
+
+  it('offers the Geofences page to Admins only', async () => {
+    const fixture = TestBed.createComponent(ControlRoom);
+    const link = () => (fixture.nativeElement as HTMLElement).querySelector('a[href="/geofences"]');
+
+    await fixture.whenStable();
+    expect(link()).toBeNull();
+
+    admin.set(true);
+    await fixture.whenStable();
+    expect(link()!.textContent!.trim()).toBe('Geofences');
   });
 });
