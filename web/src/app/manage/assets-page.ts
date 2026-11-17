@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { AssetGroup, assetTypes } from '../control-room/live';
 import { Asset } from './api';
@@ -19,7 +19,10 @@ export class AssetsPage {
   protected readonly changes = new Changes();
   protected readonly assetTypes = assetTypes;
 
-  protected readonly assets = signal<Asset[] | null>(null);
+  /** Archived ones too, so their Asset Groups count them. */
+  private readonly assets = signal<Asset[] | null>(null);
+  /** The Assets listed: those in use. */
+  protected readonly inUse = computed(() => this.assets()?.filter((asset) => !asset.archived) ?? null);
   protected readonly groups = signal<AssetGroup[]>([]);
   /** The Asset being edited, or 'new' while one is being created. */
   protected readonly assetForm = new Editing<Asset | 'new'>();
@@ -33,8 +36,11 @@ export class AssetsPage {
     return this.groups().find((group) => group.id === id)?.name ?? '—';
   }
 
-  protected assetsIn(group: AssetGroup): number {
-    return (this.assets() ?? []).filter((asset) => asset.assetGroupId === group.id).length;
+  /** How many Assets the group holds; Archived ones are counted apart, as they too keep the group from being deleted. */
+  protected assetsIn(group: AssetGroup): string {
+    const members = (this.assets() ?? []).filter((asset) => asset.assetGroupId === group.id);
+    const archived = members.filter((asset) => asset.archived).length;
+    return `${members.length - archived}${archived ? ` (${archived} Archived)` : ''}`;
   }
 
   protected saveAsset(form: HTMLFormElement): Promise<void> {
@@ -81,7 +87,7 @@ export class AssetsPage {
   private async load(): Promise<void> {
     try {
       const [assets, groups] = await Promise.all([
-        firstValueFrom(this.http.get<Asset[]>('/api/assets')),
+        firstValueFrom(this.http.get<Asset[]>('/api/assets?includeArchived=true')),
         firstValueFrom(this.http.get<AssetGroup[]>('/api/asset-groups')),
       ]);
       this.assets.set(assets);

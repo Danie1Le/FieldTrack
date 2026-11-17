@@ -33,7 +33,7 @@ describe('AssetsPage', () => {
 
   /** Answers the page's reads, then lets the answers render. */
   async function serve(assets: Asset[], groups: AssetGroup[]) {
-    await vi.waitFor(() => api.expectOne('/api/assets').flush(assets));
+    await vi.waitFor(() => api.expectOne('/api/assets?includeArchived=true').flush(assets));
     api.expectOne('/api/asset-groups').flush(groups);
     await view.settle();
   }
@@ -48,6 +48,23 @@ describe('AssetsPage', () => {
     expect(rows('Asset Groups')).toEqual([
       ['Depot', '1'],
       ['Quarry', '0'],
+    ]);
+  });
+
+  it('leaves Archived Assets out of the list but counts them in their Asset Group, which they keep from being deleted', async () => {
+    view.button('Delete', 'Generator 1').click();
+    await view.settle();
+    view.button('Yes, delete').click();
+    api.expectOne({ method: 'DELETE', url: '/api/assets/gen' }).flush(null, { status: 204, statusText: 'No Content' });
+    await serve(
+      [asset('truck', 'Haul truck 7', 'Truck', 'depot'), { ...asset('gen', 'Generator 1', 'Generator', 'quarry'), archived: true }],
+      [group('depot', 'Depot'), group('quarry', 'Quarry')],
+    );
+
+    expect(rows('Assets')).toEqual([['Haul truck 7', 'Truck', 'Depot']]);
+    expect(rows('Asset Groups')).toEqual([
+      ['Depot', '1'],
+      ['Quarry', '0 (1 Archived)'],
     ]);
   });
 

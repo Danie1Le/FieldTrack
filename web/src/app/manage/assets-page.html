@@ -47,7 +47,7 @@
         <tr><th>Name</th><th>Type</th><th>Asset Group</th><th><span class="sr-only">Actions</span></th></tr>
       </thead>
       <tbody>
-        @for (asset of assets(); track asset.id) {
+        @for (asset of inUse(); track asset.id) {
           <tr>
             <td>{{ asset.name }}</td>
             <td>{{ asset.type }}</td>
@@ -63,7 +63,7 @@
             </td>
           </tr>
         } @empty {
-          <tr><td colspan="4" class="muted">{{ assets() ? 'No Assets yet.' : 'Loading…' }}</td></tr>
+          <tr><td colspan="4" class="muted">{{ inUse() ? 'No Assets yet.' : 'Loading…' }}</td></tr>
         }
       </tbody>
     </table>
