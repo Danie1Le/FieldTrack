@@ -127,10 +127,12 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     {
         using var admin = await AdminClientAsync();
         var (_, asset) = await AttachedDeviceAsync(admin, "TRK-010");
+        var hub = BrokenLiveHub.Throwing();
         await using var api = Fixture.Api.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
-            services.AddSingleton<HubLifetimeManager<LiveHub>>(BrokenLiveHub.Throwing())));
+            services.AddSingleton<HubLifetimeManager<LiveHub>>(hub)));
 
         await Should.NotThrowAsync(() => api.Services.GetRequiredService<LivePush>().PushAsync([Guid.Parse(asset)], [], [], CancellationToken));
+        hub.Sent.IsCompleted.ShouldBeTrue();
     }
 
     [Fact]

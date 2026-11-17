@@ -11,6 +11,11 @@ namespace FieldTrack.IntegrationTests;
 internal sealed class BrokenLiveHub(Func<CancellationToken, Task> sendAll)
     : DefaultHubLifetimeManager<LiveHub>(NullLogger<DefaultHubLifetimeManager<LiveHub>>.Instance)
 {
+    private readonly TaskCompletionSource _sent = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes on the first broadcast, so a test knows the push reached the broken part.</summary>
+    public Task Sent => _sent.Task;
+
     /// <summary>A push that throws.</summary>
     public static BrokenLiveHub Throwing() => new(_ => throw new InvalidOperationException("Push failed on purpose."));
 
@@ -18,6 +23,9 @@ internal sealed class BrokenLiveHub(Func<CancellationToken, Task> sendAll)
     public static BrokenLiveHub Stalled() => new(cancellationToken => Task.Delay(Timeout.Infinite, cancellationToken));
 
     /// <inheritdoc />
-    public override Task SendAllAsync(string methodName, object?[] args, CancellationToken cancellationToken = default) =>
-        sendAll(cancellationToken);
+    public override Task SendAllAsync(string methodName, object?[] args, CancellationToken cancellationToken = default)
+    {
+        _sent.TrySetResult();
+        return sendAll(cancellationToken);
+    }
 }
