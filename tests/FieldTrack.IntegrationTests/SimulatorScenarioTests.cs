@@ -115,6 +115,8 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         meter.SetMeasurementEventCallback<long>((instrument, value, _, _) => logs.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} BATCH size {value}"));
         meter.SetMeasurementEventCallback<double>((instrument, value, _, _) => logs.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} BATCH commit {value * 1000:F0} ms"));
         meter.Start();
+        using var spans = new System.Diagnostics.ActivityListener { ShouldListenTo = s => s.Name == "FieldTrack.Ingest", Sample = (ref System.Diagnostics.ActivityCreationOptions<System.Diagnostics.ActivityContext> _) => System.Diagnostics.ActivitySamplingResult.AllData, ActivityStopped = a => { if (a.OperationName == "ingest batch") { logs.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} SPAN ingest batch {a.Duration.TotalMilliseconds:F0} ms"); } } };
+        System.Diagnostics.ActivitySource.AddActivityListener(spans);
         await using var ingest = await StartIngestAsync(services: collection => collection.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(new CollectingLogger(logs)));
 
         var manifest = await FleetRunner.RunAsync(Fleet, Options(TimeSpan.FromSeconds(2), rate: null), TextWriter.Null, TimeProvider.System, CancellationToken);
@@ -143,7 +145,7 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
             await Task.Delay(1000, CancellationToken);
         }
 
-        var states = string.Join("; ", await ActivityAsync(database));
+        var states = string.Join("; ", await ActivityAsync(database)) + " cpus=" + Environment.ProcessorCount + " load=" + File.ReadAllText("/proc/loadavg");
         var counts = string.Join(",", Fleet.Devices.Select(d => $"{d.Serial}={Published(manifest, d.Serial)}"));
         File.AppendAllText(Path.Combine(Path.GetTempPath(), "max-diag.log"), $"run {run} published={counts} stored={stored}\n");
         stored.ShouldBe(Published(manifest, "TRK-001"), $"run {run} published {counts}\nTIMELINE\n{string.Join("\n", timeline)}\nPG {states}\nLOGS\n{string.Join("\n", logs.Where(l => !l.Contains("DbCommand")).TakeLast(60))}");
