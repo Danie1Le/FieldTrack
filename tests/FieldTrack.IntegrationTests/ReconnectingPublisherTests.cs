@@ -91,6 +91,43 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
         await Should.ThrowAsync<OperationCanceledException>(() => publishing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
     }
 
+    [Fact(Timeout = 60_000)]
+    public async Task Cancelling_always_ends_as_a_cancellation_however_the_connection_fails()
+    {
+        // A broker that resets every connection fails the attempt at an unpredictable moment, so cancelling lands before,
+        // during or after that failure. Whichever it is, the caller must see a cancellation, never the connection error.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var stopListening = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        _ = Task.Run(async () =>
+        {
+            while (!stopListening.IsCancellationRequested)
+            {
+                using var connection = await listener.AcceptTcpClientAsync(stopListening.Token);
+                connection.LingerState = new LingerOption(true, 0);
+            }
+        }, stopListening.Token);
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        try
+        {
+            for (var attempt = 0; attempt < 200; attempt++)
+            {
+                await using var publisher = new ReconnectingPublisher("127.0.0.1", port, "reset", TextWriter.Null);
+                using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                var publishing = publisher.PublishAsync("fieldtrack/v1/devices/RESET/telemetry", "never"u8.ToArray(), stop.Token);
+                Thread.SpinWait(Random.Shared.Next(200_000));
+                await stop.CancelAsync();
+
+                await Should.ThrowAsync<OperationCanceledException>(() => publishing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            }
+        }
+        finally
+        {
+            await stopListening.CancelAsync();
+        }
+    }
+
     [Theory(Timeout = 30_000)]
     [InlineData(false)]
     [InlineData(true)]
