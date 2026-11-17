@@ -6,7 +6,9 @@
 /** Asset Status (GLOSSARY): No device > Alerting > Offline > Normal, computed by the API. */
 export type AssetStatus = 'NoDevice' | 'Alerting' | 'Offline' | 'Normal';
 
-export type AssetType = 'Truck' | 'Excavator' | 'Generator' | 'Sensor';
+export const assetTypes = ['Truck', 'Excavator', 'Generator', 'Sensor'] as const;
+
+export type AssetType = (typeof assetTypes)[number];
 
 export type Sensor = 'SpeedKph' | 'EngineTempC' | 'FuelPct' | 'VibrationMmS' | 'BatteryV';
 
