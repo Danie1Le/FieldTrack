@@ -5,6 +5,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\FieldTrack.Domain\FieldTrack.Domain.csproj" />
+    <ProjectReference Include="..\..\src\FieldTrack.Simulator\FieldTrack.Simulator.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,37 @@
+namespace FieldTrack.Simulator;
+
+/// <summary>The <c>--name value</c> pairs after a command, with the environment as a fallback for secrets.</summary>
+internal sealed class Options
+{
+    private readonly Dictionary<string, string> _values;
+
+    private Options(Dictionary<string, string> values) => _values = values;
+
+    /// <summary>Reads <paramref name="args"/> as <c>--name value</c> pairs.</summary>
+    /// <exception cref="SimulatorException">An argument that is not a <c>--name</c> with a value, or a name given twice.</exception>
+    public static Options Parse(IReadOnlyList<string> args)
+    {
+        var values = new Dictionary<string, string>();
+        for (var i = 0; i < args.Count; i += 2)
+        {
+            if (!args[i].StartsWith("--", StringComparison.Ordinal) || i + 1 >= args.Count || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                throw new SimulatorException($"Expected '--name value', got '{args[i]}'.");
+            }
+
+            if (!values.TryAdd(args[i][2..], args[i + 1]))
+            {
+                throw new SimulatorException($"{args[i]} is given twice.");
+            }
+        }
+
+        return new Options(values);
+    }
+
+    /// <summary>The value of <paramref name="name"/>, or null when it was not given.</summary>
+    public string? Get(string name) => _values.GetValueOrDefault(name);
+
+    /// <summary>The value of <paramref name="name"/>.</summary>
+    /// <exception cref="SimulatorException">The option was not given.</exception>
+    public string Require(string name) => Get(name) ?? throw new SimulatorException($"Missing --{name}.");
+}
