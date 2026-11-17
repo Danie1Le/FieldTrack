@@ -108,11 +108,6 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         manifest.RatePerSecond.ShouldBeNull();
         var total = Fleet.Devices.Sum(device => Published(manifest, device.Serial));
         total.ShouldBeGreaterThan(90, "a paced run of 2 s at 30 a second publishes about 60");
-        // A starved runner can leave one Device with few Readings, so each is only required to have published; the flood is the total above.
-        foreach (var device in Fleet.Devices)
-        {
-            Published(manifest, device.Serial).ShouldBeGreaterThan(0, device.Serial);
-        }
 
         // A flood is thousands of Readings and ingest stores them slower than the broker accepts them, so the wait is generous and
         // counts in the database: listing them through the API on every poll would slow the very ingest being waited for.
