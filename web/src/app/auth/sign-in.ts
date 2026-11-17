@@ -1,7 +1,8 @@
-import { HttpErrorResponse } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from './auth';
+
+const tooManyAttempts = 'Too many attempts. Wait a minute and try again.';
 
 /**
  * The sign-in page. A temporary password (the seeded first Admin's, #61) gets a second step that replaces it, which
@@ -39,7 +40,7 @@ export class SignIn {
           this.errors.set(['Wrong email or password, or the account is locked for a while after repeated failures.']);
           break;
         case 'tooManyAttempts':
-          this.errors.set(['Too many attempts. Wait a minute and try again.']);
+          this.errors.set([tooManyAttempts]);
           break;
       }
     });
@@ -52,16 +53,24 @@ export class SignIn {
     }
 
     await this.attempt(async () => {
-      try {
-        await this.auth.changePassword(this.email, this.password, newPassword);
-        this.password = '';
-        await this.router.navigateByUrl('/');
-      } catch (error) {
-        if (!(error instanceof HttpErrorResponse)) {
-          throw error;
-        }
-
-        this.errors.set(changePasswordErrors(error));
+      const outcome = await this.auth.changePassword(this.email, this.password, newPassword);
+      switch (outcome) {
+        case 'changed':
+          this.password = '';
+          await this.router.navigateByUrl('/');
+          break;
+        case 'refused':
+          // Locked meanwhile, or the temporary password was changed elsewhere: only a new sign-in can continue.
+          this.email = '';
+          this.password = '';
+          this.step.set('signIn');
+          this.errors.set(['The current password was refused. Sign in again.']);
+          break;
+        case 'tooManyAttempts':
+          this.errors.set([tooManyAttempts]);
+          break;
+        default:
+          this.errors.set(outcome.invalid.length ? outcome.invalid : ['The password could not be changed.']);
       }
     });
   }
@@ -76,20 +85,5 @@ export class SignIn {
     } finally {
       this.busy.set(false);
     }
-  }
-}
-
-/** What to tell the user about a refused password change: the API's validation messages, or what the status means. */
-function changePasswordErrors(error: HttpErrorResponse): string[] {
-  switch (error.status) {
-    case 400:
-      // A validation problem: { errors: { NewPassword: ["Passwords must have at least one digit ('0'-'9')."] } }.
-      return Object.values<string[]>(error.error?.errors ?? {}).flat();
-    case 401:
-      return ['The current password was refused. Sign in again.'];
-    case 429:
-      return ['Too many attempts. Wait a minute and try again.'];
-    default:
-      return [error.error?.title ?? 'The password could not be changed.'];
   }
 }

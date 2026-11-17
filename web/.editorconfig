@@ -1,5 +1,4 @@
-# Editor configuration, see https://editorconfig.org
-root = true
+# Editor configuration, see https://editorconfig.org (inherits end_of_line = lf from the repo root)
 
 [*]
 charset = utf-8

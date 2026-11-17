@@ -107,4 +107,57 @@ describe('AuthService', () => {
 
     expect(await response).toEqual([]);
   });
+
+  it('spends the refresh token once when two calls get a 401 together', async () => {
+    await signIn();
+    const http = TestBed.inject(HttpClient);
+
+    const assets = firstValueFrom(http.get('/api/assets'));
+    const rules = firstValueFrom(http.get('/api/alert-rules'));
+    for (const url of ['/api/assets', '/api/alert-rules']) {
+      const first = await vi.waitFor(() => api.expectOne(url), { interval: 1 });
+      first.flush(null, { status: 401, statusText: 'Unauthorized' });
+    }
+    // expectOne fails on a second spend, which the API would treat as a replay (ADR 0002).
+    await vi.waitFor(() => api.expectOne('/api/auth/refresh'), { interval: 1 }).then((refresh) => refresh.flush(tokens(2)));
+    for (const url of ['/api/assets', '/api/alert-rules']) {
+      const retry = await vi.waitFor(() => api.expectOne(url), { interval: 1 });
+      expect(retry.request.headers.get('Authorization')).toBe('Bearer access-2');
+      retry.flush([]);
+    }
+
+    expect(await assets).toEqual([]);
+    expect(await rules).toEqual([]);
+  });
+
+  it('retries only once: a 401 on the retry is the error, with no second refresh', async () => {
+    await signIn();
+    const http = TestBed.inject(HttpClient);
+
+    const response = firstValueFrom(http.get('/api/assets/live'));
+    await vi.waitFor(() => api.expectOne('/api/assets/live'), { interval: 1 }).then((first) =>
+      first.flush(null, { status: 401, statusText: 'Unauthorized' }),
+    );
+    await vi.waitFor(() => api.expectOne('/api/auth/refresh'), { interval: 1 }).then((refresh) => refresh.flush(tokens(2)));
+    await vi.waitFor(() => api.expectOne('/api/assets/live'), { interval: 1 }).then((retry) =>
+      retry.flush(null, { status: 401, statusText: 'Unauthorized' }),
+    );
+
+    await expect(response).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('does not bring the session back when a refresh in flight answers after sign out', async () => {
+    await signIn();
+
+    const refreshed = auth.refresh();
+    const request = api.expectOne('/api/auth/refresh');
+    auth.signOut();
+    request.flush(tokens(2));
+
+    expect(await refreshed).toBe(false);
+    expect(auth.signedIn()).toBe(false);
+    expect(sessionStorage.getItem(refreshTokenKey)).toBeNull();
+    // No silent refresh was re-armed: api.verify() fails on any request this would send.
+    vi.advanceTimersByTime(30 * minute);
+  });
 });

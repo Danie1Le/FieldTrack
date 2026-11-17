@@ -17,6 +17,7 @@ export interface LiveHubConnection {
 
 /** Wait before each retry after a failed connect, the last one repeating. */
 const retryDelays = [1_000, 2_000, 5_000, 10_000, 30_000];
+const retryDelay = (attempt: number) => retryDelays[Math.min(attempt, retryDelays.length - 1)];
 
 /** Builds the connection to the API's live hub; the token factory runs on every connect and reconnect. */
 export const LIVE_HUB = new InjectionToken<(accessToken: () => Promise<string>) => LiveHubConnection>('LIVE_HUB', {
@@ -24,7 +25,7 @@ export const LIVE_HUB = new InjectionToken<(accessToken: () => Promise<string>) 
   factory: () => (accessTokenFactory) =>
     new HubConnectionBuilder()
       .withUrl('/api/hubs/live', { accessTokenFactory })
-      .withAutomaticReconnect({ nextRetryDelayInMilliseconds: (r) => retryDelays[Math.min(r.previousRetryCount, 4)] })
+      .withAutomaticReconnect({ nextRetryDelayInMilliseconds: (r) => retryDelay(r.previousRetryCount) })
       .build(),
 });
 
@@ -49,6 +50,8 @@ export class LiveFleet {
   private stopped = false;
   private failedConnects = 0;
   private retry?: ReturnType<typeof setTimeout>;
+  /** Pushes that arrive while load() reads the fleet; replayed over its snapshot, which may be older than them. */
+  private pushedDuringLoad: LiveAsset[][] | null = null;
 
   readonly assets = signal<LiveAsset[]>([]);
   readonly groups = signal<AssetGroup[]>([]);
@@ -61,7 +64,9 @@ export class LiveFleet {
       clearTimeout(this.retry);
       void this.hub.stop();
     });
-    this.hub.on('AssetsUpdated', (changed) => this.merge(changed));
+    this.hub.on('AssetsUpdated', (changed) =>
+      this.pushedDuringLoad ? this.pushedDuringLoad.push(changed) : this.merge(changed),
+    );
     this.hub.onreconnecting(() => this.connection.set('reconnecting'));
     this.hub.onreconnected(() => void this.load());
     this.hub.onclose(() => {
@@ -92,12 +97,13 @@ export class LiveFleet {
 
   private connectLater(): void {
     if (!this.stopped) {
-      this.retry = setTimeout(() => void this.connect(), retryDelays[Math.min(this.failedConnects++, 4)]);
+      this.retry = setTimeout(() => void this.connect(), retryDelay(this.failedConnects++));
     }
   }
 
   /** Reads the fleet over REST; on failure drops the connection, so the reconnect path loads again. */
   private async load(): Promise<void> {
+    this.pushedDuringLoad ??= [];
     try {
       const [assets, groups, rules] = await Promise.all([
         firstValueFrom(this.http.get<LiveAsset[]>('/api/assets/live')),
@@ -105,12 +111,15 @@ export class LiveFleet {
         firstValueFrom(this.http.get<AlertRule[]>('/api/alert-rules')),
       ]);
       this.assets.set(assets);
+      this.pushedDuringLoad.forEach((changed) => this.merge(changed));
       this.groups.set(groups);
       this.rules.set(rules);
       this.failedConnects = 0;
       this.connection.set('live');
     } catch {
       await this.hub.stop();
+    } finally {
+      this.pushedDuringLoad = null;
     }
   }
 

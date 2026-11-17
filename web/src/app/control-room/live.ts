@@ -46,10 +46,11 @@ export interface AssetGroup {
 export interface AlertRule {
   id: string;
   name: string;
-  kind: string;
+  /** The API's `AlertRuleKind` names; Offline arrives with #33. */
+  kind: 'Threshold' | 'Offline';
   assetId: string | null;
   assetGroupId: string | null;
-  severity: string;
+  severity: 'Warning' | 'Critical';
   enabled: boolean;
   sensor: Sensor | null;
   operator: 'GreaterThan' | 'LessThan' | null;
