@@ -9,6 +9,7 @@ namespace FieldTrack.Simulator;
 /// <param name="ManifestPath">Where to write the <see cref="RunManifest"/>.</param>
 /// <param name="Scenario">What to inject into which Device and when; null for nothing scripted.</param>
 /// <param name="RandomInjection">How often to inject at random; null for never. Neither this nor a Scenario is allowed in maximum mode.</param>
+/// <param name="Acknowledged">Called, possibly from several Devices at once, with the time from a Device's tick to the broker's acknowledgement of each Reading it published; null for nobody listening.</param>
 internal sealed record RunOptions(
     string BrokerHost,
     int BrokerPort,
@@ -17,7 +18,8 @@ internal sealed record RunOptions(
     string StatePath,
     string ManifestPath,
     Scenario? Scenario = null,
-    RandomRates? RandomInjection = null);
+    RandomRates? RandomInjection = null,
+    Action<TimeSpan>? Acknowledged = null);
 
 /// <summary>
 /// Runs every Device of a fleet against the broker and writes the Manifest when it stops. Paced mode (a rate) spreads the sends
@@ -111,6 +113,7 @@ internal static class FleetRunner
             {
                 await publisher.PublishAsync(device.Topic, payload, drain);
                 device.Published();
+                options.Acknowledged?.Invoke(time.GetElapsedTime(startTimestamp) - elapsed);
             }
         }
         // Maximum mode has no timer: the next Reading follows as soon as the last one was acknowledged.
