@@ -68,6 +68,33 @@ public sealed class BenchTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
+    public async Task Restarting_ingest_during_a_run_loses_nothing_and_stores_nothing_twice()
+    {
+        await SeedAsync();
+        var clientId = NewIngestClientId();
+        var ingest = await StartIngestAsync(clientId: clientId);
+
+        // A new worker on the same broker session takes over what the old one had not acknowledged. The compose bench SIGKILLs a container instead.
+        async Task RestartAsync(CancellationToken stop)
+        {
+            await ingest.DisposeAsync();
+            ingest = await StartIngestAsync(clientId: clientId);
+        }
+
+        var outcome = await CrashBench.RunAsync(
+            Fleet, Target, rate: 60, TimeSpan.FromSeconds(9), [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)], RestartAsync, TextWriter.Null, CancellationToken);
+        await ingest.DisposeAsync();
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("kills").GetArrayLength().ShouldBe(2);
+        results.GetProperty("published").GetInt64().ShouldBeGreaterThan(300);
+        results.GetProperty("missing").GetInt64().ShouldBe(0);
+        results.GetProperty("storedDuplicates").GetInt64().ShouldBe(0);
+        results.GetProperty("copiesDroppedByIngest").GetInt64().ShouldBeGreaterThanOrEqualTo(0);
+        outcome.Pass.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Scoring_counts_a_listed_Reading_that_was_never_stored_as_missing()
     {
         await SeedAsync();
