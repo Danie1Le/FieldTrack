@@ -29,6 +29,34 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
     }
 
     [Fact]
+    public async Task Each_dropped_copy_is_identical_or_conflicting_against_the_stored_copy_not_against_other_copies()
+    {
+        using var admin = await AdminClientAsync();
+        await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
+        var now = DateTimeOffset.UtcNow;
+        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
+        var first = await writer.WriteAsync([Received(0, now) with { Payload = [1] }], [], CancellationToken);
+
+        var later = await writer.WriteAsync(
+        [
+            // Copies of Reading 0, stored by the earlier batch with payload [1]: the two [2] copies match each other
+            // but not the stored copy, so both conflict.
+            Received(0, now) with { Payload = [1] },
+            Received(0, now) with { Payload = [2] },
+            Received(0, now) with { Payload = [2] },
+            // Reading 1 is new: its first copy is stored and the others are judged against it.
+            Received(1, now) with { Payload = [3] },
+            Received(1, now) with { Payload = [3] },
+            Received(1, now) with { Payload = [4] },
+        ], [], CancellationToken);
+
+        (first.IdenticalDuplicates, first.ConflictingDuplicates).ShouldBe((0, 0));
+        (later.IdenticalDuplicates, later.ConflictingDuplicates).ShouldBe((2, 3));
+        await using var database = await OpenDatabaseAsync();
+        (await SqlAsync(database, "SELECT count(*) FROM readings")).ShouldBe(2L);
+    }
+
+    [Fact]
     public async Task A_redelivered_Rejected_message_already_stored_is_skipped_but_a_fresh_copy_is_stored()
     {
         var now = DateTimeOffset.UtcNow;
@@ -37,11 +65,11 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
             TelemetryPublisher.TopicOf("GHOST-1"), "GHOST-1", new Reading(1, 0, now, 51.5, -0.12, null, null, null, null, null), now, [0x7d], false);
         await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
 
-        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Count.ShouldBe(2);
+        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Rejected.Count.ShouldBe(2);
         // The broker's redelivery (DUP) of both, after the batch committed.
-        (await writer.WriteAsync([unknown with { Redelivered = true }], [badJson with { Redelivered = true }], CancellationToken)).ShouldBeEmpty();
+        (await writer.WriteAsync([unknown with { Redelivered = true }], [badJson with { Redelivered = true }], CancellationToken)).Rejected.ShouldBeEmpty();
         // Published again by the Device: a new message, so a new Rejected message.
-        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Count.ShouldBe(2);
+        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Rejected.Count.ShouldBe(2);
 
         await using var database = await OpenDatabaseAsync();
         (await SqlAsync(database, "SELECT count(*) FROM rejected_messages")).ShouldBe(4L);
