@@ -1,0 +1,10 @@
+# Layer over docker-compose.yml for the API load test (#47):
+#   docker compose -f docker-compose.yml -f bench/docker-compose.k6.yml up --build -d
+# Local load tests only. Fifty virtual users sign in from one address, so the per-address sign-in limit (10 a minute,
+# ADR 0002) is raised; the real sign-in endpoint is still used. The Demo Operator is the Operator they sign in as.
+services:
+  api:
+    environment:
+      Auth__SignInPermitsPerMinute: "1000"
+      FIELDTRACK_DEMO_EMAIL: ${FIELDTRACK_DEMO_EMAIL:?set the Demo Operator email}
+      FIELDTRACK_DEMO_PASSWORD: ${FIELDTRACK_DEMO_PASSWORD:?set the Demo Operator password}
