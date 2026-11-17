@@ -37,13 +37,16 @@ public sealed class FieldTrackFixture : IAsyncLifetime
         // Same split as docker-compose: the image's init scripts load extensions into the
         // maintenance database, and the API creates and migrates the fieldtrack database itself.
         .WithDatabase("postgres")
+        // The bench reads each batch's commit time (bench/docker-compose.bench.yml sets the same).
+        .WithCommand("-c", "track_commit_timestamp=on")
         .Build();
 
     private readonly IContainer _broker = new ContainerBuilder(TestImages.Mosquitto)
         .WithPortBinding(MqttPort, assignRandomHostPort: true)
+        // The shared config plus the one setting the bench needs (bench/docker-compose.bench.yml appends the same): $SYS counters every second.
         .WithResourceMapping(
-            new FileInfo(Path.Combine(AppContext.BaseDirectory, "mosquitto.conf")),
-            new FileInfo("/mosquitto/config/mosquitto.conf"))
+            System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "mosquitto.conf")) + "\nsys_interval 1\n"),
+            "/mosquitto/config/mosquitto.conf")
         .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged(
             "mosquitto version .+ running", wait => wait.WithTimeout(TimeSpan.FromMinutes(1))))
         .Build();

@@ -20,6 +20,8 @@ namespace FieldTrack.IntegrationTests;
 /// </summary>
 public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetime
 {
+    private readonly List<string> _ingestClientIds = [];
+
     /// <summary>The shared containers and API host.</summary>
     protected FieldTrackFixture Fixture { get; } = fixture;
 
@@ -90,8 +92,13 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
         return api;
     }
 
-    /// <summary>A broker session name no other test uses.</summary>
-    protected static string NewIngestClientId() => $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+    /// <summary>A broker session name no other test uses; the session is dropped when the test ends.</summary>
+    protected string NewIngestClientId()
+    {
+        var clientId = $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+        _ingestClientIds.Add(clientId);
+        return clientId;
+    }
 
     /// <summary>A payload carrying only an engine temperature, for Alert Rule tests.</summary>
     protected static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
@@ -164,9 +171,14 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
         (await client.GetFromJsonAsync<JsonElement[]>(path, CancellationToken)).ShouldNotBeNull();
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        // A session a test leaves behind keeps queueing every later test's telemetry on the shared broker, so the bench's backlog never empties.
+        foreach (var clientId in _ingestClientIds)
+        {
+            await TelemetryPublisher.DropIngestSessionAsync(Fixture, clientId);
+        }
+
         GC.SuppressFinalize(this);
-        return ValueTask.CompletedTask;
     }
 }
