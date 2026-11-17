@@ -1,4 +1,5 @@
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Live;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -15,7 +16,7 @@ namespace FieldTrack.Api.Assets;
 [ApiController]
 [Route("attachments")]
 [Authorize(Policy = Policies.Read)]
-public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider time) : ControllerBase
+public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider time, LivePush live) : ControllerBase
 {
     /// <summary>Lists Attachments newest first, optionally only one Asset's or one Device's history.</summary>
     [HttpGet]
@@ -72,7 +73,10 @@ public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider t
         return StatusCode(StatusCodes.Status201Created, ToResponse(attachment));
     }
 
-    /// <summary>Detaches the Device, ending the Attachment now; the Attachment stays in history.</summary>
+    /// <summary>
+    /// Detaches the Device, ending the Attachment now; the Attachment stays in history. The Asset's Active Alerts resolve
+    /// as Device detached.
+    /// </summary>
     /// <response code="404">No Attachment has this id.</response>
     /// <response code="409">The Attachment has already ended.</response>
     [HttpPost("{id:guid}/detach")]
@@ -96,8 +100,9 @@ public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider t
         }
 
         var now = time.GetUtcNow();
-        await db.EndOpenAttachmentsAsync(a => a.Id == id, now, cancellationToken);
+        var resolved = await db.EndOpenAttachmentsAsync(a => a.Id == id, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.PushAsync([], [], resolved, cancellationToken);
         return ToResponse(attachment) with { DetachedAt = now };
     }
 

@@ -1,4 +1,5 @@
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Live;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -15,7 +16,7 @@ namespace FieldTrack.Api.Assets;
 [ApiController]
 [Route("devices")]
 [Authorize(Policy = Policies.Read)]
-public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory readingHistory, TimeProvider time) : ControllerBase
+public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory readingHistory, TimeProvider time, LivePush live) : ControllerBase
 {
     /// <summary>Lists Devices by serial number, leaving out Archived ones unless <paramref name="includeArchived"/> is true.</summary>
     [HttpGet]
@@ -54,7 +55,8 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
     /// <summary>
     /// Deletes a Device with no Readings outright, with its Attachments, so mistakes are easy to clean
     /// up. A Device with Readings is Archived instead and its open Attachment ended, which keeps its
-    /// history, hides it from lists and makes ingest reject its telemetry.
+    /// history, hides it from lists and makes ingest reject its telemetry; its Asset's Active Alerts resolve as Device
+    /// detached.
     /// </summary>
     /// <response code="404">No Device has this id.</response>
     [HttpDelete("{id:guid}")]
@@ -71,10 +73,11 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
             return NotFound();
         }
 
+        IReadOnlyList<Guid> resolved = [];
         if (await readingHistory.DeviceHasReadingsAsync(id, cancellationToken))
         {
             device.Archived = true;
-            await db.EndOpenAttachmentsAsync(attachment => attachment.DeviceId == id, time.GetUtcNow(), cancellationToken);
+            resolved = await db.EndOpenAttachmentsAsync(attachment => attachment.DeviceId == id, time.GetUtcNow(), cancellationToken);
         }
         else
         {
@@ -85,6 +88,7 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.PushAsync([], [], resolved, cancellationToken);
         return NoContent();
     }
 

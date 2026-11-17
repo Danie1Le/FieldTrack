@@ -1,4 +1,6 @@
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Live;
+using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -13,7 +15,7 @@ namespace FieldTrack.Api.Assets;
 [ApiController]
 [Route("assets")]
 [Authorize(Policy = Policies.Read)]
-public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory readingHistory, TimeProvider time) : ControllerBase
+public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory readingHistory, TimeProvider time, LivePush live) : ControllerBase
 {
     /// <summary>Lists Assets by name, leaving out Archived ones unless <paramref name="includeArchived"/> is true.</summary>
     [HttpGet]
@@ -73,7 +75,8 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
     /// <summary>
     /// Deletes an Asset with no history outright, with its Attachments, so mistakes are easy to clean
     /// up. An Asset with history (Readings) is Archived instead and its open Attachment ended, which
-    /// keeps the history and hides it from lists.
+    /// keeps the history and hides it from lists; its own Alert Rules are disabled and its Active Alerts resolve as
+    /// Asset archived.
     /// </summary>
     /// <response code="404">No Asset has this id.</response>
     [HttpDelete("{id:guid}")]
@@ -91,10 +94,17 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             return NotFound();
         }
 
+        // Either way the Asset's own rules stop: disabled with it, or deleted with it.
+        await db.RaiseAlertRuleVersionAsync(cancellationToken);
+        IReadOnlyList<Guid> resolved = [];
         if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken))
         {
             asset.Archived = true;
-            await db.EndOpenAttachmentsAsync(attachment => attachment.AssetId == id, time.GetUtcNow(), cancellationToken);
+            var now = time.GetUtcNow();
+            await db.AlertRules.Where(rule => rule.AssetId == id).ExecuteUpdateAsync(set => set.SetProperty(rule => rule.Enabled, false), cancellationToken);
+            // Before the Attachment ends, which would resolve them as Device detached.
+            resolved = await db.ResolveActiveAlertsAsync(alert => alert.AssetId == id, ResolveReason.AssetArchived, now, cancellationToken);
+            await db.EndOpenAttachmentsAsync(attachment => attachment.AssetId == id, now, cancellationToken);
         }
         else
         {
@@ -105,6 +115,7 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.PushAsync([], [], resolved, cancellationToken);
         return NoContent();
     }
 
