@@ -57,6 +57,15 @@ services:
       mosquitto:
         condition: service_started
 
+  web:
+    # The dashboard, served by nginx, which proxies /api/ to the api service: http://localhost:8081.
+    build: web
+    ports:
+      # Loopback only, like the API it fronts.
+      - "127.0.0.1:8081:80"
+    depends_on:
+      - api
+
 volumes:
   postgres-data:
   mosquitto-data:
