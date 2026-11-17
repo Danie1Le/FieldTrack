@@ -104,10 +104,10 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     protected static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
         TelemetryPublisher.Payload(1, seq, deviceTime, more: FormattableString.Invariant($",\"engineTempC\":{engineTempC}"));
 
-    /// <summary>Reads until <paramref name="done"/> holds or 15 s pass, and returns the last value read.</summary>
-    protected static async Task<T> EventuallyAsync<T>(Func<Task<T>> read, Func<T, bool> done)
+    /// <summary>Reads until <paramref name="done"/> holds or <paramref name="within"/> (30 s by default: only a failing test waits that long, and a shared CI runner can be several times slower than a laptop) passes, and returns the last value read.</summary>
+    protected static async Task<T> EventuallyAsync<T>(Func<Task<T>> read, Func<T, bool> done, TimeSpan? within = null)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        var deadline = DateTime.UtcNow + (within ?? TimeSpan.FromSeconds(30));
         while (true)
         {
             var value = await read();
