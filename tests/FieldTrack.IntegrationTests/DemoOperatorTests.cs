@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using FieldTrack.Api.Auth;
 using Microsoft.AspNetCore.Mvc.Testing;
 using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
@@ -38,6 +40,28 @@ public sealed class DemoOperatorTests(FieldTrackFixture fixture) : IntegrationTe
 
         previous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         current.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Signed_out_visitors_read_the_Demo_Operator_credentials_in_demo_mode()
+    {
+        await using var api = DemoApi(DemoPassword);
+        using var client = api.CreateClient();
+
+        var credentials = await client.GetFromJsonAsync<JsonElement>("/auth/demo-operator", TestContext.Current.CancellationToken);
+
+        credentials.GetProperty("email").GetString().ShouldBe(DemoEmail);
+        credentials.GetProperty("password").GetString().ShouldBe(DemoPassword);
+    }
+
+    [Fact]
+    public async Task Without_demo_mode_there_are_no_Demo_Operator_credentials()
+    {
+        using var client = Fixture.Api.CreateClient();
+
+        using var response = await client.GetAsync("/auth/demo-operator", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]

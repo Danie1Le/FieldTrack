@@ -8,8 +8,8 @@ using Microsoft.Extensions.Options;
 namespace FieldTrack.Api.Auth;
 
 /// <summary>
-/// Sign-in, token refresh and password change: the only endpoints a signed-out client may call
-/// besides health and docs.
+/// Sign-in, token refresh, password change and, in demo mode only, the Demo Operator's credentials:
+/// the only endpoints a signed-out client may call besides health and docs.
 /// </summary>
 [ApiController]
 [Route("auth")]
@@ -97,6 +97,17 @@ public sealed class AuthController(
         await tokens.RevokeAllAsync(user.Id, cancellationToken);
         return await tokens.IssueAsync(user, cancellationToken);
     }
+
+    /// <summary>
+    /// The Demo Operator's email and password, which the login page shows in demo mode so visitors
+    /// can sign in without an account. The password is public by design: it is reset on every deploy
+    /// and cannot be changed (ADR 0002).
+    /// </summary>
+    /// <response code="404">Demo mode is off.</response>
+    [HttpGet("demo-operator")]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<DemoOperatorResponse> DemoOperator() =>
+        demoOperator.Value is { Enabled: true } demo ? new DemoOperatorResponse(demo.Email!, demo.Password!) : NotFound();
 
     /// <summary>
     /// The user with this email and password, or null. Failures count towards lockout, and an
