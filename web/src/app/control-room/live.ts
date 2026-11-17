@@ -50,6 +50,16 @@ export type AlertStatus = 'Open' | 'Acknowledged' | 'Resolved';
 
 export type ResolveReason = 'Cleared' | 'Manual' | 'RuleChanged' | 'RuleDisabled' | 'AssetArchived' | 'DeviceDetached';
 
+/** How a Resolve reason reads on screen; shared by the Alert feed and the Asset page. */
+export const reasonLabels: Record<ResolveReason, string> = {
+  Cleared: 'Cleared',
+  Manual: 'Manual',
+  RuleChanged: 'Rule changed',
+  RuleDisabled: 'Rule disabled',
+  AssetArchived: 'Asset archived',
+  DeviceDetached: 'Device detached',
+};
+
 /** An Alert (`AlertResponse`), from `GET /alerts`, the Alert actions and the hub's `AlertRaised` / `AlertUpdated`. */
 export interface Alert {
   id: string;

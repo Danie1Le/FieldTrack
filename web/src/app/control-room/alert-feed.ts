@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
-import { Alert, ResolveReason } from './live';
+import { Alert, reasonLabels } from './live';
 import { LiveFleet } from './live-fleet';
 
 /** Newest first by Device time raised, ties by id: the API's order, so a pushed Alert lands where a reload would put it. */
@@ -17,15 +17,6 @@ export function activeAlerts(alerts: readonly Alert[]): Alert[] {
 export function resolvedAlerts(alerts: readonly Alert[]): Alert[] {
   return alerts.filter((a) => a.status === 'Resolved').sort(newestFirst);
 }
-
-const reasonLabels: Record<ResolveReason, string> = {
-  Cleared: 'Cleared',
-  Manual: 'Manual',
-  RuleChanged: 'Rule changed',
-  RuleDisabled: 'Rule disabled',
-  AssetArchived: 'Asset archived',
-  DeviceDetached: 'Device detached',
-};
 
 /**
  * The Alert feed (Dashboard UX, #20): Active Alerts newest first with Acknowledge (Open only) and Resolve, which opens
