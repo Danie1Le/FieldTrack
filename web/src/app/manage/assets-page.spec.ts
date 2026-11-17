@@ -175,8 +175,23 @@ describe('AssetsPage', () => {
     api.expectOne({ method: 'DELETE', url: '/api/asset-groups/depot' }).flush({ detail }, { status: 409, statusText: 'Conflict' });
     await view.settle();
 
+    // A 409 means the page is out of date (another Admin moved an Asset into the group), so it reads its data again.
+    await serve([asset('truck', 'Haul truck 7', 'Truck', 'depot')], [group('depot', 'Depot')]);
+
     const shown = view.root.querySelector('[role="alert"]')!;
     expect(view.text(shown)).toBe(detail);
     expect(shown.querySelector('b')).toBeNull();
+  });
+
+  it('says an item another change removed no longer exists, and shows what is there now', async () => {
+    view.button('Rename', 'Quarry').click();
+    await view.settle();
+    view.fill('groupName', 'South quarry');
+    view.button('Save').click();
+    api.expectOne({ method: 'PUT', url: '/api/asset-groups/quarry' }).flush(null, { status: 404, statusText: 'Not Found' });
+    await serve([asset('truck', 'Haul truck 7', 'Truck', 'depot')], [group('depot', 'Depot')]);
+
+    expect(view.text(view.root.querySelector('[role="alert"]'))).toBe('It no longer exists. The page now shows what is there.');
+    expect(rows('Asset Groups')).toEqual([['Depot', '1']]);
   });
 });

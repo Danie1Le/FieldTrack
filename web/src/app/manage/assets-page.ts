@@ -16,7 +16,7 @@ import { Editing } from './editing';
 })
 export class AssetsPage {
   private readonly http = inject(HttpClient);
-  protected readonly changes = new Changes();
+  protected readonly changes = new Changes(() => this.load());
   protected readonly assetTypes = assetTypes;
 
   /** Archived ones too, so their Asset Groups count them. */
