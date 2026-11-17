@@ -1,0 +1,6 @@
+{
+  "devices": [
+    { "serial": "TRK-001", "assetName": "Haul truck 1", "assetType": "Truck", "sensors": ["speedKph", "engineTempC", "fuelPct", "batteryV"] },
+    { "serial": "GEN-001", "assetName": "Generator 1", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC", "fuelPct", "vibrationMmS", "batteryV"] }
+  ]
+}
