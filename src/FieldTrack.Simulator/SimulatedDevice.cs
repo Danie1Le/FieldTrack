@@ -4,8 +4,10 @@ using System.Text.Json.Serialization;
 namespace FieldTrack.Simulator;
 
 /// <summary>
-/// One simulated Device in one Boot: it builds the payloads a real Device would publish and counts how many reached
-/// the broker. Sensor values are plausible and steady; noise and Faults come with Scenarios (#43).
+/// One simulated Device: it takes the Readings a real Device would, keeps them until the broker acknowledges them and counts
+/// how many it did. Sensor values are plausible and steady, with Gaussian noise where the fleet file asks for it, and the Device
+/// suffers the <see cref="Injection"/>s of its schedule (Faults, Power offs, Coverage gaps, clock problems). A Power off ends its
+/// Boot and starts the next.
 /// </summary>
 internal sealed class SimulatedDevice
 {
@@ -13,6 +15,8 @@ internal sealed class SimulatedDevice
     public const double NormalEngineTempC = 85;
 
     private const double FuelDrainPctPerMinute = 0.5;
+
+    private static readonly TimeSpan _openEndedOverheatRamp = TimeSpan.FromMinutes(4);
 
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
@@ -54,7 +58,7 @@ internal sealed class SimulatedDevice
     {
         { Route: { } route } => new RouteMotion(GpxRoute.Load(route), spec.SpeedKph),
         { Position: { } position } => new FixedMotion(position),
-        // Every walker starts at the same centre; fine for the demo's one, worth an offset when Scenarios (#43) add more.
+        // Every walker starts at the same centre and wanders its own way (each seeds from its serial).
         _ => new RandomWalkMotion(RandomWalkMotion.DefaultCentre, spec.SpeedKph, RandomWalkMotion.DefaultRadiusMeters, new Random(SeedFor(spec.Serial))),
     });
 
@@ -67,7 +71,7 @@ internal sealed class SimulatedDevice
     /// <summary>The Boot this Device is in.</summary>
     public int Boot { get; private set; }
 
-    /// <summary>How many Readings the broker acknowledged in this Boot; they are Sequence numbers 0 to one less.</summary>
+    /// <summary>How many Readings the broker acknowledged in this Boot (the last one, while powered off); they are Sequence numbers 0 to one less.</summary>
     public long PublishedCount { get; private set; }
 
     /// <summary>What the broker acknowledged, one range per Boot; a Boot that published nothing has none.</summary>
@@ -124,14 +128,15 @@ internal sealed class SimulatedDevice
             return;
         }
 
-        _earlierBoots.AddRange(Range(Boot, PublishedCount));
         _outbox.Clear();
         _poweredOff = true;
     }
 
-    // Every Boot starts its Sequence numbers at 0 (ADR 0001).
+    // Every Boot starts its Sequence numbers at 0 (ADR 0001). The ended Boot's range is archived here, where it stops being the
+    // current one, so Ranges lists it exactly once however the run ends.
     private void PowerOn()
     {
+        _earlierBoots.AddRange(Range(Boot, PublishedCount));
         Boot = _raiseBoot();
         PublishedCount = 0;
         _captured = 0;
@@ -158,6 +163,12 @@ internal sealed class SimulatedDevice
         if (_injections.Active(InjectionLane.Overheat, elapsed) is not { } overheat)
         {
             return NormalEngineTempC;
+        }
+
+        // One that lasts to the end of the run has no length to take shares of: it ramps as a 10-minute one does, then holds its peak.
+        if (overheat.End == TimeSpan.MaxValue)
+        {
+            return NormalEngineTempC + ((overheat.Amount - NormalEngineTempC) * Math.Min(1, (elapsed - overheat.Start) / _openEndedOverheatRamp));
         }
 
         var progress = (elapsed - overheat.Start) / (overheat.End - overheat.Start);

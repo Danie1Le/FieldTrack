@@ -15,13 +15,19 @@ internal enum InjectionKind
     /// <summary>Coverage gap: the Device keeps taking Readings but cannot send them until the gap ends.</summary>
     CoverageGap,
 
-    /// <summary>Clock fault: the Device's clock is wrong by a fixed <see cref="Injection.Amount"/> seconds.</summary>
+    /// <summary>Clock fault: the Device's clock is wrong by a fixed <see cref="Injection.Amount"/> seconds for the length of its window.</summary>
     ClockOffset,
 
-    /// <summary>Clock fault: the Device's clock gains <see cref="Injection.Amount"/> parts per million, so its error grows steadily.</summary>
+    /// <summary>
+    /// Clock fault: the Device's clock gains <see cref="Injection.Amount"/> parts per million, so its error grows steadily for the
+    /// length of its window and is gone once the window ends.
+    /// </summary>
     ClockDrift,
 
-    /// <summary>Clock fault: the Device's clock suddenly steps by <see cref="Injection.Amount"/> seconds and stays there.</summary>
+    /// <summary>
+    /// Clock fault: the Device's clock suddenly steps by <see cref="Injection.Amount"/> seconds for the length of its window; it
+    /// stays there only when the window lasts to the end of the run.
+    /// </summary>
     ClockJump,
 }
 
@@ -48,10 +54,21 @@ internal enum InjectionLane
 /// </summary>
 /// <param name="Kind">What it does.</param>
 /// <param name="Start">When it starts, counted from the start of the run.</param>
-/// <param name="End">When it ends, counted from the start of the run; <see cref="TimeSpan.MaxValue"/> when it lasts to the end of the run.</param>
+/// <param name="End">
+/// When it ends, after <paramref name="Start"/>, counted from the start of the run; <see cref="TimeSpan.MaxValue"/> when it lasts to the
+/// end of the run (an Overheat that does then ramps to its peak and holds it).
+/// </param>
 /// <param name="Amount">How strong it is; the unit depends on <paramref name="Kind"/>. Unused by Power offs and Coverage gaps.</param>
 internal sealed record Injection(InjectionKind Kind, TimeSpan Start, TimeSpan End, double Amount)
 {
+    /// <summary>When it ends; never at or before <see cref="Start"/>, which would be a window that covers nothing.</summary>
+    public TimeSpan End { get; } = End > Start ? End : throw new ArgumentOutOfRangeException(nameof(End), End, $"An Injection must end after it starts ({Start}).");
+
+    /// <summary>How strong it is; a fuel leak's drain factor is never negative, which would fill the tank.</summary>
+    public double Amount { get; } = Kind == InjectionKind.FuelLeak && !(Amount >= 0)
+        ? throw new ArgumentOutOfRangeException(nameof(Amount), Amount, "A fuel leak's drain factor cannot be negative.")
+        : Amount;
+
     /// <summary>The state of the Device this Injection controls.</summary>
     public InjectionLane Lane => Kind switch
     {
