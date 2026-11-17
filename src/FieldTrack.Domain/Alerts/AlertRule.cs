@@ -30,6 +30,15 @@ public sealed class AlertRule
     /// <summary>Threshold rules: what the rule watches and where it breaches and clears; null for other kinds.</summary>
     public ThresholdSettings? ThresholdSettings { get; set; }
 
+    /// <summary>Geofence rules: the Geofence watched; null for other kinds.</summary>
+    public Guid? GeofenceId { get; set; }
+
+    /// <summary>
+    /// Geofence rules: the Geofence named by <see cref="GeofenceId"/>, which ingest loads with the rule so the evaluator
+    /// can check containment; not stored with the rule.
+    /// </summary>
+    public IGeofence? Geofence { get; set; }
+
     /// <summary>Whether the rule covers the Asset <paramref name="assetId"/>, which is in Asset Group <paramref name="assetGroupId"/> (or none).</summary>
     public bool Targets(Guid assetId, Guid? assetGroupId) =>
         AssetId == assetId || (AssetGroupId is not null && AssetGroupId == assetGroupId);
