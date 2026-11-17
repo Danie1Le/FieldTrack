@@ -60,4 +60,28 @@ describe('SignIn', () => {
     expect(error.textContent).toBe('<img src=x onerror=alert(1)> too short');
     expect(error.querySelector('img')).toBeNull();
   });
+
+  async function refusePasswordChange(body: object | null, status: number, statusText: string) {
+    await submit({ email: 'admin@example.com', password: 'Temporary1!' });
+    api.expectOne('/api/auth/sign-in').flush(null, { status: 403, statusText: 'Forbidden' });
+    await fixture.whenStable();
+
+    await submit({ 'new-password': 'Chosen-Password-1', confirmation: 'Chosen-Password-1' });
+    api.expectOne('/api/auth/change-password').flush(body, { status, statusText });
+    await fixture.whenStable();
+  }
+
+  it('says the password could not be changed when a 400 carries no validation messages', async () => {
+    await refusePasswordChange({ title: 'Bad Request' }, 400, 'Bad Request');
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('The password could not be changed.');
+  });
+
+  it('goes back to sign-in when the current password is refused', async () => {
+    await refusePasswordChange(null, 401, 'Unauthorized');
+
+    expect(page.querySelector('#email')).not.toBeNull();
+    expect(page.querySelector('#new-password')).toBeNull();
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('Sign in again.');
+  });
 });
