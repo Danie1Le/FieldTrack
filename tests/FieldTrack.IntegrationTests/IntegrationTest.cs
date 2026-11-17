@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Ingest;
 using FieldTrack.Infrastructure.Identity;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
@@ -48,12 +49,50 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     }
 
     /// <summary>
-    /// A host where every Asset and Device has Readings, so deletes take the Archive branch. Readings arrive
-    /// with #26, which replaces this seam override with real ones.
+    /// A host where every Asset and Device counts as having Readings, so deletes take the Archive branch
+    /// without publishing telemetry first. AssetTests and IngestTests cover the same branch with real Readings.
     /// </summary>
     protected WebApplicationFactory<Program> ApiWhereEverythingHasReadings() =>
         Fixture.Api.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EverythingHasReadings>()));
+
+    /// <summary>
+    /// Starts a host running the ingest worker on a broker session of its own, created before this returns,
+    /// so every message published afterwards reaches it. <paramref name="time"/> replaces the clock.
+    /// </summary>
+    protected async Task<WebApplicationFactory<Program>> StartIngestAsync(TimeProvider? time = null)
+    {
+        var clientId = $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+        await TelemetryPublisher.CreateIngestSessionAsync(Fixture, clientId);
+        var api = Fixture.Api.WithWebHostBuilder(builder => builder
+            .UseSetting($"{IngestOptions.SectionName}:{nameof(IngestOptions.ClientId)}", clientId)
+            .ConfigureTestServices(services =>
+            {
+                services.AddHostedService<IngestWorker>();
+                if (time is not null)
+                {
+                    services.AddSingleton(time);
+                }
+            }));
+        api.StartServer();
+        return api;
+    }
+
+    /// <summary>Reads until <paramref name="done"/> holds or 15 s pass, and returns the last value read.</summary>
+    protected static async Task<T> EventuallyAsync<T>(Func<Task<T>> read, Func<T, bool> done)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (true)
+        {
+            var value = await read();
+            if (done(value) || DateTime.UtcNow > deadline)
+            {
+                return value;
+            }
+
+            await Task.Delay(50, CancellationToken);
+        }
+    }
 
     /// <summary>A client signed in as the Admin, on <paramref name="api"/> or the shared host.</summary>
     protected async Task<HttpClient> AdminClientAsync(WebApplicationFactory<Program>? api = null)

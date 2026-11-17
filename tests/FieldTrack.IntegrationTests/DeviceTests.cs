@@ -155,7 +155,6 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Deleting_a_Device_with_Readings_Archives_it_and_ends_its_Attachment()
     {
-        // Readings arrive with #26; until then the "has Readings" seam answers yes.
         await using var api = ApiWhereEverythingHasReadings();
         using var admin = await AdminClientAsync(api);
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
@@ -195,7 +194,6 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Archiving_an_Asset_ends_its_Attachment()
     {
-        // Readings arrive with #26; until then the "has Readings" seam answers yes.
         await using var api = ApiWhereEverythingHasReadings();
         using var admin = await AdminClientAsync(api);
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });

@@ -3,8 +3,8 @@ using FieldTrack.Infrastructure.Persistence;
 namespace FieldTrack.IntegrationTests;
 
 /// <summary>
-/// Answers that every Asset and Device has Readings, so tests reach the Archive branch of delete
-/// before #26 stores real Readings.
+/// Answers that every Asset and Device has Readings, so tests of delete and attach rules reach the
+/// Archive branch without publishing telemetry.
 /// </summary>
 internal sealed class EverythingHasReadings : IReadingHistory
 {

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace FieldTrack.Infrastructure.Persistence;
 
@@ -13,7 +14,8 @@ public static class PersistenceServiceCollectionExtensions
     /// <summary>
     /// Adds <see cref="FieldTrackDbContext"/> on Npgsql with NetTopologySuite spatial types and
     /// snake_case table and column names, the names the hand-written SQL beside EF uses (ADR 0003, ADR 0004),
-    /// and the <see cref="IReadingHistory"/> that Asset delete asks.
+    /// the <see cref="IReadingHistory"/> that Asset and Device delete ask, and an <see cref="NpgsqlDataSource"/>
+    /// for the ingest writer's own connection (ADR 0004).
     /// </summary>
     public static IServiceCollection AddFieldTrackDatabase(this IServiceCollection services, IConfiguration configuration)
     {
@@ -22,6 +24,7 @@ public static class PersistenceServiceCollectionExtensions
 
         return services
             .AddScoped<IReadingHistory, ReadingHistory>()
+            .AddSingleton(_ => NpgsqlDataSource.Create(connectionString))
             .AddDbContext<FieldTrackDbContext>(options =>
                 options.UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite()).UseSnakeCaseNamingConvention());
     }

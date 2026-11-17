@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using FieldTrack.Api.Auth;
 using FieldTrack.Api.Health;
+using FieldTrack.Api.Ingest;
 using FieldTrack.Api.Maintenance;
 using FieldTrack.Infrastructure.Messaging;
 using FieldTrack.Infrastructure.Persistence;
@@ -30,6 +31,11 @@ builder.Services.PostConfigure<HealthCheckServiceOptions>(options =>
 });
 builder.Services.AddFieldTrackAuth();
 builder.Services.AddHostedService<DatabaseMaintenanceJob>();
+builder.Services.AddOptions<IngestOptions>()
+    .BindConfiguration(IngestOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddHostedService<IngestWorker>();
 // The request-start and request-finished lines include the query string, where SignalR clients
 // send their access token. Silence them whatever the configured levels say (#23: no tokens in logs).
 // A provider-specific level outranks a provider-less filter, so pin the category for every provider

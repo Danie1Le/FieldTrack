@@ -1,10 +1,13 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Ingest;
 using FieldTrack.Infrastructure.Messaging;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Hosting;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -39,5 +42,9 @@ public sealed class FieldTrackApiFactory(string databaseConnectionString, string
         builder.UseSetting($"{AuthOptions.SectionName}:{nameof(AuthOptions.SignInPermitsPerMinute)}", "10000");
         builder.UseSetting(UserSeeder.AdminEmailKey, AdminEmail);
         builder.UseSetting(UserSeeder.AdminPasswordKey, AdminPassword);
+        // Ingest runs only where a test asks for it (IntegrationTest.StartIngestAsync): one worker per broker
+        // session, and hosts derived from this one would otherwise all compete for the same ClientId.
+        builder.ConfigureTestServices(services => services.Remove(
+            services.Single(service => service.ServiceType == typeof(IHostedService) && service.ImplementationType == typeof(IngestWorker))));
     }
 }
