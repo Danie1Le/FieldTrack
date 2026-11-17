@@ -73,10 +73,11 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
             return NotFound();
         }
 
-        IReadOnlyList<Guid> resolved = [];
+        List<Guid> resolved = [];
         if (await readingHistory.DeviceHasReadingsAsync(id, cancellationToken))
         {
             device.Archived = true;
+            await db.BumpAlertRuleVersionAsync(cancellationToken);
             resolved = await db.EndOpenAttachmentsAsync(attachment => attachment.DeviceId == id, time.GetUtcNow(), cancellationToken);
         }
         else
@@ -88,7 +89,7 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await live.PushAsync([], [], resolved, cancellationToken);
+        await live.AlertsUpdatedAsync(resolved, cancellationToken);
         return NoContent();
     }
 

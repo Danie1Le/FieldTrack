@@ -47,48 +47,59 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     public DbSet<RejectedMessage> RejectedMessages => Set<RejectedMessage>();
 
     /// <summary>
-    /// Raises the Alert Rule version (ADR 0005) in the caller's transaction, so the ingest worker reloads its rules and
-    /// rule state before its next batch. Call it in any transaction that changes what ingest evaluates: its row lock
-    /// waits for a running ingest batch and holds the next one until this commits, so the change and a batch never
-    /// interleave. Ingest locks Devices and Assets before the version, so call it after any Device or Asset lock the
-    /// transaction takes (a foreign key check on saving a rule takes one too), and before resolving Alerts or changing
-    /// rule state, so those see every Alert the last batch raised.
+    /// Bumps the Alert Rule version (ADR 0005) in the caller's transaction, so the ingest worker reloads its rules and
+    /// rule state before its next batch. Call it once in any transaction that changes what ingest evaluates or caches
+    /// (Alert Rules, their Alerts, rule state). Ingest reads the version <c>FOR SHARE</c> after its Device and Asset
+    /// locks, so this row lock waits for a running batch and holds the next one until the change commits: the change
+    /// and a batch never interleave. Lock order (ADR 0005): call it after every Device or Asset lock the transaction
+    /// takes, including the Asset a rule's foreign key names, and before touching Alert Rules, Alerts or rule state.
     /// </summary>
-    public Task RaiseAlertRuleVersionAsync(CancellationToken cancellationToken) =>
+    public Task BumpAlertRuleVersionAsync(CancellationToken cancellationToken) =>
         Database.ExecuteSqlRawAsync("UPDATE alert_rule_version SET version = version + 1", cancellationToken);
 
     /// <summary>
-    /// Resolves the Active Alerts matching <paramref name="which"/> as the platform, with <paramref name="reason"/>, at
-    /// <paramref name="at"/>, and returns their ids for the live push once the caller commits. Conditional like every
-    /// resolve, so a user who resolved one first keeps it (#10). Call <see cref="RaiseAlertRuleVersionAsync"/> first.
+    /// Resolves the Active Alerts of the Alert Rule <paramref name="ruleId"/> as the platform, with
+    /// <paramref name="reason"/> at <paramref name="at"/>, and returns the ids of exactly the Alerts it resolved, for
+    /// the live push once the caller commits. A user who resolved one first keeps their resolution (#10). Call
+    /// <see cref="BumpAlertRuleVersionAsync"/> first.
     /// </summary>
-    public async Task<IReadOnlyList<Guid>> ResolveActiveAlertsAsync(
-        Expression<Func<Alert, bool>> which, ResolveReason reason, DateTimeOffset at, CancellationToken cancellationToken)
-    {
-        var active = Alerts.Where(which).Where(alert => alert.Status != AlertStatus.Resolved);
-        var ids = await active.Select(alert => alert.Id).ToListAsync(cancellationToken);
-        await active.ExecuteUpdateAsync(set => set
-            .SetProperty(alert => alert.Status, AlertStatus.Resolved)
-            .SetProperty(alert => alert.ResolvedAt, at)
-            .SetProperty(alert => alert.ResolveReason, reason), cancellationToken);
-        return ids;
-    }
+    public Task<List<Guid>> ResolveActiveAlertsOfRuleAsync(Guid ruleId, ResolveReason reason, DateTimeOffset at, CancellationToken cancellationToken) =>
+        ResolveActiveAlertsAsync([ruleId], [], reason, at, cancellationToken);
+
+    /// <summary>
+    /// Resolves the Active Alerts of the Assets <paramref name="assetIds"/> as the platform, with
+    /// <paramref name="reason"/> at <paramref name="at"/>, and returns the ids of exactly the Alerts it resolved, for
+    /// the live push once the caller commits. A user who resolved one first keeps their resolution (#10). Call
+    /// <see cref="BumpAlertRuleVersionAsync"/> first.
+    /// </summary>
+    public Task<List<Guid>> ResolveActiveAlertsOfAssetsAsync(Guid[] assetIds, ResolveReason reason, DateTimeOffset at, CancellationToken cancellationToken) =>
+        ResolveActiveAlertsAsync([], assetIds, reason, at, cancellationToken);
 
     /// <summary>
     /// Ends the open Attachments matching <paramref name="which"/> at <paramref name="at"/>. Detach and both Archives end
     /// Attachments only through here, so each also resolves the Active Alerts of the Assets that lost their Device as
-    /// Device detached and forgets those Assets' rule state, so the next Device starts each rule afresh (#34). Returns
-    /// the resolved Alerts' ids for the live push once the caller commits.
+    /// Device detached and forgets those Assets' rule state, so the next Device starts each rule afresh (#34). Call
+    /// <see cref="BumpAlertRuleVersionAsync"/> first. Returns the resolved Alerts' ids for the live push once the caller
+    /// commits.
     /// </summary>
-    public async Task<IReadOnlyList<Guid>> EndOpenAttachmentsAsync(Expression<Func<Attachment, bool>> which, DateTimeOffset at, CancellationToken cancellationToken)
+    public async Task<List<Guid>> EndOpenAttachmentsAsync(Expression<Func<Attachment, bool>> which, DateTimeOffset at, CancellationToken cancellationToken)
     {
-        await RaiseAlertRuleVersionAsync(cancellationToken);
         var open = Attachments.Where(which).Where(attachment => attachment.DetachedAt == null);
-        var assetIds = await open.Select(attachment => attachment.AssetId).ToListAsync(cancellationToken);
+        Guid[] assetIds = [.. await open.Select(attachment => attachment.AssetId).ToListAsync(cancellationToken)];
         await open.ExecuteUpdateAsync(set => set.SetProperty(attachment => attachment.DetachedAt, at), cancellationToken);
         await AlertRuleStates.Where(state => assetIds.Contains(state.AssetId)).ExecuteDeleteAsync(cancellationToken);
-        return await ResolveActiveAlertsAsync(alert => assetIds.Contains(alert.AssetId), ResolveReason.DeviceDetached, at, cancellationToken);
+        return await ResolveActiveAlertsOfAssetsAsync(assetIds, ResolveReason.DeviceDetached, at, cancellationToken);
     }
+
+    // One UPDATE ... RETURNING, so the ids are exactly the Alerts it resolved; conditional like every resolve, and
+    // resolved_by stays null (a platform resolve).
+    private Task<List<Guid>> ResolveActiveAlertsAsync(
+        Guid[] ruleIds, Guid[] assetIds, ResolveReason reason, DateTimeOffset at, CancellationToken cancellationToken) =>
+        Database.SqlQuery<Guid>($"""
+            UPDATE alerts SET status = {nameof(AlertStatus.Resolved)}, resolved_at = {at}, resolve_reason = {reason.ToString()}
+            WHERE (alert_rule_id = ANY({ruleIds}) OR asset_id = ANY({assetIds})) AND status <> {nameof(AlertStatus.Resolved)}
+            RETURNING id AS "Value"
+            """).ToListAsync(cancellationToken);
 
     /// <summary>
     /// Creates the missing daily Reading partitions for the UTC days <paramref name="first"/> to <paramref name="last"/>

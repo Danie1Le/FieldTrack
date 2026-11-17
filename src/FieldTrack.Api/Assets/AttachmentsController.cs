@@ -100,9 +100,10 @@ public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider t
         }
 
         var now = time.GetUtcNow();
+        await db.BumpAlertRuleVersionAsync(cancellationToken);
         var resolved = await db.EndOpenAttachmentsAsync(a => a.Id == id, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await live.PushAsync([], [], resolved, cancellationToken);
+        await live.AlertsUpdatedAsync(resolved, cancellationToken);
         return ToResponse(attachment) with { DetachedAt = now };
     }
 
