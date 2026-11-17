@@ -45,4 +45,14 @@ public sealed class InjectionScheduleTests
         schedule.TryAdd(Window(InjectionKind.FuelLeak, 10, 30)).ShouldBeTrue();
         schedule.TryAdd(Window(InjectionKind.ClockDrift, 10, 30)).ShouldBeTrue();
     }
+
+    [Theory]
+    [InlineData(10, 10)]
+    [InlineData(10, 5)]
+    public void An_Injection_must_end_after_it_starts(double start, double end) =>
+        Should.Throw<ArgumentOutOfRangeException>(() => Window(InjectionKind.ClockOffset, start, end));
+
+    [Fact]
+    public void A_fuel_leak_cannot_have_a_negative_drain_factor() =>
+        Should.Throw<ArgumentOutOfRangeException>(() => new Injection(InjectionKind.FuelLeak, TimeSpan.Zero, TimeSpan.FromSeconds(1), -1));
 }

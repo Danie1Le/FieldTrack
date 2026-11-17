@@ -38,7 +38,7 @@ internal static class FleetRunner
     {
         if (options.RatePerSecond is null && (options.Scenario is not null || options.RandomInjection is { Any: true }))
         {
-            throw new SimulatorException("--rate max floods with noise and random-walk positions only; give it a rate to inject a Scenario or random Faults.");
+            throw new SimulatorException("--rate max floods Readings with noise and injects nothing; give it a rate to inject a Scenario or random Faults.");
         }
 
         Pacing? pacing = options.RatePerSecond is { } rate ? new Pacing(fleet.Devices.Count, rate) : null;
@@ -71,7 +71,8 @@ internal static class FleetRunner
         finally
         {
             // Written however the run ends: what was acknowledged is still the benchmark's ground truth.
-            manifest = RunManifest.Of(startedAt, time.GetUtcNow(), options.RatePerSecond, devices);
+            // The same clock the Devices step by, so a wall-clock step mid-run cannot move the windows off the Readings.
+            manifest = RunManifest.Of(startedAt, startedAt + time.GetElapsedTime(startTimestamp), options.RatePerSecond, devices);
             manifest.Write(options.ManifestPath);
         }
 
@@ -82,7 +83,7 @@ internal static class FleetRunner
         {
             try
             {
-                await PublishAsync(device, index, pacing, options, log, time, startTimestamp, stop.Token, drain.Token);
+                await PublishAsync(device, index, pacing, options, log, time, startedAt, startTimestamp, stop.Token, drain.Token);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -94,7 +95,8 @@ internal static class FleetRunner
     }
 
     private static async Task PublishAsync(
-        SimulatedDevice device, int index, Pacing? pacing, RunOptions options, TextWriter log, TimeProvider time, long startTimestamp, CancellationToken stop, CancellationToken drain)
+        SimulatedDevice device, int index, Pacing? pacing, RunOptions options, TextWriter log, TimeProvider time, DateTimeOffset startedAt, long startTimestamp,
+        CancellationToken stop, CancellationToken drain)
     {
         // One connection per Device, as on the real fleet.
         await using var publisher = new ReconnectingPublisher(options.BrokerHost, options.BrokerPort, device.Serial, log);
@@ -102,7 +104,9 @@ internal static class FleetRunner
         using var timer = pacing is { } paced ? new PeriodicTimer(paced.Interval, time) : null;
         do
         {
-            device.Step(time.GetUtcNow(), time.GetElapsedTime(startTimestamp));
+            // Device time is run start + elapsed, the clock of the Manifest's windows, so a wall-clock step cannot split them.
+            var elapsed = time.GetElapsedTime(startTimestamp);
+            device.Step(startedAt + elapsed, elapsed);
             while (device.NextToSend is { } payload)
             {
                 await publisher.PublishAsync(device.Topic, payload, drain);

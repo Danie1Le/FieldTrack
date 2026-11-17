@@ -16,6 +16,8 @@ internal sealed class SimulatedDevice
 
     private const double FuelDrainPctPerMinute = 0.5;
 
+    private static readonly TimeSpan _openEndedOverheatRamp = TimeSpan.FromMinutes(4);
+
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     private readonly FleetDevice _spec;
@@ -27,7 +29,6 @@ internal sealed class SimulatedDevice
     private readonly List<PublishedRange> _earlierBoots = [];
     private bool _poweredOff;
     private bool _hasCoverage = true;
-    private TimeSpan _lastStep;
     private long _captured;
     private double _fuelDrained;
     private TimeSpan _fuelAt;
@@ -76,7 +77,7 @@ internal sealed class SimulatedDevice
     /// <summary>The Boot this Device is in.</summary>
     public int Boot { get; private set; }
 
-    /// <summary>How many Readings the broker acknowledged in this Boot; they are Sequence numbers 0 to one less.</summary>
+    /// <summary>How many Readings the broker acknowledged in this Boot (the last one, while powered off); they are Sequence numbers 0 to one less.</summary>
     public long PublishedCount { get; private set; }
 
     /// <summary>What the broker acknowledged, one range per Boot; a Boot that published nothing has none.</summary>
@@ -84,6 +85,9 @@ internal sealed class SimulatedDevice
 
     /// <summary>What was injected into the Device so far, scripted or drawn, in the order it was scheduled.</summary>
     public IReadOnlyList<Injection> Injections => _injections.All;
+
+    /// <summary>How far into the run the Device last stepped, or null before its first step; it acts on nothing later.</summary>
+    public TimeSpan? LastStep { get; private set; }
 
     /// <summary>
     /// Advances the Device to <paramref name="elapsed"/> into the run, <paramref name="now"/> by the wall clock: it takes a Reading
@@ -94,12 +98,12 @@ internal sealed class SimulatedDevice
     {
         _injections.Advance(elapsed);
         var off = _injections.Active(InjectionLane.Connection, elapsed) is { Kind: InjectionKind.PowerOff };
-        if (off || _injections.All.Any(injection => injection.Kind == InjectionKind.PowerOff && injection.OverlapWith(_lastStep, elapsed) > TimeSpan.Zero))
+        if (off || _injections.All.Any(injection => injection.Kind == InjectionKind.PowerOff && injection.OverlapWith(LastStep ?? TimeSpan.Zero, elapsed) > TimeSpan.Zero))
         {
             PowerOff();
         }
 
-        _lastStep = elapsed;
+        LastStep = elapsed;
         if (off)
         {
             return;
@@ -137,14 +141,15 @@ internal sealed class SimulatedDevice
             return;
         }
 
-        _earlierBoots.AddRange(Range(Boot, PublishedCount));
         _outbox.Clear();
         _poweredOff = true;
     }
 
-    // Every Boot starts its Sequence numbers at 0 (ADR 0001).
+    // Every Boot starts its Sequence numbers at 0 (ADR 0001). The ended Boot's range is archived here, where it stops being the
+    // current one, so Ranges lists it exactly once however the run ends.
     private void PowerOn()
     {
+        _earlierBoots.AddRange(Range(Boot, PublishedCount));
         Boot = _raiseBoot();
         PublishedCount = 0;
         _captured = 0;
@@ -171,6 +176,12 @@ internal sealed class SimulatedDevice
         if (_injections.Active(InjectionLane.Overheat, elapsed) is not { } overheat)
         {
             return NormalEngineTempC;
+        }
+
+        // One that lasts to the end of the run has no length to take shares of: it ramps as a 10-minute one does, then holds its peak.
+        if (overheat.End == TimeSpan.MaxValue)
+        {
+            return NormalEngineTempC + ((overheat.Amount - NormalEngineTempC) * Math.Min(1, (elapsed - overheat.Start) / _openEndedOverheatRamp));
         }
 
         var progress = (elapsed - overheat.Start) / (overheat.End - overheat.Start);
