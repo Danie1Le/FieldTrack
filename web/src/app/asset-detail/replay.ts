@@ -1,6 +1,12 @@
 import { AlertRule, Sensor } from '../control-room/live';
 
 /**
+ * The most vertices the route or the trail is drawn with (a screen cannot show more), and so the most Readings the
+ * page asks the history endpoint for: it thins a busy range to this many server-side (#126).
+ */
+export const maxDrawn = 3000;
+
+/**
  * The Reading the replay shows at a time: the last one at or before it (the first one before the replay starts), or
  * -1 without Readings. Readings come ordered by Device time, so this is a binary search.
  */

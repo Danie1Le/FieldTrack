@@ -4,7 +4,7 @@ import { Component, DestroyRef, computed, effect, inject, input, signal, untrack
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { Alert, AlertRule, AssetType, Reading, reasonLabels } from '../control-room/live';
-import { positionAt, ruleLines } from './replay';
+import { maxDrawn, positionAt, ruleLines } from './replay';
 import { ReplayMap } from './replay-map';
 import { SensorChart } from './sensor-chart';
 
@@ -28,8 +28,8 @@ function localInput(time: number): string {
 }
 
 /**
- * Why the API refused a read, for people: a validation problem's messages (a range over 31 days or over the Readings
- * cap, #26), else its title. Shown as text, never as HTML.
+ * Why the API refused a read, for people: a validation problem's messages (such as a range over 31 days, #26), else
+ * its title. Shown as text, never as HTML.
  */
 function refusal(error: unknown): string {
   if (error instanceof HttpErrorResponse) {
@@ -161,13 +161,16 @@ export class AssetDetail {
     }
   }
 
-  /** Reads the range's Readings by Device time (the Asset history endpoint, #26) and shows the latest one. */
+  /**
+   * Reads the range's Readings by Device time (the Asset history endpoint, #26), thinned server-side to what the map
+   * draws (#126), and shows the latest one.
+   */
   private async loadHistory(): Promise<void> {
     const read = ++this.reads;
     this.pause();
     this.loading.set(true);
     this.problem.set(null);
-    const params = { from: new Date(this.from()).toISOString(), to: new Date(this.to()).toISOString() };
+    const params = { from: new Date(this.from()).toISOString(), to: new Date(this.to()).toISOString(), thinTo: maxDrawn };
     try {
       const readings = await firstValueFrom(
         this.http.get<Reading[]>(`/api/assets/${encodeURIComponent(this.id())}/readings`, { params }),

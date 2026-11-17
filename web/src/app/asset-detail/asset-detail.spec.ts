@@ -119,11 +119,12 @@ describe('AssetDetail', () => {
     expect(page.querySelector('b')).toBeNull();
   });
 
-  it('asks the history endpoint for [now - 24 h, now) by Device time', async () => {
+  it('asks the history endpoint for [now - 24 h, now) by Device time, thinned to what the map draws', async () => {
     const request = api.expectOne((r) => r.url === '/api/assets/truck-7/readings');
 
     expect(request.request.params.get('from')).toBe('2026-11-16T12:00:00.000Z');
     expect(request.request.params.get('to')).toBe('2026-11-17T12:00:00.000Z');
+    expect(request.request.params.get('thinTo')).toBe('3000');
   });
 
   it('draws the threshold and clear lines on the engine temp chart only', async () => {
