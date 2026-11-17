@@ -123,6 +123,59 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
         created.StatusCode.ShouldBe(HttpStatusCode.Created);
     }
 
+    [Fact]
+    public async Task A_rule_edit_takes_effect_on_the_running_workers_next_Reading()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var t = DateTimeOffset.UtcNow;
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        await publisher.PublishAsync("TRK-007", Temp(0, t, 110));
+        await ActiveAlertsWhenAsync(admin, alerts => alerts.Length == 1);
+
+        using (var edited = await admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { threshold = 115 }, CancellationToken))
+        {
+            edited.EnsureSuccessStatusCode();
+        }
+
+        // Under the new threshold: the old rule would raise here. Then past it: the old rule state (breached) would not.
+        await publisher.PublishAsync("TRK-007", Temp(1, t.AddSeconds(1), 112));
+        await publisher.PublishAsync("TRK-007", Temp(2, t.AddSeconds(2), 116));
+        var active = (await ActiveAlertsWhenAsync(admin, alerts => alerts.Length == 1)).Single();
+
+        active.GetProperty("reading").GetProperty("sequenceNumber").GetInt64().ShouldBe(2);
+        active.GetProperty("message").GetString().ShouldBe("Engine temp 116 °C, above 115 (clears below 110)");
+    }
+
+    [Fact]
+    public async Task A_rule_edit_that_comes_while_a_batch_is_storing_waits_for_it_and_resolves_the_Alert_it_raised()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        await using var blocker = await OpenDatabaseAsync();
+        await using var hold = await blocker.BeginTransactionAsync(CancellationToken);
+        // Holds the batch in its store statement, after it has read the Alert Rule version.
+        await SqlAsync(blocker, "LOCK TABLE reading_keys IN SHARE MODE");
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        await publisher.PublishAsync("TRK-007", Temp(0, DateTimeOffset.UtcNow, 110));
+        await LockWaitsAsync(1);
+        var edit = admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { name = "Engine hot" }, CancellationToken);
+        await LockWaitsAsync(2);
+        await hold.CommitAsync(CancellationToken);
+        using (var edited = await edit)
+        {
+            edited.EnsureSuccessStatusCode();
+        }
+
+        var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
+        alert.GetProperty("resolveReason").GetString().ShouldBe("RuleChanged");
+    }
+
     // An Engine overheat rule on an Asset fitted with TRK-007, and the Open Alert its first Reading raised.
     private async Task<(string Device, string Asset, string Rule, string Alert)> OpenAlertAsync(HttpClient admin)
     {
@@ -131,6 +184,13 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
         await WriteAsync([Received(0, DateTimeOffset.UtcNow, 110)]);
         var alert = (await ListAsync(admin, "/alerts?active=true")).ShouldHaveSingleItem().GetProperty("id").GetString()!;
         return (device, asset, rule, alert);
+    }
+
+    private static async Task<JsonElement[]> ActiveAlertsWhenAsync(HttpClient admin, Func<JsonElement[], bool> done)
+    {
+        var alerts = await EventuallyAsync(() => ListAsync(admin, "/alerts?active=true"), done);
+        done(alerts).ShouldBeTrue();
+        return alerts;
     }
 
     private static async Task ChangeAsync(HttpClient admin, string change, string? device, string asset, string rule)
