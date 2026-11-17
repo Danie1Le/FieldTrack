@@ -1,0 +1,14 @@
+{
+  "devices": [
+    { "serial": "ALR-001", "assetName": "Alert bench 001", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-002", "assetName": "Alert bench 002", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-003", "assetName": "Alert bench 003", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-004", "assetName": "Alert bench 004", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-005", "assetName": "Alert bench 005", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-006", "assetName": "Alert bench 006", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-007", "assetName": "Alert bench 007", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-008", "assetName": "Alert bench 008", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-009", "assetName": "Alert bench 009", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } },
+    { "serial": "ALR-010", "assetName": "Alert bench 010", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC"], "noise": { "engineTempC": 2.5 } }
+  ]
+}

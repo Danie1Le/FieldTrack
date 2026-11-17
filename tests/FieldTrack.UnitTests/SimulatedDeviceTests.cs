@@ -29,6 +29,21 @@ public sealed class SimulatedDeviceTests
     }
 
     [Fact]
+    public void A_noise_seed_draws_the_same_noise_in_every_Boot_while_without_one_each_Boot_draws_its_own()
+    {
+        var spec = new FleetDevice(
+            "TRK-001", "Haul truck 1", AssetType.Truck, null, new Position(45.5, -122.6), 30, [Sensor.EngineTempC], new Dictionary<Sensor, double> { [Sensor.EngineTempC] = 2 });
+        string Temperatures(int boot, int? seed)
+        {
+            var device = new SimulatedDevice(spec, boot, new FixedMotion(new Position(45.5, -122.6)), noiseSeed: seed);
+            return string.Join(',', Enumerable.Range(0, 20).Select(second => JsonDocument.Parse(Take(device, TimeSpan.FromSeconds(second))).RootElement.GetProperty("engineTempC").GetDouble()));
+        }
+
+        Temperatures(boot: 1, seed: 7).ShouldBe(Temperatures(boot: 2, seed: 7));
+        Temperatures(boot: 1, seed: null).ShouldNotBe(Temperatures(boot: 2, seed: null));
+    }
+
+    [Fact]
     public void A_payload_is_a_Reading_by_the_telemetry_contract()
     {
         var device = Truck(boot: 3, [.. Enum.GetValues<Sensor>()]);
