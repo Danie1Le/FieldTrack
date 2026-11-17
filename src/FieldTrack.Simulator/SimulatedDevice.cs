@@ -19,22 +19,28 @@ internal sealed class SimulatedDevice
     private readonly FleetDevice _spec;
     private readonly IMotion _motion;
     private readonly InjectionSchedule _injections;
+    private readonly Func<int> _raiseBoot;
     private readonly Random _random;
     private readonly Queue<byte[]> _outbox = new();
+    private readonly List<PublishedRange> _earlierBoots = [];
+    private bool _poweredOff;
+    private TimeSpan _lastStep;
     private long _captured;
     private double _fuelDrained;
     private TimeSpan _fuelAt;
 
     /// <summary>
     /// A Device with the traits of <paramref name="spec"/> that is in <paramref name="boot"/>, moves as <paramref name="motion"/> says
-    /// and suffers what <paramref name="injections"/> schedules (nothing when null).
+    /// and suffers what <paramref name="injections"/> schedules (nothing when null). After a Power off it asks
+    /// <paramref name="raiseBoot"/> for its new Boot (the next number when null).
     /// </summary>
-    public SimulatedDevice(FleetDevice spec, int boot, IMotion motion, InjectionSchedule? injections = null)
+    public SimulatedDevice(FleetDevice spec, int boot, IMotion motion, InjectionSchedule? injections = null, Func<int>? raiseBoot = null)
     {
         _spec = spec;
         Boot = boot;
         _motion = motion;
         _injections = injections ?? new InjectionSchedule();
+        _raiseBoot = raiseBoot ?? (() => Boot + 1);
         _random = new Random(SeedFor($"{spec.Serial}/noise/{boot}"));
     }
 
@@ -58,16 +64,40 @@ internal sealed class SimulatedDevice
     public string Topic => $"fieldtrack/v1/devices/{Serial}/telemetry";
 
     /// <summary>The Boot this Device is in.</summary>
-    public int Boot { get; }
+    public int Boot { get; private set; }
 
     /// <summary>How many Readings the broker acknowledged in this Boot; they are Sequence numbers 0 to one less.</summary>
     public long PublishedCount { get; private set; }
 
     /// <summary>What the broker acknowledged, one range per Boot; a Boot that published nothing has none.</summary>
-    public IReadOnlyList<PublishedRange> Ranges => PublishedCount == 0 ? [] : [new PublishedRange(Boot, 0, PublishedCount - 1)];
+    public IReadOnlyList<PublishedRange> Ranges => [.. _earlierBoots, .. Range(Boot, PublishedCount)];
 
-    /// <summary>The Device takes a Reading at <paramref name="now"/>, <paramref name="elapsed"/> into the run.</summary>
-    public void Step(DateTimeOffset now, TimeSpan elapsed) => _outbox.Enqueue(Build(now, elapsed));
+    /// <summary>
+    /// Advances the Device to <paramref name="elapsed"/> into the run, <paramref name="now"/> by the wall clock: it takes a Reading
+    /// unless a Power off has it switched off, and starts its new Boot when a Power off ends. A Power off that began and ended
+    /// between two steps still costs the Boot.
+    /// </summary>
+    public void Step(DateTimeOffset now, TimeSpan elapsed)
+    {
+        var off = _injections.Active(InjectionLane.Connection, elapsed) is { Kind: InjectionKind.PowerOff };
+        if (off || _injections.All.Any(injection => injection.Kind == InjectionKind.PowerOff && injection.OverlapWith(_lastStep, elapsed) > TimeSpan.Zero))
+        {
+            PowerOff();
+        }
+
+        _lastStep = elapsed;
+        if (off)
+        {
+            return;
+        }
+
+        if (_poweredOff)
+        {
+            PowerOn();
+        }
+
+        _outbox.Enqueue(Build(now, elapsed));
+    }
 
     /// <summary>
     /// The payload to send next, or null when nothing waits. Until <see cref="Published"/> every call returns the same bytes,
@@ -80,6 +110,30 @@ internal sealed class SimulatedDevice
     {
         _outbox.Dequeue();
         PublishedCount++;
+    }
+
+    private static IEnumerable<PublishedRange> Range(int boot, long published) => published == 0 ? [] : [new PublishedRange(boot, 0, published - 1)];
+
+    // A Power off keeps nothing: what was taken but not acknowledged is lost with the Boot.
+    private void PowerOff()
+    {
+        if (_poweredOff)
+        {
+            return;
+        }
+
+        _earlierBoots.AddRange(Range(Boot, PublishedCount));
+        _outbox.Clear();
+        _poweredOff = true;
+    }
+
+    // Every Boot starts its Sequence numbers at 0 (ADR 0001).
+    private void PowerOn()
+    {
+        Boot = _raiseBoot();
+        PublishedCount = 0;
+        _captured = 0;
+        _poweredOff = false;
     }
 
     // Seeded from the serial, so a Device wanders the same way every run; string.GetHashCode is randomised per process.

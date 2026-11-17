@@ -35,6 +35,40 @@ public sealed class SimulatedDeviceFaultTests
         return JsonDocument.Parse(payload).RootElement;
     }
 
+    [Fact]
+    public void A_Power_off_sends_and_keeps_nothing_then_the_Device_starts_a_new_Boot_at_Sequence_number_0()
+    {
+        var device = Device([Window(InjectionKind.PowerOff, 100, 200)], Sensor.FuelPct);
+        Tick(device, 80).GetProperty("seq").GetInt64().ShouldBe(0);
+        device.Step(Now.AddSeconds(90), TimeSpan.FromSeconds(90));
+        device.NextToSend.ShouldNotBeNull("a Reading taken just before the power was cut and not yet acknowledged");
+
+        foreach (var seconds in new[] { 100, 150, 199.9 })
+        {
+            device.Step(Now.AddSeconds(seconds), TimeSpan.FromSeconds(seconds));
+            device.NextToSend.ShouldBeNull($"{seconds} s: the Device is off");
+        }
+
+        var back = Tick(device, 200);
+
+        back.GetProperty("boot").GetInt32().ShouldBe(2);
+        back.GetProperty("seq").GetInt64().ShouldBe(0);
+        device.Boot.ShouldBe(2);
+        device.Ranges.ShouldBe([new PublishedRange(1, 0, 0), new PublishedRange(2, 0, 0)]);
+    }
+
+    [Fact]
+    public void A_Power_off_between_two_ticks_still_starts_a_new_Boot_taken_from_the_Boot_counter()
+    {
+        var schedule = new InjectionSchedule();
+        schedule.TryAdd(Window(InjectionKind.PowerOff, 10, 20));
+        var device = new SimulatedDevice(
+            new FleetDevice("TRK-001", "Haul truck 1", AssetType.Truck, null, null, 30, []), 4, new FixedMotion(new Position(1, 2)), schedule, raiseBoot: () => 9);
+
+        Tick(device, 5);
+        Tick(device, 20).GetProperty("boot").GetInt32().ShouldBe(9);
+    }
+
     [Theory]
     [InlineData(0, 90)]
     [InlineData(540, 85.5)]
