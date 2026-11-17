@@ -4,6 +4,7 @@ using System.Text.Json;
 using FieldTrack.Api.Auth;
 using FieldTrack.Api.Ingest;
 using FieldTrack.Infrastructure.Identity;
+using FieldTrack.Infrastructure.Ingest;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -60,11 +61,12 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     /// <summary>
     /// Starts a host running the ingest worker on a broker session of its own, created before this returns,
     /// so every message published afterwards reaches it. <paramref name="time"/> replaces the clock; pass
-    /// <paramref name="clientId"/> to resume a session the test set up.
+    /// <paramref name="clientId"/> to resume a session the test set up, and <paramref name="crashes"/> to make it crash.
     /// </summary>
-    protected async Task<WebApplicationFactory<Program>> StartIngestAsync(TimeProvider? time = null, string? clientId = null)
+    protected async Task<WebApplicationFactory<Program>> StartIngestAsync(
+        TimeProvider? time = null, string? clientId = null, IIngestCrashPoints? crashes = null)
     {
-        clientId ??= $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+        clientId ??= NewIngestClientId();
         await TelemetryPublisher.CreateIngestSessionAsync(Fixture, clientId);
         var api = Fixture.Api.WithWebHostBuilder(builder => builder
             .UseSetting($"{IngestOptions.SectionName}:{nameof(IngestOptions.ClientId)}", clientId)
@@ -75,10 +77,22 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
                 {
                     services.AddSingleton(time);
                 }
+
+                if (crashes is not null)
+                {
+                    services.AddSingleton(crashes);
+                }
             }));
         api.StartServer();
         return api;
     }
+
+    /// <summary>A broker session name no other test uses.</summary>
+    protected static string NewIngestClientId() => $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+
+    /// <summary>A payload carrying only an engine temperature, for Alert Rule tests.</summary>
+    protected static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
+        TelemetryPublisher.Payload(1, seq, deviceTime, more: FormattableString.Invariant($",\"engineTempC\":{engineTempC}"));
 
     /// <summary>Reads until <paramref name="done"/> holds or 15 s pass, and returns the last value read.</summary>
     protected static async Task<T> EventuallyAsync<T>(Func<Task<T>> read, Func<T, bool> done)

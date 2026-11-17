@@ -163,9 +163,6 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(f
         (await SqlAsync(database, "SELECT asset_id FROM readings WHERE seq = 1")).ShouldBe(Guid.Parse(asset));
     }
 
-    private static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
-        TelemetryPublisher.Payload(1, seq, deviceTime, more: FormattableString.Invariant($",\"engineTempC\":{engineTempC}"));
-
     private static async Task<JsonElement[]> AlertsWhenAsync(HttpClient admin, Func<JsonElement[], bool> done)
     {
         var alerts = await EventuallyAsync(() => ListAsync(admin, "/alerts"), done);
