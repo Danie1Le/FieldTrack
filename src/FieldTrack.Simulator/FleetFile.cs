@@ -15,6 +15,7 @@ internal sealed record Position(double Lat, double Lon);
 /// <param name="AssetType">The kind of equipment the Asset is.</param>
 /// <param name="Route">Path of the GPX route a mobile Device follows, or null.</param>
 /// <param name="Position">Where a stationary Device reports from, or null.</param>
+/// <param name="SpeedKph">How fast a mobile Device travels, in km/h.</param>
 /// <param name="Sensors">The sensors the Device carries.</param>
 internal sealed record FleetDevice(
     string Serial,
@@ -22,6 +23,7 @@ internal sealed record FleetDevice(
     AssetType AssetType,
     string? Route,
     Position? Position,
+    double SpeedKph,
     IReadOnlyList<Sensor> Sensors);
 
 /// <summary>
@@ -31,6 +33,9 @@ internal sealed record FleetDevice(
 /// </summary>
 internal sealed partial class FleetFile
 {
+    private const double DefaultSpeedKph = 30;
+    private const double MaxSpeedKph = 200;
+
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { AllowDuplicateProperties = false };
 
     private FleetFile(IReadOnlyList<FleetDevice> devices) => Devices = devices;
@@ -101,12 +106,18 @@ internal sealed partial class FleetFile
             throw new SimulatorException($"Device {serial}: position must have lat within -90..90 and lon within -180..180.");
         }
 
+        if (dto.SpeedKph is not (null or > 0 and <= MaxSpeedKph))
+        {
+            throw new SimulatorException($"Device {serial}: speedKph must be above 0 and at most {MaxSpeedKph}.");
+        }
+
         return new FleetDevice(
             serial,
             dto.AssetName ?? serial,
             assetType,
             dto.Route is null ? null : Path.GetFullPath(dto.Route, baseDirectory),
             dto.Position,
+            dto.SpeedKph ?? DefaultSpeedKph,
             (dto.Sensors ?? []).Select(name => ParseSensor(serial, name)).Distinct().ToList());
     }
 
@@ -120,5 +131,6 @@ internal sealed partial class FleetFile
 
     private sealed record FleetDto(List<DeviceDto?>? Devices);
 
-    private sealed record DeviceDto(string? Serial, string? AssetName, string? AssetType, string? Route, Position? Position, List<string>? Sensors);
+    private sealed record DeviceDto(
+        string? Serial, string? AssetName, string? AssetType, string? Route, Position? Position, double? SpeedKph, List<string>? Sensors);
 }

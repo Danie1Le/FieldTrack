@@ -13,7 +13,7 @@ public sealed class FleetFileTests
         var fleet = FleetFile.Parse("""
             { "devices": [
               { "serial": "TRK-001", "assetName": "Haul truck 1", "assetType": "Truck", "route": "routes/loop.gpx",
-                "sensors": ["speedKph", "fuelPct"] },
+                "speedKph": 25, "sensors": ["speedKph", "fuelPct"] },
               { "serial": "GEN-001", "assetType": "generator", "position": { "lat": 45.5, "lon": -122.6 } }
             ] }
             """, Base);
@@ -23,13 +23,27 @@ public sealed class FleetFileTests
         truck.AssetName.ShouldBe("Haul truck 1");
         truck.AssetType.ShouldBe(AssetType.Truck);
         truck.Route.ShouldBe(Path.Combine(Base, "routes", "loop.gpx"));
+        truck.SpeedKph.ShouldBe(25);
         truck.Sensors.ShouldBe([Sensor.SpeedKph, Sensor.FuelPct]);
         var generator = fleet.Devices[1];
         generator.AssetName.ShouldBe("GEN-001");
         generator.AssetType.ShouldBe(AssetType.Generator);
         generator.Position.ShouldBe(new Position(45.5, -122.6));
+        generator.SpeedKph.ShouldBe(30);
         generator.Route.ShouldBeNull();
         generator.Sensors.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void The_committed_demo_fleet_loads_and_its_routes_exist()
+    {
+        var fleet = FleetFile.Load(Path.Combine(AppContext.BaseDirectory, "fleets", "demo.json"));
+
+        fleet.Devices.ShouldNotBeEmpty();
+        foreach (var route in fleet.Devices.Select(device => device.Route).OfType<string>())
+        {
+            GpxRoute.Load(route).LengthMeters.ShouldBeGreaterThan(500, route);
+        }
     }
 
     [Fact]
@@ -53,6 +67,8 @@ public sealed class FleetFileTests
     [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "route": "r.gpx", "position": { "lat": 1, "lon": 1 } } ] }""", "not both")]
     [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "position": { "lat": 91, "lon": 1 } } ] }""", "position")]
     [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck" }, { "serial": "A", "assetType": "Sensor" } ] }""", "appears twice")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "speedKph": 0 } ] }""", "speedKph")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "speedKph": 500 } ] }""", "speedKph")]
     [InlineData("""{ "devices": [ null ] }""", "no serial")]
     [InlineData("not json", "not valid JSON")]
     public void A_fleet_file_that_breaks_a_rule_is_refused_with_the_reason(string json, string reason)
