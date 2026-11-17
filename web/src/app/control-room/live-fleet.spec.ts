@@ -102,6 +102,19 @@ describe('LiveFleet', () => {
     ]);
   });
 
+  it('keeps a push that arrives while the fleet loads over the older snapshot', async () => {
+    fleet.start();
+    const snapshot = await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 });
+
+    hub.fire('AssetsUpdated', [truck('Offline')]);
+    snapshot.flush([truck('Normal')]);
+    api.expectOne('/api/asset-groups').flush([]);
+    api.expectOne('/api/alert-rules').flush([]);
+    await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
+
+    expect(fleet.assets()[0].status).toBe('Offline');
+  });
+
   it('reloads the fleet over REST after an automatic reconnect, recovering missed pushes', async () => {
     fleet.start();
     await serveSnapshot([truck('Normal')]);
