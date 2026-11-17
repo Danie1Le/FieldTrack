@@ -50,8 +50,8 @@ export class LiveFleet {
   private stopped = false;
   private failedConnects = 0;
   private retry?: ReturnType<typeof setTimeout>;
-  /** Pushes that arrive while load() reads the fleet; replayed over its snapshot, which may be older than them. */
-  private pushedDuringLoad: LiveAsset[][] | null = null;
+  /** One buffer per running load(): pushes that arrive meanwhile, replayed over its snapshot, which may be older than them. */
+  private readonly pushedDuringLoads = new Set<LiveAsset[][]>();
 
   readonly assets = signal<LiveAsset[]>([]);
   readonly groups = signal<AssetGroup[]>([]);
@@ -64,9 +64,12 @@ export class LiveFleet {
       clearTimeout(this.retry);
       void this.hub.stop();
     });
-    this.hub.on('AssetsUpdated', (changed) =>
-      this.pushedDuringLoad ? this.pushedDuringLoad.push(changed) : this.merge(changed),
-    );
+    this.hub.on('AssetsUpdated', (changed) => {
+      if (this.pushedDuringLoads.size === 0) {
+        this.merge(changed);
+      }
+      this.pushedDuringLoads.forEach((pushed) => pushed.push(changed));
+    });
     this.hub.onreconnecting(() => this.connection.set('reconnecting'));
     this.hub.onreconnected(() => void this.load());
     this.hub.onclose(() => {
@@ -103,7 +106,8 @@ export class LiveFleet {
 
   /** Reads the fleet over REST; on failure drops the connection, so the reconnect path loads again. */
   private async load(): Promise<void> {
-    this.pushedDuringLoad ??= [];
+    const pushed: LiveAsset[][] = [];
+    this.pushedDuringLoads.add(pushed);
     try {
       const [assets, groups, rules] = await Promise.all([
         firstValueFrom(this.http.get<LiveAsset[]>('/api/assets/live')),
@@ -111,7 +115,7 @@ export class LiveFleet {
         firstValueFrom(this.http.get<AlertRule[]>('/api/alert-rules')),
       ]);
       this.assets.set(assets);
-      this.pushedDuringLoad.forEach((changed) => this.merge(changed));
+      pushed.forEach((changed) => this.merge(changed));
       this.groups.set(groups);
       this.rules.set(rules);
       this.failedConnects = 0;
@@ -119,7 +123,7 @@ export class LiveFleet {
     } catch {
       await this.hub.stop();
     } finally {
-      this.pushedDuringLoad = null;
+      this.pushedDuringLoads.delete(pushed);
     }
   }
 

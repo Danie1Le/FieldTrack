@@ -115,6 +115,23 @@ describe('LiveFleet', () => {
     expect(fleet.assets()[0].status).toBe('Offline');
   });
 
+  it('lets two overlapping loads each finish without stopping the hub', async () => {
+    fleet.start();
+    const first = await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 });
+    const firstReads = [first, api.expectOne('/api/asset-groups'), api.expectOne('/api/alert-rules')];
+
+    hub.fire('reconnected');
+    const second = await vi.waitFor(() => api.expectOne('/api/assets/live'), { timeout: 5_000 });
+    const secondReads = [second, api.expectOne('/api/asset-groups'), api.expectOne('/api/alert-rules')];
+
+    firstReads.forEach((read, i) => read.flush(i === 0 ? [truck('Normal')] : []));
+    await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
+    secondReads.forEach((read, i) => read.flush(i === 0 ? [truck('Offline')] : []));
+
+    await vi.waitFor(() => expect(fleet.assets()[0].status).toBe('Offline'));
+    expect(fleet.connection()).toBe('live');
+  });
+
   it('reloads the fleet over REST after an automatic reconnect, recovering missed pushes', async () => {
     fleet.start();
     await serveSnapshot([truck('Normal')]);
