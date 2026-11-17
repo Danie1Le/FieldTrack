@@ -84,4 +84,28 @@ describe('SignIn', () => {
     expect(page.querySelector('#new-password')).toBeNull();
     expect(page.querySelector('[role=alert]')!.textContent).toContain('Sign in again.');
   });
+
+  it("shows the Demo Operator's credentials in demo mode and signs in with them", async () => {
+    api.expectOne('/api/auth/demo-operator').flush({ email: 'demo@example.com', password: '<b>Demo-pass-1</b>' });
+    await fixture.whenStable();
+
+    const demo = page.querySelector('.demo')!;
+    expect(demo.textContent).toContain('demo@example.com');
+    expect(demo.textContent).toContain('<b>Demo-pass-1</b>');
+    expect(demo.querySelector('b')).toBeNull();
+
+    demo.querySelector('button')!.click();
+    const signIn = api.expectOne('/api/auth/sign-in');
+    expect(signIn.request.body).toEqual({ email: 'demo@example.com', password: '<b>Demo-pass-1</b>' });
+    signIn.flush({ accessToken: 'a', accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(), refreshToken: 'r' });
+
+    await vi.waitFor(() => expect(TestBed.inject(Router).url).toBe('/'));
+  });
+
+  it('offers no Demo Operator outside demo mode', async () => {
+    api.expectOne('/api/auth/demo-operator').flush(null, { status: 404, statusText: 'Not Found' });
+    await fixture.whenStable();
+
+    expect(page.querySelector('.demo')).toBeNull();
+  });
 });

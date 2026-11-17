@@ -9,6 +9,21 @@
       <input #password id="password" type="password" autocomplete="current-password" required />
       <button type="submit" class="btn btn-solid" [disabled]="busy()">Sign in</button>
     </form>
+
+    @if (demo(); as demo) {
+      <section class="demo" aria-label="Demo Operator">
+        <p>Trying the demo? Sign in as the Demo Operator:</p>
+        <dl>
+          <dt>Email</dt>
+          <dd class="mono">{{ demo.email }}</dd>
+          <dt>Password</dt>
+          <dd class="mono">{{ demo.password }}</dd>
+        </dl>
+        <button type="button" class="btn" [disabled]="busy()" (click)="signIn(demo.email, demo.password)">
+          Sign in as Demo Operator
+        </button>
+      </section>
+    }
   } @else {
     <form (submit)="$event.preventDefault(); changePassword(newPassword.value, confirmation.value)">
       <p>Your password is temporary. Choose a new one to finish signing in.</p>
