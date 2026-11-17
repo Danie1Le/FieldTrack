@@ -1,11 +1,14 @@
+using FieldTrack.Domain.Alerts;
+using FieldTrack.Domain.Telemetry;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace FieldTrack.Infrastructure.Ingest;
 
 /// <summary>
-/// Stores batches of Readings exactly once (ADR 0003, ADR 0004). It holds one connection, with its stage
-/// table, for the life of an ingest session; dispose it and open a new one after any failure.
+/// Stores batches of Readings exactly once (ADR 0003, ADR 0004) and evaluates Alert Rules against the new ones in the
+/// same transaction (ADR 0005). It holds one connection, with its stage table and rule state, for the life of an
+/// ingest session; dispose it and open a new one after any failure.
 /// </summary>
 public sealed class ReadingWriter : IAsyncDisposable
 {
@@ -87,26 +90,40 @@ public sealed class ReadingWriter : IAsyncDisposable
                    s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
             FROM staged s
             JOIN new_keys USING (device_id, boot, seq)
+            RETURNING device_id, boot, seq, asset_id
+        ), received AS (
+            UPDATE devices d
+            SET last_received_at = r.received_time
+            FROM (SELECT device_id, max(received_time) AS received_time FROM staged GROUP BY device_id) r
+            WHERE d.id = r.device_id
         )
-        UPDATE devices d
-        SET last_received_at = r.received_time
-        FROM (SELECT device_id, max(received_time) AS received_time FROM staged GROUP BY device_id) r
-        WHERE d.id = r.device_id
+        -- The new Readings of Assets in use, in receive order, for rule evaluation (ADR 0005).
+        SELECT s.device_id, r.asset_id, a.asset_group_id, s.boot, s.seq, s.device_time, s.lat, s.lon,
+               s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
+        FROM stored r
+        JOIN staged s USING (device_id, boot, seq)
+        JOIN assets a ON a.id = r.asset_id
+        WHERE NOT a.archived
+        ORDER BY s.ordinal
         """;
 
     private readonly NpgsqlConnection _connection;
+    private readonly AlertRuleRunner _rules;
 
-    private ReadingWriter(NpgsqlConnection connection) => _connection = connection;
+    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules) => (_connection, _rules) = (connection, rules);
 
-    /// <summary>Opens a connection from <paramref name="dataSource"/> and prepares its stage table.</summary>
-    public static async Task<ReadingWriter> OpenAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
+    /// <summary>
+    /// Opens a connection from <paramref name="dataSource"/>, prepares its stage table and loads the rule state.
+    /// <paramref name="time"/> stamps the Alerts it creates.
+    /// </summary>
+    public static async Task<ReadingWriter> OpenAsync(NpgsqlDataSource dataSource, TimeProvider time, CancellationToken cancellationToken)
     {
         var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         try
         {
             await using var command = new NpgsqlCommand(CreateStage, connection);
             await command.ExecuteNonQueryAsync(cancellationToken);
-            return new ReadingWriter(connection);
+            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken));
         }
         catch
         {
@@ -117,7 +134,8 @@ public sealed class ReadingWriter : IAsyncDisposable
 
     /// <summary>
     /// Stores <paramref name="readings"/> (in receive order) in one transaction and stamps each with its
-    /// Asset; Readings already stored are skipped. Returns once committed.
+    /// Asset; Readings already stored are skipped. The Alert Rules are evaluated against the newly stored ones and
+    /// their Alerts and rule state commit with them. Returns once committed.
     /// </summary>
     public async Task WriteAsync(IReadOnlyList<ReceivedReading> readings, CancellationToken cancellationToken)
     {
@@ -152,9 +170,27 @@ public sealed class ReadingWriter : IAsyncDisposable
         {
             BatchCommands = { new(LockDevices), new(LockAssets), new(Store) },
         };
-        await batch.ExecuteNonQueryAsync(cancellationToken);
+        var stored = new List<AssetReading>();
+        await using (var reader = await batch.ExecuteReaderAsync(cancellationToken))
+        {
+            // Skip the lock statements' results; the last one holds the stored Readings.
+            await reader.NextResultAsync(cancellationToken);
+            await reader.NextResultAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var reading = new Reading(
+                    reader.GetInt32(3), reader.GetInt64(4), reader.GetFieldValue<DateTimeOffset>(5), reader.GetDouble(6), reader.GetDouble(7),
+                    Sensor(reader, 8), Sensor(reader, 9), Sensor(reader, 10), Sensor(reader, 11), Sensor(reader, 12));
+                stored.Add(new AssetReading(reader.GetGuid(1), reader.IsDBNull(2) ? null : reader.GetGuid(2), new StoredReading(reader.GetGuid(0), reading)));
+            }
+        }
+
+        var ruleStates = await _rules.EvaluateAsync(transaction, stored, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        _rules.Keep(ruleStates);
     }
+
+    private static float? Sensor(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _connection.DisposeAsync();

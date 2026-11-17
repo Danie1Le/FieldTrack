@@ -66,7 +66,7 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
 
     private async Task WriteAsync(params ReceivedReading[] readings)
     {
-        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), CancellationToken);
+        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
         await writer.WriteAsync(readings, CancellationToken);
     }
 }

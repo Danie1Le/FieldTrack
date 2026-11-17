@@ -108,7 +108,7 @@ public sealed partial class IngestWorker(
             return Task.CompletedTask;
         };
 
-        await using var writer = await ReadingWriter.OpenAsync(dataSource, stoppingToken);
+        await using var writer = await ReadingWriter.OpenAsync(dataSource, time, stoppingToken);
         var connected = await client.ConnectAsync(ClientOptions(), stoppingToken);
         // MQTTnet returns a refused CONNACK (bad credentials, say) instead of throwing.
         if (connected.ResultCode != MqttClientConnectResultCode.Success)
