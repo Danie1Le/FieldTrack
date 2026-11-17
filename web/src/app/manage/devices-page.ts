@@ -18,7 +18,7 @@ import { ConfirmAction } from './confirm-action';
 })
 export class DevicesPage {
   private readonly http = inject(HttpClient);
-  protected readonly changes = new Changes();
+  protected readonly changes = new Changes(() => this.load());
 
   protected readonly devices = signal<Device[] | null>(null);
   /** Archived ones too, so history still names them. */

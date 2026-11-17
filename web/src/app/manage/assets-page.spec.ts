@@ -33,7 +33,7 @@ describe('AssetsPage', () => {
 
   /** Answers the page's reads, then lets the answers render. */
   async function serve(assets: Asset[], groups: AssetGroup[]) {
-    await vi.waitFor(() => api.expectOne('/api/assets').flush(assets));
+    await vi.waitFor(() => api.expectOne('/api/assets?includeArchived=true').flush(assets));
     api.expectOne('/api/asset-groups').flush(groups);
     await view.settle();
   }
@@ -48,6 +48,23 @@ describe('AssetsPage', () => {
     expect(rows('Asset Groups')).toEqual([
       ['Depot', '1'],
       ['Quarry', '0'],
+    ]);
+  });
+
+  it('leaves Archived Assets out of the list but counts them in their Asset Group, which they keep from being deleted', async () => {
+    view.button('Delete', 'Generator 1').click();
+    await view.settle();
+    view.button('Yes, delete').click();
+    api.expectOne({ method: 'DELETE', url: '/api/assets/gen' }).flush(null, { status: 204, statusText: 'No Content' });
+    await serve(
+      [asset('truck', 'Haul truck 7', 'Truck', 'depot'), { ...asset('gen', 'Generator 1', 'Generator', 'quarry'), archived: true }],
+      [group('depot', 'Depot'), group('quarry', 'Quarry')],
+    );
+
+    expect(rows('Assets')).toEqual([['Haul truck 7', 'Truck', 'Depot']]);
+    expect(rows('Asset Groups')).toEqual([
+      ['Depot', '1'],
+      ['Quarry', '0 (1 Archived)'],
     ]);
   });
 
@@ -78,6 +95,33 @@ describe('AssetsPage', () => {
     const edit = api.expectOne({ method: 'PUT', url: '/api/assets/truck' });
     expect(edit.request.body).toEqual({ name: 'Haul truck 8', type: 'Truck', assetGroupId: null });
     edit.flush(asset('truck', 'Haul truck 8', 'Truck'));
+    await serve([], []);
+  });
+
+  it('builds the form afresh from each Asset it opens, so unsaved choices never reach another Asset', async () => {
+    view.button('Edit', 'Haul truck 7').click();
+    await view.settle();
+    view.fill('type', 'Excavator');
+    view.fill('assetGroupId', 'quarry');
+    view.button('Edit', 'Generator 1').click();
+    await view.settle();
+    view.button('Save').click();
+
+    const edit = api.expectOne({ method: 'PUT', url: '/api/assets/gen' });
+    expect(edit.request.body).toEqual({ name: 'Generator 1', type: 'Generator', assetGroupId: null });
+    edit.flush(asset('gen', 'Generator 1', 'Generator'));
+    await serve([asset('truck', 'Haul truck 7', 'Truck', 'depot')], [group('depot', 'Depot'), group('quarry', 'Quarry')]);
+
+    view.button('Edit', 'Haul truck 7').click();
+    await view.settle();
+    view.fill('assetGroupId', 'quarry');
+    view.button('Edit', 'Haul truck 7').click();
+    await view.settle();
+    view.button('Save').click();
+
+    const again = api.expectOne({ method: 'PUT', url: '/api/assets/truck' });
+    expect(again.request.body).toEqual({ name: 'Haul truck 7', type: 'Truck', assetGroupId: 'depot' });
+    again.flush(asset('truck', 'Haul truck 7', 'Truck', 'depot'));
     await serve([], []);
   });
 
@@ -131,8 +175,23 @@ describe('AssetsPage', () => {
     api.expectOne({ method: 'DELETE', url: '/api/asset-groups/depot' }).flush({ detail }, { status: 409, statusText: 'Conflict' });
     await view.settle();
 
+    // A 409 means the page is out of date (another Admin moved an Asset into the group), so it reads its data again.
+    await serve([asset('truck', 'Haul truck 7', 'Truck', 'depot')], [group('depot', 'Depot')]);
+
     const shown = view.root.querySelector('[role="alert"]')!;
     expect(view.text(shown)).toBe(detail);
     expect(shown.querySelector('b')).toBeNull();
+  });
+
+  it('says an item another change removed no longer exists, and shows what is there now', async () => {
+    view.button('Rename', 'Quarry').click();
+    await view.settle();
+    view.fill('groupName', 'South quarry');
+    view.button('Save').click();
+    api.expectOne({ method: 'PUT', url: '/api/asset-groups/quarry' }).flush(null, { status: 404, statusText: 'Not Found' });
+    await serve([asset('truck', 'Haul truck 7', 'Truck', 'depot')], [group('depot', 'Depot')]);
+
+    expect(view.text(view.root.querySelector('[role="alert"]'))).toBe('It no longer exists. The page now shows what is there.');
+    expect(rows('Asset Groups')).toEqual([['Depot', '1']]);
   });
 });

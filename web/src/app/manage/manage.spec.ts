@@ -9,8 +9,8 @@ import { adminGuard } from '../auth/signed-in.guard';
 import { manageRoutes } from './manage';
 
 describe('Manage', () => {
-  it('is for Admins only: Operators never reach the management screens', () => {
-    expect(routes.find((route) => route.path === 'manage')!.canActivate).toEqual([adminGuard]);
+  it('is for Admins only: Operators never download or reach the management screens', () => {
+    expect(routes.find((route) => route.path === 'manage')!.canMatch).toEqual([adminGuard]);
   });
 
   it('opens on the Assets screen and links each management screen', async () => {

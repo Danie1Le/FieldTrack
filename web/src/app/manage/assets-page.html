@@ -10,11 +10,11 @@
   <section class="panel" aria-label="Assets">
     <header>
       <h2>Assets</h2>
-      <button type="button" class="btn" (click)="cancel(); assetForm.set('new')">New Asset</button>
+      <button type="button" class="btn" (click)="cancel(); assetForm.open('new')">New Asset</button>
     </header>
 
-    @if (assetForm(); as editing) {
-      @let asset = editing === 'new' ? null : editing;
+    @for (session of assetForm.sessions(); track session) {
+      @let asset = session.item === 'new' ? null : session.item;
       <form (submit)="$event.preventDefault(); saveAsset($any($event.target))">
         <h3>{{ asset ? 'Edit ' + asset.name : 'New Asset' }}</h3>
         <label>Name <input name="name" required maxlength="200" [value]="asset?.name ?? ''" /></label>
@@ -47,13 +47,13 @@
         <tr><th>Name</th><th>Type</th><th>Asset Group</th><th><span class="sr-only">Actions</span></th></tr>
       </thead>
       <tbody>
-        @for (asset of assets(); track asset.id) {
+        @for (asset of inUse(); track asset.id) {
           <tr>
             <td>{{ asset.name }}</td>
             <td>{{ asset.type }}</td>
             <td>{{ groupName(asset.assetGroupId) }}</td>
             <td class="actions">
-              <button type="button" class="btn" (click)="cancel(); assetForm.set(asset)">Edit</button>
+              <button type="button" class="btn" (click)="cancel(); assetForm.open(asset)">Edit</button>
               <app-confirm-action
                 label="Delete"
                 [question]="'Delete ' + asset.name + '? With Readings or Alerts it is Archived instead: kept with its history, its Alert Rules disabled, its Device detached and its Active Alerts resolved.'"
@@ -63,7 +63,7 @@
             </td>
           </tr>
         } @empty {
-          <tr><td colspan="4" class="muted">{{ assets() ? 'No Assets yet.' : 'Loading…' }}</td></tr>
+          <tr><td colspan="4" class="muted">{{ inUse() ? 'No Assets yet.' : 'Loading…' }}</td></tr>
         }
       </tbody>
     </table>
@@ -72,11 +72,11 @@
   <section class="panel" aria-label="Asset Groups">
     <header>
       <h2>Asset Groups</h2>
-      <button type="button" class="btn" (click)="cancel(); groupForm.set('new')">New Asset Group</button>
+      <button type="button" class="btn" (click)="cancel(); groupForm.open('new')">New Asset Group</button>
     </header>
 
-    @if (groupForm(); as editing) {
-      @let group = editing === 'new' ? null : editing;
+    @for (session of groupForm.sessions(); track session) {
+      @let group = session.item === 'new' ? null : session.item;
       <form (submit)="$event.preventDefault(); saveGroup($any($event.target))">
         <h3>{{ group ? 'Rename ' + group.name : 'New Asset Group' }}</h3>
         <label>Name <input name="groupName" required maxlength="200" [value]="group?.name ?? ''" /></label>
@@ -97,7 +97,7 @@
             <td>{{ group.name }}</td>
             <td class="num mono">{{ assetsIn(group) }}</td>
             <td class="actions">
-              <button type="button" class="btn" (click)="cancel(); groupForm.set(group)">Rename</button>
+              <button type="button" class="btn" (click)="cancel(); groupForm.open(group)">Rename</button>
               <app-confirm-action
                 label="Delete"
                 [question]="'Delete ' + group.name + '? Only a group no Asset or Alert Rule names can go.'"

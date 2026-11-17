@@ -119,8 +119,24 @@ describe('DevicesPage', () => {
       { detail: 'A Device with serial number TRK-007 is already registered.' },
       { status: 409, statusText: 'Conflict' },
     );
-    await view.settle();
+    await serve([device('trk7', 'TRK-007', '2026-11-17T10:00:00Z'), device('trk9', 'TRK-009')]);
 
     expect(view.text(view.root.querySelector('[role="alert"]'))).toBe('A Device with serial number TRK-007 is already registered.');
+    expect(view.root.querySelector<HTMLInputElement>('[name="serialNumber"]')!.value).toBe('TRK-007');
+  });
+
+  it('reads its data again when the API says an Attachment has already ended, so Detach is no longer offered', async () => {
+    view.button('Detach', 'TRK-007').click();
+    await view.settle();
+    view.button('Yes, detach').click();
+    api.expectOne({ method: 'POST', url: '/api/attachments/now/detach' }).flush(
+      { detail: 'The Attachment has already ended.' },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await serve([device('trk7', 'TRK-007')], [attachment('now', 'trk7', 'truck7', '2026-11-17T09:00:00Z', '2026-11-17T10:30:00Z')]);
+
+    expect(view.text(view.root.querySelector('[role="alert"]'))).toBe('The Attachment has already ended.');
+    expect(() => view.button('Detach', 'TRK-007')).toThrow();
+    expect(view.button('Attach', 'TRK-007')).toBeTruthy();
   });
 });
