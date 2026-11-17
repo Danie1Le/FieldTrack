@@ -61,6 +61,19 @@ public sealed class OfflineRuleTests
     }
 
     [Fact]
+    public void Silence_is_judged_at_the_sweep_time_even_when_the_sweep_runs_later()
+    {
+        var sweepAt = _lastReceivedAt.AddSeconds(60);
+        _time.Advance(TimeSpan.FromSeconds(62));
+
+        Sweep(null, Tick(_lastReceivedAt) with { At = sweepAt.AddSeconds(-1) }).Raised.ShouldBeEmpty();
+        var alert = Sweep(null, Tick(_lastReceivedAt) with { At = sweepAt }).Raised.ShouldHaveSingleItem();
+
+        alert.RaisedAt.ShouldBe(sweepAt);
+        alert.CreatedAt.ShouldBe(_time.GetUtcNow());
+    }
+
+    [Fact]
     public void A_Device_that_never_sent_a_Reading_counts_silence_from_the_attach()
     {
         var attachedAt = _lastReceivedAt;
@@ -155,6 +168,17 @@ public sealed class OfflineRuleTests
     }
 
     [Fact]
+    public void A_former_Devices_late_backlog_leaves_the_rule_breached_because_the_attached_Device_is_still_silent()
+    {
+        var breached = new RuleState(true, null);
+
+        var evaluation = Evaluate(breached, Reading(1, 8, device: Guid.NewGuid()));
+
+        evaluation.ResolveActiveAlertAt.ShouldBeNull();
+        evaluation.State.ShouldBe(breached);
+    }
+
+    [Fact]
     public void Readings_change_nothing_while_the_rule_is_clear_so_no_state_is_written_per_batch()
     {
         var clear = new RuleState(false, null);
@@ -167,14 +191,14 @@ public sealed class OfflineRuleTests
         Evaluate(null, Reading(1, 8)).State.ShouldBeNull();
     }
 
-    private static SweepTick Tick(DateTimeOffset? lastReceivedAt, DateTimeOffset? attachedAt = null) =>
-        new(attachedAt ?? _attachedAt, lastReceivedAt, _caughtUpAt);
+    private SweepTick Tick(DateTimeOffset? lastReceivedAt, DateTimeOffset? attachedAt = null) =>
+        new(_time.GetUtcNow(), attachedAt ?? _attachedAt, lastReceivedAt, _caughtUpAt);
 
     private RuleEvaluation Sweep(RuleState? state, SweepTick tick) => RuleEvaluator.Sweep(_silent, _asset, state, tick, _time);
 
     private RuleEvaluation Evaluate(RuleState? state, params StoredReading[] readings) =>
-        RuleEvaluator.Evaluate(_silent, _asset, state, readings, _time);
+        RuleEvaluator.Evaluate(_silent, _asset, _device, state, readings, _time);
 
-    private static StoredReading Reading(int boot, long sequenceNumber) =>
-        new(_device, new Reading(boot, sequenceNumber, _lastReceivedAt, 51.5, -0.12, null, null, null, null, null));
+    private static StoredReading Reading(int boot, long sequenceNumber, Guid? device = null) =>
+        new(device ?? _device, new Reading(boot, sequenceNumber, _lastReceivedAt, 51.5, -0.12, null, null, null, null, null));
 }

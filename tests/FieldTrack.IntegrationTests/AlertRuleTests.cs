@@ -107,6 +107,7 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
             Overheat(assetId: asset) with { severity = "Warning, Critical" },
             Overheat(assetId: asset) with { kind = "Threshold, Threshold" },
             Overheat(assetId: asset) with { sensor = "1" },
+            Overheat(assetId: asset) with { kind = "Offline" },
         ];
         foreach (var request in invalid)
         {

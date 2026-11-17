@@ -36,3 +36,5 @@ Readings drive rules per Asset in (Boot, Sequence number) order, and only when t
 - Rule evaluation time adds to every batch's commit time, and so to the 200 ms ingest and 500 ms alert latency budgets.
 - A Reading that arrives after a newer one from the same Device never raises or resolves an Alert.
 - Only the last evaluated Reading is kept, so after a Device swap an old Device's Coverage-gap backlog that arrives later counts as newer and is evaluated. Within one batch the Device evaluated last goes first, so its own stragglers are still skipped before another Device's Readings move the state on.
+- The rules engine has two entry points, one per trigger, where spec #21 describes one: `RuleEvaluator.Evaluate` for a batch's Readings (every rule kind) and `RuleEvaluator.Sweep` for the sweep tick (Offline rules only). Each keeps its input plain; both return the same new rule state plus Alerts to raise and resolve.
+- An Offline rule clears only on a Reading from the Device attached to the Asset now. After a Device swap, the old Device's late backlog is still stored, but it does not resolve the Offline Alert of a Device that is still silent.

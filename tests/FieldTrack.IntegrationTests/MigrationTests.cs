@@ -120,6 +120,7 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     [Theory]
     [InlineData("'Offline'", "NULL")]
     [InlineData("'Offline'", "0")]
+    [InlineData("'Offline'", "-1")]
     [InlineData("'Threshold'", "60")]
     public async Task Database_refuses_an_Offline_rule_without_positive_seconds_and_seconds_on_another_kind(string kind, string offlineSeconds)
     {

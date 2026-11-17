@@ -82,7 +82,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
             migrationBuilder.AddCheckConstraint(
                 name: "ck_alert_rules_offline",
                 table: "alert_rules",
-                sql: "(kind = 'Offline') = (offline_seconds IS NOT NULL) AND offline_seconds > 0");
+                sql: "(kind = 'Offline') = (offline_seconds IS NOT NULL) AND (offline_seconds IS NULL OR offline_seconds > 0)");
 
             migrationBuilder.AddCheckConstraint(
                 name: "ck_alert_rule_states_last_evaluated",
