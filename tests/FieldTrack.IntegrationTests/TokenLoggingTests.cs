@@ -22,7 +22,10 @@ public sealed class TokenLoggingTests(FieldTrackFixture fixture) : IntegrationTe
         var signedIn = await AuthClient.AuthorizeAsync(client, AdminEmail, AdminPassword);
         using var refreshed = await AuthClient.PostRefreshAsync(client, signedIn.RefreshToken);
         var tokens = await AuthClient.ReadTokensAsync(refreshed);
-        using var hub = await client.GetAsync($"/hubs/fleet?access_token={tokens.AccessToken}", CancellationToken);
+        await using (await LiveClient.ConnectAsync(api, tokens.AccessToken))
+        {
+        }
+
         await AuthClient.CreateUserAsync(client, "operator@fieldtrack.test", "Operator", "Operator-pass-1");
 
         logs.Entries.ShouldNotBeEmpty();

@@ -42,9 +42,10 @@ public sealed class FieldTrackFixture : IAsyncLifetime
 
     private readonly IContainer _broker = new ContainerBuilder(TestImages.Mosquitto)
         .WithPortBinding(MqttPort, assignRandomHostPort: true)
+        // The shared config plus the one setting the bench needs (bench/docker-compose.bench.yml appends the same): $SYS counters every second.
         .WithResourceMapping(
-            new FileInfo(Path.Combine(AppContext.BaseDirectory, "mosquitto.conf")),
-            new FileInfo("/mosquitto/config/mosquitto.conf"))
+            System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "mosquitto.conf")) + "\nsys_interval 1\n"),
+            "/mosquitto/config/mosquitto.conf")
         .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged(
             "mosquitto version .+ running", wait => wait.WithTimeout(TimeSpan.FromMinutes(1))))
         .Build();

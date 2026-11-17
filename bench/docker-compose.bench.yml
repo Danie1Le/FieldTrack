@@ -14,3 +14,10 @@ services:
       - shared_buffers=1GB
       - -c
       - max_wal_size=4GB
+  mosquitto:
+    # `bench` reads the broker's $SYS counters (PUBLISH messages received, queued messages); refresh them every second instead of every 10.
+    # Appended to a copy of the base config, which stays unchanged for every other environment.
+    command:
+      - sh
+      - -c
+      - cp /mosquitto/config/mosquitto.conf /tmp/bench.conf && printf '\nsys_interval 1\n' >> /tmp/bench.conf && exec /usr/sbin/mosquitto -c /tmp/bench.conf

@@ -12,9 +12,14 @@ internal static class CrashSchedule
     /// end is cut into equal slots with one kill in each slot's middle half, so kills are random but never bunch up (a kill during a
     /// restart would test nothing). Offsets come from the run's start, in order.
     /// </summary>
-    /// <exception cref="SimulatorException">The run is too short to give each kill a slot of at least 40 s.</exception>
+    /// <exception cref="SimulatorException">There is no kill to plan, or the run is too short to give each kill a slot of at least 40 s.</exception>
     public static IReadOnlyList<TimeSpan> Plan(int kills, TimeSpan duration, Random random)
     {
+        if (kills < 1)
+        {
+            throw new SimulatorException($"--kills must be at least 1, got {kills}.");
+        }
+
         var slot = (duration - (2 * _settle)) / kills;
         if (slot < _minimumSlot)
         {

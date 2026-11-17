@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Live;
 using FieldTrack.Domain.Alerts;
 
 namespace FieldTrack.IntegrationTests;
@@ -177,6 +178,35 @@ public sealed class AlertActionTests(FieldTrackFixture fixture) : AlertTest(fixt
     }
 
     // An Engine overheat rule on an Asset fitted with TRK-007 and one breaching Reading at Device time t: one Open Alert.
+    [Fact]
+    public async Task Acknowledge_and_Resolve_are_pushed_live_by_display_name_with_no_email()
+    {
+        var (alert, _) = await OpenAlertAsync();
+        using var operatorClient = await OperatorClientAsync();
+        await using var live = await LiveClient.ConnectAsync(Fixture.Api, operatorClient.DefaultRequestHeaders.Authorization!.Parameter);
+
+        using (var acknowledge = await operatorClient.PostAsync($"/alerts/{alert}/acknowledge", content: null, CancellationToken))
+        {
+            acknowledge.EnsureSuccessStatusCode();
+        }
+
+        var acknowledged = await live.NextAsync(LiveHub.AlertUpdated, pushed => pushed.GetProperty("status").GetString() == "Acknowledged");
+        using (var resolve = await operatorClient.PostAsync($"/alerts/{alert}/resolve", content: null, CancellationToken))
+        {
+            resolve.EnsureSuccessStatusCode();
+        }
+
+        var resolved = await live.NextAsync(LiveHub.AlertUpdated, pushed => pushed.GetProperty("status").GetString() == "Resolved");
+
+        acknowledged.GetProperty("id").GetString().ShouldBe(alert);
+        acknowledged.GetProperty("acknowledgedBy").GetString().ShouldBe(OperatorName);
+        resolved.GetProperty("resolvedBy").GetString().ShouldBe(OperatorName);
+        // Every dashboard gets every push, the Demo Operator's too, so no user's email may travel in one.
+        acknowledged.GetRawText().ShouldNotContain("@");
+        resolved.GetRawText().ShouldNotContain("@");
+        (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem().GetProperty("status").GetString().ShouldBe("Normal");
+    }
+
     private async Task<(string Alert, DateTimeOffset T)> OpenAlertAsync()
     {
         using var admin = await AdminClientAsync();

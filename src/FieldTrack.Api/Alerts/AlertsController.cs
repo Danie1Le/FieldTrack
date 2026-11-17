@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using System.Security.Claims;
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Live;
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -19,7 +20,7 @@ namespace FieldTrack.Api.Alerts;
 [ApiController]
 [Route("alerts")]
 [Authorize(Policy = Policies.Read)]
-public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time) : ControllerBase
+public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time, LivePush live) : ControllerBase
 {
     // The most Alerts one list returns.
     // shortcut: newest only, no paging; add paging when the Alert feed (#37) pages back through history.
@@ -38,7 +39,7 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time) 
             alerts = alerts.Where(alert => (alert.Status != AlertStatus.Resolved) == isActive);
         }
 
-        return await Responses(alerts
+        return await Responses(db, alerts
                 .OrderByDescending(alert => alert.RaisedAt)
                 .ThenByDescending(alert => alert.Id)
                 .Take(MaxAlerts))
@@ -108,32 +109,43 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time) 
                 .SetProperty(alert => alert.ResolveReason, ResolveReason.Manual)
                 .SetProperty(alert => alert.ResolvedBy, user)
                 .SetProperty(alert => alert.Note, note)
-                .SetProperty(alert => alert.Latched, ConditionHolds()), cancellationToken);
+                .SetProperty(alert => alert.Latched, ConditionHolds(db)), cancellationToken);
         return await OutcomeAsync(id, resolved, "The Alert is already Resolved.", cancellationToken);
     }
 
     // The JWT's sub claim is the user id (TokenService).
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
 
-    private async Task<ActionResult<AlertResponse>> OutcomeAsync(Guid id, int changed, string refusal, CancellationToken cancellationToken) =>
-        await ReadAsync(id, cancellationToken) switch
+    // The update has committed when this runs (it is its own statement), so a change is pushed live here (ADR 0005).
+    private async Task<ActionResult<AlertResponse>> OutcomeAsync(Guid id, int changed, string refusal, CancellationToken cancellationToken)
+    {
+        if (changed > 0)
+        {
+            await live.AlertUpdatedAsync(id, cancellationToken);
+        }
+
+        return await ReadAsync(id, cancellationToken) switch
         {
             null => NotFound(),
             _ when changed == 0 => Problem(refusal, statusCode: StatusCodes.Status409Conflict),
             var alert => alert,
         };
+    }
 
     private Task<AlertResponse?> ReadAsync(Guid id, CancellationToken cancellationToken) =>
-        Responses(db.Alerts.Where(alert => alert.Id == id)).SingleOrDefaultAsync(cancellationToken);
+        Responses(db, db.Alerts.Where(alert => alert.Id == id)).SingleOrDefaultAsync(cancellationToken);
 
     // The Latch (GLOSSARY): whether the Alert's condition holds now, from the rule state ingest keeps. Resolve stores it
     // and responses show it for Active Alerts, so both use this one definition.
-    private Expression<Func<Alert, bool>> ConditionHolds() =>
+    private static Expression<Func<Alert, bool>> ConditionHolds(FieldTrackDbContext db) =>
         alert => db.AlertRuleStates.Any(state => state.AlertRuleId == alert.AlertRuleId && state.AssetId == alert.AssetId && state.Breached);
 
-    // Users are named by display name, never email: every signed-in user reads Alerts, the Demo Operator included,
-    // and only Admins see emails (/users).
-    private IQueryable<AlertResponse> Responses(IQueryable<Alert> alerts)
+    /// <summary>
+    /// <paramref name="alerts"/> as this controller returns them; the live push sends the same shape. Users are named
+    /// by display name, never email: every signed-in user reads Alerts, the Demo Operator included, and only Admins
+    /// see emails (/users).
+    /// </summary>
+    internal static IQueryable<AlertResponse> Responses(FieldTrackDbContext db, IQueryable<Alert> alerts)
     {
         Expression<Func<Alert, bool, AlertResponse>> response = (alert, conditionHolds) => new AlertResponse(
             alert.Id, alert.AlertRuleId, alert.AssetId, alert.Reading, alert.Severity, alert.Message, alert.Status,
@@ -146,7 +158,7 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time) 
             alert.Status == AlertStatus.Resolved ? alert.Latched : conditionHolds,
             alert.CreatedAt, alert.FromBacklog);
         // Splices ConditionHolds in for conditionHolds, so EF runs it as a subquery of this query.
-        var holds = ConditionHolds();
+        var holds = ConditionHolds(db);
         var alertParameter = response.Parameters[0];
         var body = ReplacingExpressionVisitor.Replace(
             response.Parameters[1], ReplacingExpressionVisitor.Replace(holds.Parameters[0], alertParameter, holds.Body), response.Body);

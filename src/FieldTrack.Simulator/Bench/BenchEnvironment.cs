@@ -22,7 +22,7 @@ internal static class BenchEnvironment
     {
         gitSha = await TryAsync(() => Shell.RunAsync("git", cancellationToken, "rev-parse", "HEAD")),
         // Uncommitted changes mean the SHA alone does not identify the code that was measured.
-        gitDirty = await TryAsync(() => Shell.RunAsync("git", cancellationToken, "status", "--porcelain")) is { Length: > 0 },
+        gitDirty = await GitDirtyAsync(cancellationToken),
         os = RuntimeInformation.OSDescription,
         cpu = new { model = CpuModel(), logicalCores = Environment.ProcessorCount },
         ramBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
@@ -31,6 +31,10 @@ internal static class BenchEnvironment
         containers = await TryAsync(() => ContainersAsync(composeProject, cancellationToken)) ?? [],
         postgres = await TryAsync(() => database.SettingsAsync(_postgresSettings, cancellationToken)),
     };
+
+    /// <summary>Whether the working tree has uncommitted changes; false when git cannot say.</summary>
+    public static async Task<bool> GitDirtyAsync(CancellationToken cancellationToken) =>
+        await TryAsync(() => Shell.RunAsync("git", cancellationToken, "status", "--porcelain")) is { Length: > 0 };
 
     private static async Task<T?> TryAsync<T>(Func<Task<T>> probe)
         where T : class

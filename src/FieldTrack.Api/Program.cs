@@ -2,6 +2,7 @@ using FieldTrack.Api;
 using FieldTrack.Api.Auth;
 using FieldTrack.Api.Health;
 using FieldTrack.Api.Ingest;
+using FieldTrack.Api.Live;
 using FieldTrack.Api.Maintenance;
 using FieldTrack.Infrastructure.Messaging;
 using FieldTrack.Infrastructure.Persistence;
@@ -52,6 +53,9 @@ builder.Services.PostConfigure<LoggerFilterOptions>(options =>
 builder.Services.AddControllers()
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new EnumNameConverter()));
 builder.Services.AddOpenApi();
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options => options.PayloadSerializerOptions.Converters.Add(new EnumNameConverter()));
+builder.Services.AddSingleton<LivePush>();
 
 var app = builder.Build();
 
@@ -73,6 +77,9 @@ app.MapOpenApi().AllowAnonymous();
 app.MapScalarApiReference().AllowAnonymous();
 app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthReportWriter.WriteAsync }).AllowAnonymous();
 app.MapControllers();
+// ADR 0002: a connection ends when its access token does, so a revoked user is cut off within the token's life;
+// the dashboard reconnects with a fresh token.
+app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 
 await app.RunAsync();
 

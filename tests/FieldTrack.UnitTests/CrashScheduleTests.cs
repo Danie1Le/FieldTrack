@@ -34,6 +34,14 @@ public sealed class CrashScheduleTests
         CrashSchedule.Plan(10, TenMinutes, new Random(7)).ShouldBe(CrashSchedule.Plan(10, TenMinutes, new Random(7)));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-3)]
+    public void Fewer_than_one_kill_is_refused_with_a_message_not_an_overflow(int kills)
+    {
+        Should.Throw<SimulatorException>(() => CrashSchedule.Plan(kills, TenMinutes, new Random(1))).Message.ShouldContain("--kills");
+    }
+
     [Fact]
     public void A_run_too_short_for_its_kills_is_refused()
     {
