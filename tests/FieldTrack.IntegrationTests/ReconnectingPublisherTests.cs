@@ -109,18 +109,23 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
         }, stopListening.Token);
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        for (var attempt = 0; attempt < 200; attempt++)
+        try
         {
-            await using var publisher = new ReconnectingPublisher("127.0.0.1", port, "reset", TextWriter.Null);
-            using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            var publishing = publisher.PublishAsync("fieldtrack/v1/devices/RESET/telemetry", "never"u8.ToArray(), stop.Token);
-            Thread.SpinWait(Random.Shared.Next(200_000));
-            await stop.CancelAsync();
+            for (var attempt = 0; attempt < 200; attempt++)
+            {
+                await using var publisher = new ReconnectingPublisher("127.0.0.1", port, "reset", TextWriter.Null);
+                using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                var publishing = publisher.PublishAsync("fieldtrack/v1/devices/RESET/telemetry", "never"u8.ToArray(), stop.Token);
+                Thread.SpinWait(Random.Shared.Next(200_000));
+                await stop.CancelAsync();
 
-            await Should.ThrowAsync<OperationCanceledException>(() => publishing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+                await Should.ThrowAsync<OperationCanceledException>(() => publishing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            }
         }
-
-        await stopListening.CancelAsync();
+        finally
+        {
+            await stopListening.CancelAsync();
+        }
     }
 
     [Theory(Timeout = 30_000)]
