@@ -1,4 +1,4 @@
-/** Shapes the API sends to the Control room: `GET /assets/live`, the hub's `AssetsUpdated`, `GET /alert-rules`. */
+/** Shapes the API sends to the Control room: `GET /assets/live`, `GET /alerts`, `GET /alert-rules` and the hub's pushes. */
 
 /** Asset Status (GLOSSARY): No device > Alerting > Offline > Normal, computed by the API. */
 export type AssetStatus = 'NoDevice' | 'Alerting' | 'Offline' | 'Normal';
