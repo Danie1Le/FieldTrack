@@ -1,13 +1,13 @@
 {
   "uid": "fieldtrack-ingest",
   "title": "FieldTrack ingest",
-  "description": "Ingest rate, batches, duplicates, rejects, rule evaluation and Alerts from the API host and its ingest worker (#48).",
+  "description": "Ingest rate, batches, duplicates, rejects, rule evaluation, Alerts and alert push time, and the HTTP error rate, from the API host and its ingest worker (#48).",
   "tags": [
     "fieldtrack"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "5s",
   "time": {
@@ -229,7 +229,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Receive-to-commit time",
-      "description": "Time from the broker handing a message to ingest until its batch committed. ADR 0004 targets p95 under 200 ms.",
+      "description": "Time from the broker handing a message to ingest until its batch committed: the platform's share of ADR 0004's 200 ms p95 publish-to-commit budget (the red line). Publisher and broker time are not included; the benchmark (#45) measures the whole.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -648,6 +648,147 @@
       }
     },
     {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Alert push time",
+      "description": "Time from an Alert's creation until its AlertRaised push was sent to the dashboards (fieldtrack.ingest.alert_push_duration): the server's share of alert latency. The time to the browser is measured end to end by the benchmark (#45).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "interval": "5s",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(fieldtrack_ingest_alert_push_duration_seconds_bucket[30s])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fieldtrack_ingest_alert_push_duration_seconds_bucket[30s])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fieldtrack_ingest_alert_push_duration_seconds_bucket[30s])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "HTTP error rate",
+      "description": "Share of API requests answered with a 5xx status (ASP.NET Core http.server.request.duration).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "interval": "5s",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[30s])) or vector(0)) / sum(rate(http_server_request_duration_seconds_count[30s]))",
+          "legendFormat": "5xx share",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 10,
       "type": "table",
       "title": "Ingest batch traces",
@@ -658,7 +799,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 32,
         "w": 12,
         "h": 9
       },
@@ -693,7 +834,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 32,
         "w": 12,
         "h": 9
       },
