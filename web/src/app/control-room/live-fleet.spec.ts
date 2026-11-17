@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { AuthService } from '../auth/auth';
 import { LIVE_HUB, LiveFleet, LiveHubConnection } from './live-fleet';
-import { Alert, LiveAsset } from './live';
+import { Alert, Geofence, LiveAsset } from './live';
 
 /** Stands in for SignalR's HubConnection: records connects and lets a test fire the client's events. */
 class FakeHub implements LiveHubConnection {
@@ -72,6 +72,13 @@ const overheat = (status: Alert['status'], id = 'alert-1', raisedAt = '2026-11-1
   fromBacklog: false,
 });
 
+const depot = (name: string): Geofence => ({
+  id: 'geofence-1',
+  name,
+  kind: 'Inclusion',
+  area: { type: 'Polygon', coordinates: [[[-0.13, 51.5], [-0.12, 51.5], [-0.12, 51.51], [-0.13, 51.5]]] },
+});
+
 describe('LiveFleet', () => {
   let hub: FakeHub;
   let api: HttpTestingController;
@@ -109,6 +116,7 @@ describe('LiveFleet', () => {
         api.expectOne('/api/alert-rules'),
         api.expectOne('/api/alerts?active=true'),
         api.expectOne('/api/alerts?active=false'),
+        api.expectOne('/api/geofences'),
       ],
     };
   }
@@ -255,6 +263,33 @@ describe('LiveFleet', () => {
     await serveSnapshot([truck('Normal')]);
 
     expect(hub.tokens).toEqual(['token-1', 'token-2', 'token-3']);
+  });
+
+  it('loads the Geofences once connected and reloads them when a Geofence changes', async () => {
+    fleet.start();
+    const reads = await snapshotReads();
+    reads.assets.flush([]);
+    reads.others.forEach((read, i) => read.flush(i === 4 ? [depot('Depot')] : []));
+    await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
+
+    hub.fire('GeofencesChanged');
+    api.expectOne('/api/geofences').flush([depot('Yard')]);
+
+    await vi.waitFor(() => expect(fleet.geofences().map((g) => g.name)).toEqual(['Yard']));
+  });
+
+  it('keeps the newest Geofence read when two reloads answer out of order', async () => {
+    fleet.start();
+    await serveSnapshot([]);
+
+    hub.fire('GeofencesChanged');
+    hub.fire('GeofencesChanged');
+    const [older, newer] = api.match('/api/geofences');
+    newer.flush([depot('Yard')]);
+    older.flush([depot('Depot')]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fleet.geofences().map((g) => g.name)).toEqual(['Yard']);
   });
 
   it('stops for good when the page closes', async () => {
