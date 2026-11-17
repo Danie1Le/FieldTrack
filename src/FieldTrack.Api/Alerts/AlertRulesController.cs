@@ -91,8 +91,8 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        // Ingest holds FOR KEY SHARE on the rules it evaluates until its batch commits, so this lock waits for a
-        // batch that may be raising an Alert for the rule, and the check below then sees that Alert.
+        // An ingest batch that wrote an Alert or rule state for the rule holds a key share lock on it (the foreign
+        // key) until it commits, so this lock waits for it and the check below then sees its Alert.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var rule = await db.AlertRules.FromSql($"SELECT * FROM alert_rules WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
         if (rule is null)
