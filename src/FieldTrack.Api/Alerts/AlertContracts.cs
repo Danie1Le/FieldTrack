@@ -14,7 +14,10 @@ namespace FieldTrack.Api.Alerts;
 /// <param name="Operator">Threshold rules: <c>GreaterThan</c> or <c>LessThan</c>.</param>
 /// <param name="Threshold">Threshold rules: the value the sensor must pass, in the sensor's unit.</param>
 /// <param name="Hysteresis">Threshold rules: how far back past the threshold the value must move to clear; 0 or more.</param>
-/// <param name="OfflineSeconds">Offline rules: how many seconds without a Reading raise the Alert; 1 or more.</param>
+/// <param name="OfflineSeconds">
+/// Offline rules: how many seconds without a Reading raise the Alert. Whenever sent it must be 1 or more, like every
+/// setting's range; other kinds then ignore it.
+/// </param>
 public sealed record AlertRuleRequest(
     [Required, MaxLength(200)] string Name,
     // Nullable so a missing value is refused instead of silently becoming the first enum value.

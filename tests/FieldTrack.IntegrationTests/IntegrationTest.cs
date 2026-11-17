@@ -153,6 +153,42 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     protected static async Task<JsonElement[]> ListAsync(HttpClient client, string path) =>
         (await client.GetFromJsonAsync<JsonElement[]>(path, CancellationToken)).ShouldNotBeNull();
 
+    /// <summary>The body of POST /alert-rules; nullable members so tests can leave each one out.</summary>
+#pragma warning disable IDE1006 // JSON property names
+    protected sealed record RuleRequest(
+        string name, string? kind, string? assetId, string? assetGroupId, string? severity, bool enabled,
+        string? sensor, string? @operator, object? threshold, double? hysteresis, object? offlineSeconds = null);
+#pragma warning restore IDE1006
+
+    /// <summary>A Threshold rule: engine temperature above 105, clearing below 100.</summary>
+    protected static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>
+        new("Engine overheat", "Threshold", assetId, assetGroupId, "Critical", true, "EngineTempC", "GreaterThan", 105, 5);
+
+    /// <summary>An Offline rule on <paramref name="assetId"/>: <paramref name="offlineSeconds"/> without a Reading.</summary>
+    protected static RuleRequest Silent(string assetId, int? offlineSeconds = 60) =>
+        new("Generator silent", "Offline", assetId, null, "Critical", true, null, null, null, null, offlineSeconds);
+
+    /// <summary>
+    /// Places an Alert directly, as ingest would write it: a Threshold Alert with a Reading, or with
+    /// <paramref name="offline"/> an Offline Alert, which has none. Resolved ones resolved as Cleared.
+    /// </summary>
+    protected async Task<Guid> InsertAlertAsync(string rule, string asset, string status = "Open", DateTimeOffset? raisedAt = null, bool offline = false)
+    {
+        var id = Guid.NewGuid();
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, """
+            INSERT INTO alerts (id, alert_rule_id, asset_id, reading_device_id, reading_boot, reading_sequence_number, severity, message,
+                                status, raised_at, created_at, resolved_at, resolve_reason, from_backlog)
+            SELECT @p0, @p1, @p2, r.device_id, r.boot, r.seq, 'Critical', r.message,
+                   @p3, @p4, now(), CASE WHEN @p3 = 'Resolved' THEN now() END, CASE WHEN @p3 = 'Resolved' THEN 'Cleared' END, false
+            FROM (SELECT gen_random_uuid() AS device_id, 1 AS boot, 7::bigint AS seq, 'Engine temp 108.4 °C, above 105 (clears below 100)' AS message
+                  WHERE NOT @p5
+                  UNION ALL
+                  SELECT NULL, NULL, NULL, 'No Reading received for 60 s' WHERE @p5) r
+            """, id, Guid.Parse(rule), Guid.Parse(asset), status, raisedAt ?? DateTimeOffset.UtcNow, offline);
+        return id;
+    }
+
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {

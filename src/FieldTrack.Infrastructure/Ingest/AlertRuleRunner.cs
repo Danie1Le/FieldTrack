@@ -106,14 +106,15 @@ public sealed class AlertRuleRunner
         List<Guid> raised = [];
         List<Guid> resolved = [];
         await using var writes = new NpgsqlBatch(transaction.Connection, transaction);
-        foreach (var asset in stored.GroupBy(reading => (reading.AssetId, reading.AssetGroupId)))
+        // One statement read every row, so an Asset's Readings agree on its group and attached Device.
+        foreach (var asset in stored.GroupBy(reading => (reading.AssetId, reading.AssetGroupId, reading.AttachedDeviceId)))
         {
-            var (assetId, assetGroupId) = asset.Key;
+            var (assetId, assetGroupId, attachedDeviceId) = asset.Key;
             foreach (var rule in rules.Where(rule => rule.Targets(assetId, assetGroupId)))
             {
                 var key = (rule.Id, assetId);
                 var state = _states.GetValueOrDefault(key);
-                var evaluation = RuleEvaluator.Evaluate(rule, assetId, state, asset.Select(reading => reading.Reading), _time);
+                var evaluation = RuleEvaluator.Evaluate(rule, assetId, attachedDeviceId, state, asset.Select(reading => reading.Reading), _time);
                 // Resolve before inserting: the unique index allows one Active Alert per rule and Asset.
                 if (evaluation.ResolveActiveAlertAt is { } resolveAt)
                 {

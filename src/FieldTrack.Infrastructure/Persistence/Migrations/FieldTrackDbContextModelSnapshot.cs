@@ -223,7 +223,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_alert_rules_kind", "kind IN ('Threshold', 'Offline')");
 
-                            t.HasCheckConstraint("ck_alert_rules_offline", "(kind = 'Offline') = (offline_seconds IS NOT NULL) AND offline_seconds > 0");
+                            t.HasCheckConstraint("ck_alert_rules_offline", "(kind = 'Offline') = (offline_seconds IS NOT NULL) AND (offline_seconds IS NULL OR offline_seconds > 0)");
 
                             t.HasCheckConstraint("ck_alert_rules_operator", "operator IN ('GreaterThan', 'LessThan')");
 

@@ -91,15 +91,18 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             return NotFound();
         }
 
-        // Ingest's sweep holds the Asset row (FOR KEY SHARE) while it raises an Offline Alert, so this sees that Alert.
-        if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken) || await db.Alerts.AnyAsync(alert => alert.AssetId == id, cancellationToken))
+        // History (GLOSSARY Archived) is Readings or Alerts: an Offline Alert needs no Reading. ADR 0005 sweep: ingest
+        // holds the Asset row (FOR KEY SHARE) while it raises an Offline Alert, so this lock waits and sees that Alert.
+        var hasHistory = await readingHistory.AssetHasReadingsAsync(id, cancellationToken)
+                         || await db.Alerts.AnyAsync(alert => alert.AssetId == id, cancellationToken);
+        if (hasHistory)
         {
             asset.Archived = true;
             await db.EndOpenAttachmentsAsync(attachment => attachment.AssetId == id, time.GetUtcNow(), cancellationToken);
         }
         else
         {
-            // No Readings means no history to keep, so its Attachments go with it (#25).
+            // No Readings or Alerts means no history to keep, so its Attachments go with it (#25).
             await db.Attachments.Where(attachment => attachment.AssetId == id).ExecuteDeleteAsync(cancellationToken);
             db.Assets.Remove(asset);
         }
