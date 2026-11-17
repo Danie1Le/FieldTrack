@@ -63,6 +63,15 @@ public sealed record AlertRuleResponse(
 /// <param name="RaisedAt">Device time of the Reading that raised it.</param>
 /// <param name="ResolvedAt">When it was Resolved, or null while Active.</param>
 /// <param name="ResolveReason">Why it was Resolved, or null while Active.</param>
+/// <param name="AcknowledgedBy">Email of the user who Acknowledged it, or null.</param>
+/// <param name="AcknowledgedAt">When it was Acknowledged, or null.</param>
+/// <param name="ResolvedBy">Email of the user who Resolved it by hand; null while Active and when the platform Resolved it.</param>
+/// <param name="Note">What the user who Resolved it by hand wrote, or null.</param>
+/// <param name="Latched">
+/// The latch (#10). On an Active Alert: its condition still holds, so Resolving it by hand latches the rule and the
+/// UI warns. On a Resolved one: a user Resolved it while the condition held, so the rule raised nothing new until the
+/// condition cleared and breached again.
+/// </param>
 /// <param name="CreatedAt">When the platform created it.</param>
 /// <param name="FromBacklog">True when one ingest batch raised and resolved it, so it was never Active.</param>
 public sealed record AlertResponse(
@@ -76,5 +85,14 @@ public sealed record AlertResponse(
     DateTimeOffset RaisedAt,
     DateTimeOffset? ResolvedAt,
     ResolveReason? ResolveReason,
+    string? AcknowledgedBy,
+    DateTimeOffset? AcknowledgedAt,
+    string? ResolvedBy,
+    string? Note,
+    bool Latched,
     DateTimeOffset CreatedAt,
     bool FromBacklog);
+
+/// <summary>How a user Resolves an Alert by hand.</summary>
+/// <param name="Note">Optional, for the audit trail, such as what was done about it.</param>
+public sealed record ResolveAlertRequest([MaxLength(Alert.MaxNoteLength)] string? Note);

@@ -171,7 +171,7 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
         await writer.WriteAsync(readings, [], CancellationToken);
     }
 
-    private static ReceivedReading Received(long seq, DateTimeOffset deviceTime, float engineTempC, string serialNumber = "TRK-007") =>
+    internal static ReceivedReading Received(long seq, DateTimeOffset deviceTime, float engineTempC, string serialNumber = "TRK-007") =>
         new(TelemetryPublisher.TopicOf(serialNumber), serialNumber, new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null),
             DateTimeOffset.UtcNow, [(byte)seq], Redelivered: false);
 
@@ -181,12 +181,12 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
     private static DateTimeOffset Millis(DateTimeOffset time) => DateTimeOffset.FromUnixTimeMilliseconds(time.ToUnixTimeMilliseconds());
 
 #pragma warning disable IDE1006 // JSON property names
-    private sealed record RuleRequest(
+    internal sealed record RuleRequest(
         string name, string kind, string? assetId, string? assetGroupId, string severity, bool enabled,
         string sensor, string @operator, double threshold, double hysteresis);
 #pragma warning restore IDE1006
 
-    private static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>
+    internal static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>
         new("Engine overheat", "Threshold", assetId, assetGroupId, "Critical", true, "EngineTempC", "GreaterThan", 105, 5);
 
     private static async Task<JsonElement[]> AlertsWhenAsync(HttpClient admin, Func<JsonElement[], bool> done)
@@ -196,7 +196,7 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
         return alerts;
     }
 
-    private static async Task<(string Device, string Asset)> AttachedDeviceAsync(HttpClient admin, string serialNumber = "TRK-007", string? assetGroupId = null)
+    internal static async Task<(string Device, string Asset)> AttachedDeviceAsync(HttpClient admin, string serialNumber = "TRK-007", string? assetGroupId = null)
     {
         var device = await CreateAsync(admin, "/devices", new { serialNumber });
         var asset = await CreateAsync(admin, "/assets", new { name = $"Asset of {serialNumber}", type = "Truck", assetGroupId });
