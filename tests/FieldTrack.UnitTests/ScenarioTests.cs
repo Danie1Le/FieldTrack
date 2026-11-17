@@ -91,6 +91,16 @@ public sealed class ScenarioTests : IDisposable
     }
 
     [Fact]
+    public void The_committed_demo_Scenario_fits_the_demo_fleet()
+    {
+        var fleet = FleetFile.Load(Path.Combine(AppContext.BaseDirectory, "fleets", "demo.json"));
+
+        var scenario = Scenario.Load(Path.Combine(AppContext.BaseDirectory, "fleets", "demo-scenario.json"), fleet);
+
+        fleet.Devices.Sum(device => scenario.InjectionsFor(device.Serial).Count).ShouldBeGreaterThan(3);
+    }
+
+    [Fact]
     public void A_Scenario_file_is_read_from_disk()
     {
         var path = Path.Combine(_directory, "scenario.json");
