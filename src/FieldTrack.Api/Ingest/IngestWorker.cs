@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
+using FieldTrack.Api.Live;
 using FieldTrack.Api.Messaging;
 using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Ingest;
@@ -19,7 +20,9 @@ namespace FieldTrack.Api.Ingest;
 /// A crash before that leaves the messages unacknowledged in the broker session, which redelivers them
 /// on the next connect; the Reading key table drops any copy already stored (ADR 0003). A message that cannot
 /// become a Reading is acknowledged the same way, stored as a Rejected message in its batch's transaction, and a
-/// redelivered copy of one already stored is dropped too. The worker is a single instance (spec #21).
+/// redelivered copy of one already stored is dropped too. After the PUBACKs, a separate push loop sends each
+/// committed batch's changes to the dashboards through <see cref="LivePush"/>, best effort (ADR 0005). The worker is
+/// a single instance (spec #21).
 /// </summary>
 public sealed partial class IngestWorker(
     IOptions<BrokerOptions> broker,
@@ -27,6 +30,7 @@ public sealed partial class IngestWorker(
     NpgsqlDataSource dataSource,
     TimeProvider time,
     IMeterFactory meters,
+    LivePush live,
     ILogger<IngestWorker> logger,
     IIngestCrashPoints? crashes = null) : BackgroundService
 {
@@ -82,8 +86,20 @@ public sealed partial class IngestWorker(
     private readonly Counter<long> _conflictingDuplicates = meters.Create(MeterName).CreateCounter<long>(
         ConflictingDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with a different content hash.");
 
+    /// <summary>How many committed batches may wait for the push loop before the oldest is dropped.</summary>
+    public const int PushBacklog = 64;
+
+    // #35: ingest never waits on a push. Batches queue here for the push loop; when it falls behind (a slow dashboard,
+    // a slow database), the oldest batch's changes are dropped, which ADR 0005 allows: dashboards catch up on reload.
+    private readonly Channel<WrittenBatch> _committed = Channel.CreateBounded<WrittenBatch>(
+        new BoundedChannelOptions(PushBacklog) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = true },
+        _ => LogPushDropped(logger));
+
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        Task.WhenAll(IngestAsync(stoppingToken), PushAsync(stoppingToken));
+
+    private async Task IngestAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -185,6 +201,12 @@ public sealed partial class IngestWorker(
                 {
                     await message.Args.AcknowledgeAsync(CancellationToken.None);
                 }
+
+                // Pushed only now, after commit (ADR 0005) and after the PUBACKs (#35), so neither waits on it.
+                if (written.AssetIds.Count > 0 || written.RaisedAlertIds.Count > 0 || written.ResolvedAlertIds.Count > 0)
+                {
+                    _committed.Writer.TryWrite(written);
+                }
             }
         }
         finally
@@ -195,6 +217,32 @@ public sealed partial class IngestWorker(
             {
                 await client.DisconnectAsync(cancellationToken: CancellationToken.None);
             }
+        }
+    }
+
+    /// <summary>
+    /// The push loop: sends the changes of committed batches to the dashboards, everything queued since the last push
+    /// coalesced into one, so a slow push costs pushes, never ingest. <see cref="LivePush"/> logs its own failures.
+    /// </summary>
+    private async Task PushAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            while (await _committed.Reader.WaitToReadAsync(stoppingToken))
+            {
+                HashSet<Guid> assetIds = [], raisedAlertIds = [], resolvedAlertIds = [];
+                while (_committed.Reader.TryRead(out var written))
+                {
+                    assetIds.UnionWith(written.AssetIds);
+                    raisedAlertIds.UnionWith(written.RaisedAlertIds);
+                    resolvedAlertIds.UnionWith(written.ResolvedAlertIds);
+                }
+
+                await live.PushAsync(assetIds, raisedAlertIds, resolvedAlertIds, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
         }
     }
 
@@ -284,6 +332,9 @@ public sealed partial class IngestWorker(
 
     [LoggerMessage(LogLevel.Error, "Ingest session failed; reconnecting in {RetryAfter}.")]
     private partial void LogSessionFailed(Exception exception, TimeSpan retryAfter);
+
+    [LoggerMessage(LogLevel.Warning, "Live push fell behind; dropped a committed batch's changes, dashboards catch up when they reload.")]
+    private static partial void LogPushDropped(ILogger logger);
 
     private sealed record ReceivedMessage(MqttApplicationMessageReceivedEventArgs Args, DateTimeOffset ReceivedTime);
 }
