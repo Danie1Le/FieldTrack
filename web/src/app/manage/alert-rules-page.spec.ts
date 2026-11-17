@@ -172,7 +172,7 @@ describe('AlertRulesPage', () => {
       { detail: 'The Alert Rule has raised Alerts; disable it instead.' },
       { status: 409, statusText: 'Conflict' },
     );
-    await view.settle();
+    await serve([overheat, leftYard, silent]);
     expect(view.text(view.root.querySelector('[role="alert"]'))).toBe('The Alert Rule has raised Alerts; disable it instead.');
   });
 });

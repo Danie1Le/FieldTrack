@@ -38,7 +38,7 @@ const numberOf = (value: FormDataEntryValue | null) => (value === null || value 
 })
 export class AlertRulesPage {
   private readonly http = inject(HttpClient);
-  protected readonly changes = new Changes();
+  protected readonly changes = new Changes(() => this.load());
   protected readonly kindLabels = kindLabels;
   protected readonly kinds = Object.keys(kindLabels) as Kind[];
   protected readonly sensorLabels = sensorLabels;
