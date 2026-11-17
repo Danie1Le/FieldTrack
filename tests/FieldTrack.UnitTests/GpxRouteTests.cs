@@ -64,6 +64,7 @@ public sealed class GpxRouteTests
     [InlineData("""<gpx><trk><trkseg><trkpt lat="1" lon="2"/><trkpt lat="95" lon="2"/></trkseg></trk></gpx>""", "lat and lon")]
     [InlineData("""<gpx><trk><trkseg><trkpt lat="1" lon="2"/><trkpt lon="2"/></trkseg></trk></gpx>""", "lat and lon")]
     [InlineData("not xml", "not valid XML")]
+    [InlineData("""<!DOCTYPE gpx [<!ENTITY a "1">]><gpx><trk><trkseg><trkpt lat="&a;" lon="2"/><trkpt lat="2" lon="2"/></trkseg></trk></gpx>""", "not valid XML")]
     public void A_route_that_cannot_be_followed_is_refused_with_the_reason(string gpx, string reason)
     {
         var exception = Should.Throw<SimulatorException>(() => GpxRoute.Parse(gpx, "bad.gpx"));
@@ -81,14 +82,17 @@ public sealed class GpxRouteTests
     }
 
     [Fact]
-    public void Every_committed_route_can_be_followed()
+    public void Every_committed_route_can_be_followed_and_is_a_closed_loop()
     {
         var routes = Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "fleets", "routes"), "*.gpx");
 
         routes.ShouldNotBeEmpty();
         foreach (var path in routes)
         {
-            GpxRoute.Load(path).LengthMeters.ShouldBeGreaterThan(500, path);
+            var route = GpxRoute.Load(path);
+            route.LengthMeters.ShouldBeGreaterThan(500, path);
+            // An open route makes its Device jump from the last point to the first on every lap.
+            Geo.Distance(route.PositionAt(0), route.PositionAt(route.LengthMeters - 0.001)).ShouldBeLessThan(50, path);
         }
     }
 }

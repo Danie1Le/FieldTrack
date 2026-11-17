@@ -15,10 +15,13 @@ internal static class BootState
     /// new counts. A Device not seen before gets Boot 1; Devices not in <paramref name="serials"/> keep their count.
     /// </summary>
     /// <exception cref="SimulatorException">
-    /// The file exists but cannot be read. It is not replaced: starting over from 0 would reuse identities.
+    /// The file exists but cannot be read (it is not replaced: starting over from 0 would reuse identities), or another
+    /// simulator is raising it at the same moment.
     /// </exception>
     public static IReadOnlyDictionary<string, int> Raise(string path, IEnumerable<string> serials)
     {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        using var exclusive = Lock(path);
         var state = Read(path);
         var raised = serials.ToDictionary(serial => serial, serial => state.GetValueOrDefault(serial) + 1);
         foreach (var (serial, boot) in raised)
@@ -43,16 +46,37 @@ internal static class BootState
         }
         catch (JsonException exception)
         {
-            throw new SimulatorException($"The state file {path} is unreadable ({exception.Message}). Fix or delete it; deleting restarts every Device's Boot at 1.", exception);
+            throw new SimulatorException(
+                $"The state file {path} is unreadable ({exception.Message}). Fix it, or delete it and reset the database too: "
+                + "deleting restarts every Device's Boot at 1, and Readings already stored under those Boots make the new ones duplicates.",
+                exception);
         }
     }
 
-    // Written to a temporary file first, so a crash mid-write cannot leave a truncated state file.
+    // Two simulators raising one file at once would both read Boot n and publish the same identities; the second one stops instead.
+    // The lock file stays behind: deleting it on close would let a third simulator lock a fresh file while a second holds the old one.
+    private static FileStream Lock(string path)
+    {
+        try
+        {
+            return new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException exception)
+        {
+            throw new SimulatorException($"Another simulator is raising the Boots in {path} right now; start this one again, or give it its own state file.", exception);
+        }
+    }
+
+    // Written to a temporary file and flushed to disk first, so neither a crash nor a power loss can leave a truncated state file.
     private static void Write(string path, Dictionary<string, int> boots)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(new StateFile(boots), _json));
+        using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write))
+        {
+            JsonSerializer.Serialize(file, new StateFile(boots), _json);
+            file.Flush(flushToDisk: true);
+        }
+
         File.Move(temporary, path, overwrite: true);
     }
 

@@ -69,6 +69,10 @@ public sealed class FleetFileTests
     [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck" }, { "serial": "A", "assetType": "Sensor" } ] }""", "appears twice")]
     [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "speedKph": 0 } ] }""", "speedKph")]
     [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "speedKph": 500 } ] }""", "speedKph")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "position": { "lat": 45.5 } } ] }""", "position")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetName": " ", "assetType": "Truck" } ] }""", "assetName")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetName": "", "assetType": "Truck" } ] }""", "assetName")]
+    [InlineData("""{ "devices": [ { "serial": "A", "assetType": "Truck", "assetName": "Haul" }, { "serial": "B", "assetType": "Truck", "assetName": "Haul" } ] }""", "Devices A and B both use Asset 'Haul'")]
     [InlineData("""{ "devices": [ null ] }""", "no serial")]
     [InlineData("not json", "not valid JSON")]
     public void A_fleet_file_that_breaks_a_rule_is_refused_with_the_reason(string json, string reason)
@@ -76,5 +80,13 @@ public sealed class FleetFileTests
         var exception = Should.Throw<SimulatorException>(() => FleetFile.Parse(json, Base));
 
         exception.Message.ShouldContain(reason);
+    }
+
+    [Fact]
+    public void An_Asset_name_longer_than_the_API_allows_is_refused()
+    {
+        var json = $$"""{ "devices": [ { "serial": "A", "assetName": "{{new string('x', 201)}}", "assetType": "Truck" } ] }""";
+
+        Should.Throw<SimulatorException>(() => FleetFile.Parse(json, Base)).Message.ShouldContain("assetName");
     }
 }
