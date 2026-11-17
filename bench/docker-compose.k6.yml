@@ -6,5 +6,5 @@ services:
   api:
     environment:
       Auth__SignInPermitsPerMinute: "1000"
-      FIELDTRACK_DEMO_EMAIL: ${FIELDTRACK_DEMO_EMAIL:-}
-      FIELDTRACK_DEMO_PASSWORD: ${FIELDTRACK_DEMO_PASSWORD:-}
+      FIELDTRACK_DEMO_EMAIL: ${FIELDTRACK_DEMO_EMAIL:?set the Demo Operator email}
+      FIELDTRACK_DEMO_PASSWORD: ${FIELDTRACK_DEMO_PASSWORD:?set the Demo Operator password}

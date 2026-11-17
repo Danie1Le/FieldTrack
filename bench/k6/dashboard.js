@@ -4,10 +4,17 @@
 // Every virtual user signs in through the real endpoint (ADR 0002) as the Demo Operator, then browses with its own
 // access token. Credentials come from the environment, never from this file.
 //
-// Run from the official image on the compose network (NOTES.md, "API load test"):
-//   docker run --rm --network <project>_default -v "$PWD/bench:/bench" -w /bench/k6 \
-//     -e K6_BASE_URL=http://api:8080 -e K6_EMAIL=... -e K6_PASSWORD=... \
-//     grafana/k6:1.4.2 run dashboard.js
+// Run (from the repo root, Git Bash needs MSYS_NO_PATHCONV=1):
+//   1. Stack: FIELDTRACK_DEMO_EMAIL/PASSWORD, FIELDTRACK_ADMIN_*, FIELDTRACK_AUTH_SIGNING_KEY in the environment, then
+//        docker compose -f docker-compose.yml -f bench/docker-compose.k6.yml up --build -d postgres mosquitto api
+//   2. Replace the first Admin's temporary password (POST /auth/change-password), then seed the fleet:
+//        dotnet run --project src/FieldTrack.Simulator -- seed --fleet src/FieldTrack.Simulator/fleets/demo.json
+//   3. Keep the simulator publishing for the whole test:
+//        dotnet run --project src/FieldTrack.Simulator -- run --fleet src/FieldTrack.Simulator/fleets/demo.json --rate 20
+//   4. k6 from the official image on the compose network:
+//        docker run --rm --network <project>_default -v "$PWD/bench:/bench" -w /bench/k6 \
+//          -e K6_BASE_URL=http://api:8080 -e K6_EMAIL=... -e K6_PASSWORD=... grafana/k6:1.4.2 run dashboard.js
+// Optional: K6_VUS (50), K6_DURATION (5m), K6_SKIP_HISTORY=1, K6_RESULTS_DIR (/bench/results, where the summary JSON goes).
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
@@ -15,7 +22,7 @@ const BASE = __ENV.K6_BASE_URL || 'http://localhost:8080';
 const DAY_MS = 24 * 60 * 60 * 1000;
 // Diagnostic only: K6_SKIP_HISTORY=1 drops the 24 h history requests to show what the other endpoints do alone.
 // Its thresholds then have no samples, so a run with it is never the pass/fail result.
-const SKIP_HISTORY = Boolean(__ENV.K6_SKIP_HISTORY);
+const SKIP_HISTORY = __ENV.K6_SKIP_HISTORY === '1';
 
 export const options = {
   scenarios: {
@@ -44,6 +51,9 @@ function signIn() {
 
 export function setup() {
   const token = signIn();
+  if (token === null) {
+    throw new Error('Demo Operator sign-in failed: check K6_EMAIL and K6_PASSWORD.');
+  }
   const live = http.get(`${BASE}/assets/live`, { headers: { Authorization: `Bearer ${token}` } });
   const ids = live.json().map((asset) => asset.id);
   if (ids.length === 0) {
@@ -80,7 +90,7 @@ export default function (data) {
 }
 
 export function handleSummary(data) {
-  const out = `/bench/results/k6-dashboard-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  const out = `${__ENV.K6_RESULTS_DIR || '/bench/results'}/k6-dashboard-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   const { http_reqs, http_req_duration, http_req_failed, checks } = data.metrics;
   const text = [
     `requests ${http_reqs.values.count}  p95 ${http_req_duration.values['p(95)'].toFixed(1)} ms`,
