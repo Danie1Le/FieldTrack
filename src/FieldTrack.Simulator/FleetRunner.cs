@@ -100,12 +100,27 @@ internal static class FleetRunner
     {
         // One connection per Device, as on the real fleet.
         await using var publisher = new ReconnectingPublisher(options.BrokerHost, options.BrokerPort, device.Serial, log);
-        await Task.Delay(pacing?.StartOffset(index) ?? TimeSpan.Zero, time, stop);
-        using var timer = pacing is { } paced ? new PeriodicTimer(paced.Interval, time) : null;
+        if (pacing is { } paced)
+        {
+            // A Reading is stepped at the time it was due, so a late wake-up changes when the Device publishes, not when it took the Reading.
+            await foreach (var due in paced.DueTimesAsync(index, time, startTimestamp, stop))
+            {
+                await StepAndPublishAsync(due);
+            }
+
+            return;
+        }
+
+        // Maximum mode has no schedule: the next Reading follows as soon as the last one was acknowledged.
         do
         {
             // Device time is run start + elapsed, the clock of the Manifest's windows, so a wall-clock step cannot split them.
-            var elapsed = time.GetElapsedTime(startTimestamp);
+            await StepAndPublishAsync(time.GetElapsedTime(startTimestamp));
+        }
+        while (!stop.IsCancellationRequested);
+
+        async Task StepAndPublishAsync(TimeSpan elapsed)
+        {
             device.Step(startedAt + elapsed, elapsed);
             while (device.NextToSend is { } payload)
             {
@@ -113,7 +128,5 @@ internal static class FleetRunner
                 device.Published();
             }
         }
-        // Maximum mode has no timer: the next Reading follows as soon as the last one was acknowledged.
-        while (timer is null ? !stop.IsCancellationRequested : await timer.WaitForNextTickAsync(stop));
     }
 }
