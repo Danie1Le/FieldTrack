@@ -46,6 +46,12 @@ internal static class SimulatorCli
               A run refuses a working tree with uncommitted changes unless --allow-dirty true is given.
               Start the stack with bench/docker-compose.bench.yml. Exit code 3 means the run finished but missed its bar.
 
+          bench seed-history --fleet <file> --compose-project <name> [--routes <dir>] [--days 30] [--interval 480]
+              Seeds the fleet (fleets/bench.json has 200 Devices), then COPYs a Reading every --interval seconds (default 480) per Device
+              for --days (default 30) ending now, along the GPX routes in --routes (default src/FieldTrack.Simulator/fleets/routes),
+              bypassing MQTT: about 1.08 million Readings for the query benchmarks (#46). It also builds readings_unpartitioned, a copy with
+              the same indexes. Needs an empty database (docker compose down -v).
+
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
         FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password.
         """;

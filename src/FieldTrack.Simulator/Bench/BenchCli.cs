@@ -18,12 +18,11 @@ internal static class BenchCli
     /// <exception cref="SimulatorException">The benchmark is unknown, an option is unusable, or the stack is not ready.</exception>
     public static async Task<bool> RunAsync(string kind, Options options, CancellationToken cancellationToken)
     {
-        if (kind is not ("throughput" or "flood" or "crash" or "duplicates"))
+        if (kind is not ("throughput" or "flood" or "crash" or "duplicates" or "seed-history"))
         {
-            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash or duplicates.");
+            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates or seed-history.");
         }
 
-        var fleet = FleetFile.Load(options.Require("fleet"));
         var rate = options.GetNumber("rate") ?? (kind == "crash" ? 500 : 2000);
         var duration = TimeSpan.FromSeconds(options.GetNumber("duration") ?? (kind == "flood" ? 60 : 600));
         var brokerHost = options.Get("mqtt-host") ?? "localhost";
@@ -38,12 +37,18 @@ internal static class BenchCli
             throw new SimulatorException("The working tree has uncommitted changes, so the git SHA in the result would not identify the code measured. Commit them, or pass --allow-dirty true for a trial run.");
         }
 
-        await SeedAsync(fleet, options, cancellationToken);
         await using var dataSource = NpgsqlDataSource.Create(database);
         var target = new BenchTarget(
             brokerHost, brokerPort, new BenchDatabase(dataSource), options.Get("state") ?? "simulator-state.json",
             options.Get("out") ?? Path.Combine("bench", "results"), composeProject);
 
+        if (kind == "seed-history")
+        {
+            return Report(await SeedHistoryAsync(options, target, cancellationToken));
+        }
+
+        var fleet = FleetFile.Load(options.Require("fleet"));
+        await SeedAsync(fleet, options, cancellationToken);
         Console.WriteLine($"Benchmark {kind}: {fleet.Devices.Count} Devices{(kind == "duplicates" ? string.Empty : $", {duration.TotalSeconds:0} s")}.");
         var outcome = kind switch
         {
@@ -52,6 +57,27 @@ internal static class BenchCli
             "crash" => await CrashAsync(fleet, target, options, rate, duration, cancellationToken),
             _ => await ThroughputBench.SustainedAsync(fleet, target, rate, duration, Console.Out, cancellationToken),
         };
+        return Report(outcome);
+    }
+
+    // 30 days of Device time, 200 Devices, a Reading every 8 minutes: 1.08 million Readings.
+    private static async Task<BenchOutcome> SeedHistoryAsync(Options options, BenchTarget target, CancellationToken cancellationToken)
+    {
+        var fleet = FleetFile.Load(options.Require("fleet"));
+        var routeFiles = Directory.GetFiles(options.Get("routes") ?? Path.Combine("src", "FieldTrack.Simulator", "fleets", "routes"), "*.gpx").Order().ToList();
+        if (routeFiles.Count == 0)
+        {
+            throw new SimulatorException("No GPX routes found: point --routes at a directory of .gpx files.");
+        }
+
+        await SeedAsync(fleet, options, cancellationToken);
+        return await HistorySeeder.SeedAsync(
+            fleet, [.. routeFiles.Select(GpxRoute.Load)], target, DateTimeOffset.UtcNow, TimeSpan.FromDays(options.GetNumber("days") ?? 30),
+            TimeSpan.FromSeconds(options.GetNumber("interval") ?? 480), Console.Out, cancellationToken);
+    }
+
+    private static bool Report(BenchOutcome outcome)
+    {
         Console.WriteLine(outcome.Json);
         Console.WriteLine($"{(outcome.Pass ? "PASS" : "FAIL")}: {Path.GetFullPath(outcome.Path)}");
         return outcome.Pass;

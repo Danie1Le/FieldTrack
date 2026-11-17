@@ -30,6 +30,9 @@ internal sealed record ManifestScore(long Published, long Missing, long Stored, 
 /// </summary>
 internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
 {
+    /// <summary>The connections behind this view, for the query benchmarks (#46) that seed and time their own SQL.</summary>
+    public NpgsqlDataSource DataSource => dataSource;
+
     /// <summary>How far either side of a run Device time may fall and still count as the run's.</summary>
     public static readonly TimeSpan Padding = TimeSpan.FromSeconds(1);
 
