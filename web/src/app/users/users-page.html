@@ -34,7 +34,7 @@
             </tr>
           } @empty {
             <tr>
-              <td colspan="5" class="muted">{{ users() ? 'No users yet.' : 'Loading…' }}</td>
+              <td colspan="5" class="muted">{{ users() ? 'No users yet.' : problems().length ? '' : 'Loading…' }}</td>
             </tr>
           }
         </tbody>

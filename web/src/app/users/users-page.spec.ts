@@ -66,6 +66,15 @@ describe('UsersPage', () => {
     page().querySelector('form')!.dispatchEvent(new Event('submit'));
   }
 
+  it('says the users could not be loaded, not "Loading…", when the read fails', async () => {
+    fixture = TestBed.createComponent(UsersPage);
+    await vi.waitFor(() => api.expectOne({ method: 'GET', url: '/api/users' }).flush(null, { status: 500, statusText: 'Server Error' }));
+    await settle();
+
+    expect(text(page().querySelector('[role="alert"]'))).toContain('could not be loaded');
+    expect(text(page().querySelector('tbody'))).toBe('');
+  });
+
   it('lists every user with their role and whether their password is still temporary', () => {
     expect(rows()).toEqual([
       ['Ada', 'ada@example.com', 'Admin', ''],
