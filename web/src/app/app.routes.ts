@@ -12,6 +12,13 @@ export const routes: Routes = [
     title: 'Control room · FieldTrack',
   },
   {
+    path: 'assets/:id',
+    // Lazy: Chart.js loads only when an Asset is opened (initial bundle budget).
+    loadComponent: () => import('./asset-detail/asset-detail').then((m) => m.AssetDetail),
+    canActivate: [signedInGuard],
+    title: 'Asset · FieldTrack',
+  },
+  {
     path: 'geofences',
     // Leaflet-Geoman patches the global `L` that Leaflet sets as it loads, and equips only maps created after that:
     // load Leaflet, then Geoman, then the page. Lazy, so only Admins on this page download the drawing toolbar.

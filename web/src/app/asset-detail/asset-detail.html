@@ -1,0 +1,97 @@
+<header class="bar">
+  <a class="btn" routerLink="/">← Control room</a>
+  <h1>{{ asset()?.name ?? 'Asset' }}</h1>
+  @if (asset(); as asset) {
+    <span class="muted">{{ asset.type }}</span>
+    @if (asset.archived) {
+      <span class="tag">Archived</span>
+    }
+  }
+  <form class="range" (submit)="$event.preventDefault(); show(from.value, to.value)">
+    <label for="from">From</label>
+    <input id="from" #from type="datetime-local" required [value]="localInput(this.from())" />
+    <label for="to">To</label>
+    <input id="to" #to type="datetime-local" required [value]="localInput(this.to())" />
+    <button type="submit" class="btn">Show</button>
+  </form>
+</header>
+
+@if (problem(); as problem) {
+  <p class="problem" role="alert">{{ problem }}</p>
+}
+
+<div class="detail">
+  <section class="panel replay" aria-label="Route replay">
+    @if (readings().length > 0) {
+      <app-replay-map class="map" [readings]="readings()" [position]="position()" />
+      <div class="controls">
+        <button type="button" class="btn btn-solid" (click)="toggle()">{{ playing() ? 'Pause' : 'Play' }}</button>
+        <input
+          #slider
+          type="range"
+          aria-label="Replay position"
+          step="1000"
+          [min]="start()"
+          [max]="end()"
+          [value]="time()"
+          (input)="scrub(+slider.value)"
+        />
+        <select aria-label="Replay speed" (change)="speed.set(+$any($event.target).value)">
+          @for (s of speeds; track s) {
+            <option [value]="s" [selected]="s === speed()">{{ s }}×</option>
+          }
+        </select>
+        @if (current(); as reading) {
+          <span class="mono now">
+            {{ reading.deviceTime | date: 'd MMM HH:mm:ss' }}
+            · {{ reading.engineTempC == null ? '—' : (reading.engineTempC | number: '1.1-1') }} °C
+            · fuel {{ reading.fuelPct == null ? '—' : (reading.fuelPct | number: '1.0-0') }} %
+          </span>
+        }
+      </div>
+    } @else {
+      <p class="muted empty">{{ loading() ? 'Loading…' : 'No Readings in this range.' }}</p>
+    }
+  </section>
+
+  <section class="panel side" aria-label="Sensors and Alerts">
+    @if (readings().length > 0) {
+      <figure>
+        <figcaption>
+          Engine temp °C
+          @for (line of temperatureLines(); track $index) {
+            <span class="muted">· {{ line.name }}: {{ line.operator === 'GreaterThan' ? 'above' : 'below' }} {{ line.threshold }}, clears
+              {{ line.operator === 'GreaterThan' ? 'below' : 'above' }} {{ line.clear }}</span>
+          }
+        </figcaption>
+        <app-sensor-chart sensor="EngineTempC" [readings]="readings()" [lines]="temperatureLines()" [cursor]="time()" />
+      </figure>
+      <figure>
+        <figcaption>Fuel %</figcaption>
+        <app-sensor-chart sensor="FuelPct" [readings]="readings()" [cursor]="time()" />
+      </figure>
+    }
+
+    <h2>Alerts on this Asset</h2>
+    <ul class="alerts">
+      @for (alert of alerts(); track alert.id) {
+        <li class="sev-{{ alert.severity }}">
+          <div class="line">
+            <span>{{ alert.message }}</span>
+            <span class="status">
+              {{ alert.status }}{{ alert.resolveReason ? ' · ' + reasonLabels[alert.resolveReason] : '' }}
+            </span>
+          </div>
+          <div class="muted mono">
+            raised {{ alert.raisedAt | date: 'd MMM HH:mm:ss' }}
+            @if (alert.resolvedAt) {
+              · resolved {{ alert.resolvedAt | date: 'd MMM HH:mm:ss' }}
+            }
+          </div>
+        </li>
+      } @empty {
+        <li class="muted">No Alerts.</li>
+      }
+    </ul>
+  </section>
+</div>

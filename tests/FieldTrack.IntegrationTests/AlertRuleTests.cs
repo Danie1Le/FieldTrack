@@ -260,4 +260,25 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
         one.GetProperty("fromBacklog").GetBoolean().ShouldBeFalse();
         unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
+
+    [Fact]
+    public async Task Alerts_are_listed_for_one_Asset()
+    {
+        using var admin = await AdminClientAsync();
+        var truck = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        var excavator = await CreateAsync(admin, "/assets", new { name = "Excavator 2", type = "Excavator" });
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(assetId: truck));
+        var otherRule = await CreateAsync(admin, "/alert-rules", Overheat(assetId: excavator));
+        var resolved = await InsertAlertAsync(rule, truck, "Resolved", raisedAt: DateTimeOffset.UtcNow.AddHours(-2));
+        var open = await InsertAlertAsync(rule, truck, "Open", raisedAt: DateTimeOffset.UtcNow.AddHours(-1));
+        await InsertAlertAsync(otherRule, excavator, "Open");
+
+        var all = await ListAsync(admin, $"/alerts?assetId={truck}");
+        var active = await ListAsync(admin, $"/alerts?assetId={truck}&active=true");
+        var unknown = await ListAsync(admin, $"/alerts?assetId={Guid.NewGuid()}");
+
+        all.Select(alert => alert.GetProperty("id").GetGuid()).ShouldBe([open, resolved]);
+        active.Select(alert => alert.GetProperty("id").GetGuid()).ShouldBe([open]);
+        unknown.ShouldBeEmpty();
+    }
 }

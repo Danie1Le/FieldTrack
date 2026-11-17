@@ -58,7 +58,7 @@
                 (keydown.space)="$event.preventDefault(); selectRow(asset)"
               >
                 <td class="name">
-                  <strong>{{ asset.name }}</strong> <span class="muted">{{ groupName(asset) }}</span>
+                  <a [routerLink]="['/assets', asset.id]"><strong>{{ asset.name }}</strong></a> <span class="muted">{{ groupName(asset) }}</span>
                 </td>
                 <td class="muted">{{ lastSeen(asset) }}</td>
                 <td class="num mono" [class.hot]="breached.has('EngineTempC')">
