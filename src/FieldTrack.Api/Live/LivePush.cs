@@ -9,8 +9,10 @@ namespace FieldTrack.Api.Live;
 
 /// <summary>
 /// Sends committed changes to every dashboard on <see cref="LiveHub"/>. Call it only after the change commits
-/// (ADR 0005: push after commit), so a dashboard never shows what a rollback undid. It reads the current rows
-/// itself, so a push always matches what <c>GET /assets/live</c> and <c>GET /alerts</c> return. It never throws: a
+/// (ADR 0005: push after commit), so a dashboard never shows what a rollback undid. The pushes that carry rows
+/// read the current rows themselves, so they always match what <c>GET /assets/live</c> and <c>GET /alerts</c>
+/// return; <see cref="GeofencesChangedAsync"/> carries nothing and only tells dashboards to reload
+/// <c>GET /geofences</c>. It never throws: a
 /// failed push is logged and only delays the dashboard until it reloads (ADR 0005), so callers whose change already
 /// committed never fail because of it.
 /// </summary>
