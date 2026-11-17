@@ -480,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Simulator run output (state file with each Device Boot counter, run Manifests)
+simulator-state.json
+manifest-*.json

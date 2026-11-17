@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace FieldTrack.Simulator;
 
 /// <summary>The <c>--name value</c> pairs after a command, with the environment as a fallback for secrets.</summary>
@@ -27,6 +29,13 @@ internal sealed class Options
 
     /// <summary>The value of <paramref name="name"/>, or null when it was not given.</summary>
     public string? Get(string name) => _values.GetValueOrDefault(name);
+
+    /// <summary>The numeric value of <paramref name="name"/>, or null when it was not given.</summary>
+    /// <exception cref="SimulatorException">The value is not a number.</exception>
+    public double? GetNumber(string name) =>
+        Get(name) is not { } text ? null
+        : double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number
+        : throw new SimulatorException($"--{name} must be a number, got '{text}'.");
 
     /// <summary>The value of <paramref name="name"/>.</summary>
     /// <exception cref="SimulatorException">The option was not given.</exception>
