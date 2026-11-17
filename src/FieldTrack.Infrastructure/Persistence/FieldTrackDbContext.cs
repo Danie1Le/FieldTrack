@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
+using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Identity;
@@ -32,6 +33,15 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
     /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
     public DbSet<Attachment> Attachments => Set<Attachment>();
+
+    /// <summary>Alert Rules, enabled and disabled.</summary>
+    public DbSet<AlertRule> AlertRules => Set<AlertRule>();
+
+    /// <summary>Alerts, Active and Resolved.</summary>
+    public DbSet<Alert> Alerts => Set<Alert>();
+
+    /// <summary>Rule state per Alert Rule and Asset, which ingest keeps (ADR 0005).</summary>
+    public DbSet<AlertRuleState> AlertRuleStates => Set<AlertRuleState>();
 
     /// <summary>Telemetry messages ingest refused, with their reasons.</summary>
     public DbSet<RejectedMessage> RejectedMessages => Set<RejectedMessage>();
@@ -133,6 +143,81 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // ingest's lookup of the Attachment covering a Reading's Device time.
             attachment.HasIndex(a => new { a.DeviceId, a.AttachedAt });
             attachment.HasIndex(a => new { a.AssetId, a.AttachedAt });
+        });
+
+        // Enums are stored by name with checks, like Asset Type, because ingest reads rules and writes Alerts with
+        // hand-written SQL (ADR 0005). Enum names in SQL come from nameof, so a rename reaches every check.
+        builder.Entity<AlertRule>(rule =>
+        {
+            rule.Property(r => r.Kind).HasConversion<string>();
+            rule.Property(r => r.Severity).HasConversion<string>();
+            // Plain column names; ThresholdSettings refuses bad values in C#, the checks below in SQL.
+            rule.ComplexProperty(r => r.ThresholdSettings, settings =>
+            {
+                settings.Property(s => s.Sensor).HasColumnName("sensor").HasConversion<string>();
+                settings.Property(s => s.Operator).HasColumnName("operator").HasConversion<string>();
+                settings.Property(s => s.Threshold).HasColumnName("threshold");
+                settings.Property(s => s.Hysteresis).HasColumnName("hysteresis");
+            });
+            rule.ToTable(table =>
+            {
+                table.HasCheckConstraint("ck_alert_rules_kind", NamesCheck<AlertRuleKind>("kind"));
+                table.HasCheckConstraint("ck_alert_rules_severity", NamesCheck<Severity>("severity"));
+                table.HasCheckConstraint("ck_alert_rules_sensor", NamesCheck<Sensor>("sensor"));
+                table.HasCheckConstraint("ck_alert_rules_operator", NamesCheck<ThresholdOperator>("operator"));
+                table.HasCheckConstraint("ck_alert_rules_target", "(asset_id IS NULL) <> (asset_group_id IS NULL)");
+                // double precision holds NaN and ±Infinity; Postgres sorts NaN above Infinity, so the upper bound on
+                // hysteresis refuses both.
+                table.HasCheckConstraint("ck_alert_rules_threshold",
+                    $"kind <> '{nameof(AlertRuleKind.Threshold)}' OR (sensor IS NOT NULL AND operator IS NOT NULL"
+                    + " AND threshold IS NOT NULL AND threshold NOT IN ('NaN', 'Infinity', '-Infinity')"
+                    + " AND hysteresis IS NOT NULL AND hysteresis >= 0 AND hysteresis < 'Infinity')");
+            });
+            // A rule on one Asset goes with it when the Asset is deleted outright, which happens only while it has no
+            // Readings and so no Alerts; an Asset with history is Archived instead (#24).
+            rule.HasOne<Asset>().WithMany().HasForeignKey(r => r.AssetId).OnDelete(DeleteBehavior.Cascade);
+            rule.HasOne<AssetGroup>().WithMany().HasForeignKey(r => r.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Alert>(alert =>
+        {
+            alert.ComplexProperty(a => a.Reading);
+            alert.Property(a => a.Severity).HasConversion<string>();
+            alert.Property(a => a.Status).HasConversion<string>();
+            alert.Property(a => a.ResolveReason).HasConversion<string>();
+            alert.ToTable(table =>
+            {
+                table.HasCheckConstraint("ck_alerts_severity", NamesCheck<Severity>("severity"));
+                table.HasCheckConstraint("ck_alerts_status", NamesCheck<AlertStatus>("status"));
+                table.HasCheckConstraint("ck_alerts_resolve_reason", NamesCheck<ResolveReason>("resolve_reason"));
+                // Ingest and manual resolve write these with SQL: a Resolved Alert has its time and reason, an Active
+                // one neither, and only a breach that cleared inside its batch is from backlog.
+                table.HasCheckConstraint("ck_alerts_resolution",
+                    $"(status = '{nameof(AlertStatus.Resolved)}') = (resolved_at IS NOT NULL)"
+                    + " AND (resolved_at IS NULL) = (resolve_reason IS NULL)"
+                    + $" AND (NOT from_backlog OR resolve_reason IS NOT DISTINCT FROM '{nameof(ResolveReason.Cleared)}')");
+            });
+            // Alerts are history: their rule and Asset are kept (disabled, Archived), never deleted under them.
+            alert.HasOne<AlertRule>().WithMany().HasForeignKey(a => a.AlertRuleId).OnDelete(DeleteBehavior.Restrict);
+            alert.HasOne<Asset>().WithMany().HasForeignKey(a => a.AssetId).OnDelete(DeleteBehavior.Restrict);
+            // At most one Active Alert per Alert Rule and Asset (#10, ADR 0005).
+            alert.HasIndex(a => new { a.AlertRuleId, a.AssetId })
+                .IsUnique()
+                .HasFilter($"status <> '{nameof(AlertStatus.Resolved)}'")
+                .HasDatabaseName("ix_alerts_alert_rule_id_asset_id_active");
+            // The partial index above cannot serve a rule's whole history: the delete check and its foreign key use this.
+            alert.HasIndex(a => a.AlertRuleId);
+            // The Alert feed, newest first, and an Asset's Alert history.
+            alert.HasIndex(a => a.RaisedAt);
+            alert.HasIndex(a => new { a.AssetId, a.RaisedAt });
+        });
+
+        // Rule state is not history: it goes with its rule or Asset.
+        builder.Entity<AlertRuleState>(state =>
+        {
+            state.HasKey(s => new { s.AlertRuleId, s.AssetId });
+            state.HasOne<AlertRule>().WithMany().HasForeignKey(s => s.AlertRuleId).OnDelete(DeleteBehavior.Cascade);
+            state.HasOne<Asset>().WithMany().HasForeignKey(s => s.AssetId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<RejectedMessage>(rejected =>

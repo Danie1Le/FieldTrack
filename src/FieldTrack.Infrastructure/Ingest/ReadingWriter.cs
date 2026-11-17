@@ -1,3 +1,4 @@
+using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Telemetry;
 using Npgsql;
 using NpgsqlTypes;
@@ -6,8 +7,9 @@ namespace FieldTrack.Infrastructure.Ingest;
 
 /// <summary>
 /// Stores batches of Readings exactly once (ADR 0003, ADR 0004), and the batch's Rejected messages with them, so
-/// stored plus rejected always equals published (spec #21). It holds one connection, with its stage table, for the
-/// life of an ingest session; dispose it and open a new one after any failure.
+/// stored plus rejected always equals published (spec #21), and evaluates Alert Rules against the new Readings in
+/// the same transaction (ADR 0005). It holds one connection, with its stage table and rule state, for the life of
+/// an ingest session; dispose it and open a new one after any failure.
 /// </summary>
 public sealed class ReadingWriter : IAsyncDisposable
 {
@@ -109,6 +111,7 @@ public sealed class ReadingWriter : IAsyncDisposable
                    s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
             FROM staged s
             JOIN new_keys USING (device_id, boot, seq)
+            RETURNING device_id, boot, seq, asset_id
         ), rejected AS (
             INSERT INTO rejected_messages (topic, topic_clipped, payload, reason, received_time)
             SELECT left(r.topic, {RejectedMessage.MaxTopicLength}), char_length(r.topic) > {RejectedMessage.MaxTopicLength},
@@ -135,23 +138,51 @@ public sealed class ReadingWriter : IAsyncDisposable
             SET last_received_at = r.received_time
             FROM (SELECT device_id, max(received_time) AS received_time FROM staged GROUP BY device_id) r
             WHERE d.id = r.device_id
+        ), evaluated AS (
+            -- The new Readings of Assets in use, for rule evaluation (ADR 0005). A backlog Reading stamped with an
+            -- Asset Archived since is stored but evaluates no rule.
+            SELECT s.ordinal, s.device_id, r.asset_id, a.asset_group_id, s.boot, s.seq, s.device_time, s.lat, s.lon,
+                   s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
+            FROM stored r
+            JOIN staged s USING (device_id, boot, seq)
+            JOIN assets a ON a.id = r.asset_id
+            WHERE NOT a.archived
         )
-        SELECT reason FROM rejected
+        -- Both kinds of row from one statement (FULL JOIN ON false is a typed UNION): each stored Rejected message's
+        -- reason with null Reading columns, then each Reading to evaluate, in receive order, with a null reason.
+        SELECT j.reason, e.*
+        FROM rejected j FULL JOIN evaluated e ON false
+        ORDER BY e.ordinal NULLS FIRST
         """;
 
+    // One row of _store's final SELECT; edit the two together. Column 1 is the ordinal, used only for order.
+    private static AssetReading ReadEvaluated(NpgsqlDataReader reader)
+    {
+        var reading = new Reading(
+            reader.GetInt32(5), reader.GetInt64(6), reader.GetFieldValue<DateTimeOffset>(7), reader.GetDouble(8), reader.GetDouble(9),
+            Sensor(10), Sensor(11), Sensor(12), Sensor(13), Sensor(14));
+        return new AssetReading(reader.GetGuid(3), reader.IsDBNull(4) ? null : reader.GetGuid(4), new StoredReading(reader.GetGuid(2), reading));
+
+        float? Sensor(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
+    }
+
     private readonly NpgsqlConnection _connection;
+    private readonly AlertRuleRunner _rules;
 
-    private ReadingWriter(NpgsqlConnection connection) => _connection = connection;
+    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules) => (_connection, _rules) = (connection, rules);
 
-    /// <summary>Opens a connection from <paramref name="dataSource"/> and prepares its stage table.</summary>
-    public static async Task<ReadingWriter> OpenAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
+    /// <summary>
+    /// Opens a connection from <paramref name="dataSource"/>, prepares its stage table and loads the rule state.
+    /// <paramref name="time"/> stamps the Alerts it creates.
+    /// </summary>
+    public static async Task<ReadingWriter> OpenAsync(NpgsqlDataSource dataSource, TimeProvider time, CancellationToken cancellationToken)
     {
         var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         try
         {
             await using var command = new NpgsqlCommand(CreateStage, connection);
             await command.ExecuteNonQueryAsync(cancellationToken);
-            return new ReadingWriter(connection);
+            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken));
         }
         catch
         {
@@ -163,7 +194,8 @@ public sealed class ReadingWriter : IAsyncDisposable
     /// <summary>
     /// Stores <paramref name="readings"/> (in receive order) and <paramref name="rejected"/> in one transaction, and
     /// stamps each Reading with its Asset; Readings already stored are skipped, Readings from unknown or Archived
-    /// Devices become Rejected messages, and redelivered Rejected messages already stored are skipped. Returns once
+    /// Devices become Rejected messages, and redelivered Rejected messages already stored are skipped. The Alert Rules
+    /// are evaluated against the newly stored Readings, and their Alerts and rule state commit with them. Returns once
     /// committed, with the reason of every Rejected message stored.
     /// </summary>
     public async Task<IReadOnlyList<RejectReason>> WriteAsync(
@@ -219,17 +251,32 @@ public sealed class ReadingWriter : IAsyncDisposable
             await locks.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        // Store, then the enabled rules in the same round trip (ADR 0005).
         var reasons = new List<RejectReason>();
-        await using (var store = new NpgsqlCommand(_store, _connection, transaction))
+        var stored = new List<AssetReading>();
+        List<AlertRule> rules;
+        await using (var store = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(_store), new(AlertRuleRunner.LoadRules) } })
         await using (var reader = await store.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                reasons.Add(Enum.Parse<RejectReason>(reader.GetString(0)));
+                if (reader.IsDBNull(0))
+                {
+                    stored.Add(ReadEvaluated(reader));
+                }
+                else
+                {
+                    reasons.Add(Enum.Parse<RejectReason>(reader.GetString(0)));
+                }
             }
+
+            await reader.NextResultAsync(cancellationToken);
+            rules = await AlertRuleRunner.ReadRulesAsync(reader, cancellationToken);
         }
 
+        var ruleStates = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        _rules.Keep(ruleStates);
         return reasons;
     }
 

@@ -157,6 +157,7 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     {
         new { name = "Haul truck 7", type = "Crane" },
         new { name = "Haul truck 7", type = 1 },
+        new { name = "Haul truck 7", type = "Truck, Excavator" },
         new { name = "Haul truck 7" },
         new { name = " ", type = "Truck" },
         new { name = "Haul truck 7", type = "Truck", assetGroupId = Guid.NewGuid() },
