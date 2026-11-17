@@ -101,6 +101,110 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     }
 
     [Fact]
+    public async Task A_breach_published_over_MQTT_is_pushed_after_commit_with_the_Asset_and_its_clear_as_an_Alert_update()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        await using var live = await LiveClient.ConnectAsync(api, Token(admin));
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        var t = DateTimeOffset.UtcNow.AddSeconds(1);
+
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, t, lat: 51.6, more: ",\"engineTempC\":110"));
+        var raised = await live.NextAsync(LiveHub.AlertRaised);
+        var breached = (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem();
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 1, t.AddSeconds(1), more: ",\"engineTempC\":90"));
+        var resolved = await live.NextAsync(LiveHub.AlertUpdated);
+        var cleared = (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem();
+
+        raised.GetProperty("assetId").GetString().ShouldBe(asset);
+        raised.GetProperty("status").GetString().ShouldBe("Open");
+        breached.GetProperty("id").GetString().ShouldBe(asset);
+        breached.GetProperty("status").GetString().ShouldBe("Alerting");
+        breached.GetProperty("latest").GetProperty("latitude").GetDouble().ShouldBe(51.6, tolerance: 1e-9);
+        resolved.GetProperty("id").GetString().ShouldBe(raised.GetProperty("id").GetString());
+        resolved.GetProperty("status").GetString().ShouldBe("Resolved");
+        resolved.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
+        cleared.GetProperty("status").GetString().ShouldBe("Normal");
+        cleared.GetProperty("latest").GetProperty("sequenceNumber").GetInt64().ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Ingest_keeps_committing_while_the_push_stalls_or_throws(bool stalled)
+    {
+        var hub = stalled ? BrokenLiveHub.Stalled() : BrokenLiveHub.Throwing();
+        await using var api = await StartIngestAsync(services: services => services.AddSingleton<HubLifetimeManager<LiveHub>>(hub));
+        using var admin = await AdminClientAsync(api);
+        var (device, _) = await AttachedDeviceAsync(admin, "TRK-011");
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        await using var database = await OpenDatabaseAsync();
+        var t = DateTimeOffset.UtcNow.AddSeconds(1);
+
+        await publisher.PublishAsync("TRK-011", TelemetryPublisher.Payload(1, 0, t));
+        await hub.Sent.WaitAsync(TimeSpan.FromSeconds(15), CancellationToken);
+        // A later batch, published while the first push is still stuck or after it failed.
+        await publisher.PublishAsync("TRK-011", TelemetryPublisher.Payload(1, 1, t.AddSeconds(1)));
+
+        (await EventuallyAsync(() => SqlAsync(database, "SELECT count(*) FROM readings WHERE device_id = @p0", Guid.Parse(device)), n => n is 2L))
+            .ShouldBe(2L);
+    }
+
+    [Fact]
+    public async Task A_redelivered_batch_changes_nothing_to_push()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-012");
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var t = DateTimeOffset.UtcNow.AddSeconds(1);
+        ReceivedReading[] batch = [Received("TRK-012", 0, t, 110), Received("TRK-012", 1, t.AddSeconds(1), 90)];
+        (await WriteAsync(batch)).AssetIds.ShouldBe([Guid.Parse(asset)]);
+
+        var redelivered = await WriteAsync([.. batch.Select(reading => reading with { Redelivered = true })]);
+
+        redelivered.AssetIds.ShouldBeEmpty();
+        redelivered.RaisedAlertIds.ShouldBeEmpty();
+        redelivered.ResolvedAlertIds.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task An_Alert_raised_and_Resolved_in_one_batch_is_reported_raised_once_and_not_resolved()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-013");
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var t = DateTimeOffset.UtcNow.AddSeconds(1);
+
+        var written = await WriteAsync(Received("TRK-013", 0, t, 110), Received("TRK-013", 1, t.AddSeconds(1), 90));
+
+        var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
+        alert.GetProperty("status").GetString().ShouldBe("Resolved");
+        written.RaisedAlertIds.ShouldBe([alert.GetProperty("id").GetGuid()]);
+        written.ResolvedAlertIds.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task An_Asset_quiet_for_days_still_shows_its_latest_Reading()
+    {
+        var time = new AdjustableTimeProvider();
+        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(time)));
+        using var admin = await AdminClientAsync(api);
+        // Attached three days ago, so a Reading from two days ago is stamped with the Asset.
+        time.Offset = TimeSpan.FromDays(-3);
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-014");
+        var t = DateTimeOffset.UtcNow.AddDays(-2);
+        (await WriteAsync(Received("TRK-014", 0, t.AddSeconds(-1), 80), Received("TRK-014", 1, t, 85))).AssetIds.ShouldBe([Guid.Parse(asset)]);
+        time.Offset = TimeSpan.Zero;
+
+        var live = (await ListAsync(admin, "/assets/live")).Single(a => a.GetProperty("id").GetString() == asset);
+
+        live.GetProperty("latest").GetProperty("sequenceNumber").GetInt64().ShouldBe(1);
+    }
+
+    [Fact]
     public async Task An_Alert_raised_and_Resolved_in_one_commit_goes_as_updated_not_raised()
     {
         using var admin = await AdminClientAsync();
@@ -153,10 +257,10 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
 
     private static string Token(HttpClient client) => client.DefaultRequestHeaders.Authorization!.Parameter!;
 
-    private async Task WriteAsync(params ReceivedReading[] readings)
+    private async Task<WrittenBatch> WriteAsync(params ReceivedReading[] readings)
     {
         await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
-        await writer.WriteAsync(readings, [], CancellationToken);
+        return await writer.WriteAsync(readings, [], CancellationToken);
     }
 
     // Device time must come after the Attachment's server-time start for the Reading to be stamped with the Asset.

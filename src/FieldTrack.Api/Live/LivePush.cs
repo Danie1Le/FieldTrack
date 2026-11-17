@@ -36,17 +36,21 @@ public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFact
             await using var scope = scopes.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>();
             List<Guid> alertIds = [.. raisedAlertIds, .. updatedAlertIds];
-            var alerts = await AlertsController.Responses(db, db.Alerts
-                    .Where(alert => alertIds.Contains(alert.Id))
-                    .OrderBy(alert => alert.CreatedAt))
-                .ToListAsync(cancellationToken);
-            var assets = await LiveAssets.ListAsync(db, [.. assetIds.Union(alerts.Select(alert => alert.AssetId))], time.GetUtcNow(), cancellationToken);
+            var alerts = alertIds.Count == 0
+                ? []
+                : await AlertsController.Responses(db, db.Alerts
+                        .Where(alert => alertIds.Contains(alert.Id))
+                        .OrderBy(alert => alert.CreatedAt))
+                    .ToListAsync(cancellationToken);
 
+            // Alerts first, so the Asset read adds nothing to their latency.
             foreach (var alert in alerts)
             {
                 var name = raisedAlertIds.Contains(alert.Id) && alert.Status != AlertStatus.Resolved ? LiveHub.AlertRaised : LiveHub.AlertUpdated;
                 await hub.Clients.All.SendAsync(name, alert, cancellationToken);
             }
+
+            var assets = await LiveAssets.ListAsync(db, [.. assetIds.Union(alerts.Select(alert => alert.AssetId))], time.GetUtcNow(), cancellationToken);
 
             if (assets.Count > 0)
             {
