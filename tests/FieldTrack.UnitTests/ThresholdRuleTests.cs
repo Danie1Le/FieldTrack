@@ -316,7 +316,7 @@ public sealed class ThresholdRuleTests
     }
 
     private static RuleEvaluation Evaluate(AlertRule rule, RuleState? state, params StoredReading[] readings) =>
-        RuleEvaluator.Evaluate(rule, _asset, state, readings, new FixedTime(_now));
+        RuleEvaluator.Evaluate(rule, _asset, attachedDeviceId: null, state, readings, new FixedTime(_now));
 
     private static AlertRule Rule(ThresholdSettings? settings) => new()
     {

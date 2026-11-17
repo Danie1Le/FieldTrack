@@ -155,6 +155,17 @@ public sealed class OfflineRuleTests
     }
 
     [Fact]
+    public void A_former_Devices_late_backlog_leaves_the_rule_breached_because_the_attached_Device_is_still_silent()
+    {
+        var breached = new RuleState(true, null);
+
+        var evaluation = Evaluate(breached, Reading(1, 8, device: Guid.NewGuid()));
+
+        evaluation.ResolveActiveAlertAt.ShouldBeNull();
+        evaluation.State.ShouldBe(breached);
+    }
+
+    [Fact]
     public void Readings_change_nothing_while_the_rule_is_clear_so_no_state_is_written_per_batch()
     {
         var clear = new RuleState(false, null);
@@ -173,8 +184,8 @@ public sealed class OfflineRuleTests
     private RuleEvaluation Sweep(RuleState? state, SweepTick tick) => RuleEvaluator.Sweep(_silent, _asset, state, tick, _time);
 
     private RuleEvaluation Evaluate(RuleState? state, params StoredReading[] readings) =>
-        RuleEvaluator.Evaluate(_silent, _asset, state, readings, _time);
+        RuleEvaluator.Evaluate(_silent, _asset, _device, state, readings, _time);
 
-    private static StoredReading Reading(int boot, long sequenceNumber) =>
-        new(_device, new Reading(boot, sequenceNumber, _lastReceivedAt, 51.5, -0.12, null, null, null, null, null));
+    private static StoredReading Reading(int boot, long sequenceNumber, Guid? device = null) =>
+        new(device ?? _device, new Reading(boot, sequenceNumber, _lastReceivedAt, 51.5, -0.12, null, null, null, null, null));
 }

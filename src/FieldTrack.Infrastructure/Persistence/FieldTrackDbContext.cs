@@ -173,9 +173,10 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                     $"kind <> '{nameof(AlertRuleKind.Threshold)}' OR (sensor IS NOT NULL AND operator IS NOT NULL"
                     + " AND threshold IS NOT NULL AND threshold NOT IN ('NaN', 'Infinity', '-Infinity')"
                     + " AND hysteresis IS NOT NULL AND hysteresis >= 0 AND hysteresis < 'Infinity')");
-                // An Offline rule waits at least one 1 s sweep; only Offline rules have seconds.
+                // Only Offline rules have seconds, and they wait at least one 1 s sweep. The NULL case is spelled out
+                // rather than left to a CHECK passing on NULL.
                 table.HasCheckConstraint("ck_alert_rules_offline",
-                    $"(kind = '{nameof(AlertRuleKind.Offline)}') = (offline_seconds IS NOT NULL) AND offline_seconds > 0");
+                    $"(kind = '{nameof(AlertRuleKind.Offline)}') = (offline_seconds IS NOT NULL) AND (offline_seconds IS NULL OR offline_seconds > 0)");
             });
             // A rule on one Asset goes with it when the Asset is deleted outright, which happens only while it has no
             // Readings and so no Alerts; an Asset with history is Archived instead (#24).

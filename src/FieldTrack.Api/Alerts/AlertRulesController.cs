@@ -136,6 +136,13 @@ public sealed class AlertRulesController(FieldTrackDbContext db) : ControllerBas
             ModelState.AddModelError(nameof(AlertRuleRequest.Threshold), "A Threshold rule needs sensor, operator, threshold and hysteresis.");
         }
 
+        // shortcut: the request has no offlineSeconds yet, so an Offline rule would fail ck_alert_rules_offline; #33
+        // part 2 adds the setting and replaces this refusal with its check.
+        if (request.Kind == AlertRuleKind.Offline)
+        {
+            ModelState.AddModelError(nameof(AlertRuleRequest.Kind), "Offline rules cannot be created yet.");
+        }
+
         // The JSON options read "NaN" and "Infinity" from strings; such a threshold would never breach.
         if (request.Threshold is { } threshold && !double.IsFinite(threshold))
         {

@@ -8,8 +8,9 @@ namespace FieldTrack.Domain.Alerts;
 /// The rules engine (ADR 0005): given an Alert Rule, one Asset's rule state and that Asset's newly stored
 /// Readings, works out the new rule state and the Alerts to raise and resolve. No I/O, so ingest can run it
 /// inside the batch transaction and tests can drive it directly. It takes a whole batch rather than one Reading so
-/// that a backlog's breach can be raised and resolved together; every rule kind goes through this one entry point,
-/// and Offline rules also through <see cref="Sweep"/>, since silence has no Reading to evaluate.
+/// that a backlog's breach can be raised and resolved together. It has two entry points, one per trigger:
+/// <see cref="Evaluate"/> for a batch's Readings, which every rule kind goes through, and <see cref="Sweep"/> for the
+/// sweep tick, which only Offline rules use, since silence has no Reading to evaluate (ADR 0005).
 /// </summary>
 public static class RuleEvaluator
 {
@@ -19,16 +20,22 @@ public static class RuleEvaluator
     /// </summary>
     /// <param name="rule">An enabled rule that targets the Asset.</param>
     /// <param name="assetId">The Asset the Readings are stamped with.</param>
+    /// <param name="attachedDeviceId">
+    /// The Device attached to the Asset now, or null if none. Only its Readings end an Offline rule's silence: a former
+    /// Device's late backlog says nothing about the Device the sweep watches.
+    /// </param>
     /// <param name="state">The rule state for this rule and Asset, or null before its first evaluation.</param>
     /// <param name="readings">The Readings, in receive order.</param>
     /// <param name="time">The platform clock, for <see cref="Alert.CreatedAt"/>.</param>
-    public static RuleEvaluation Evaluate(AlertRule rule, Guid assetId, RuleState? state, IEnumerable<StoredReading> readings, TimeProvider time)
+    public static RuleEvaluation Evaluate(
+        AlertRule rule, Guid assetId, Guid? attachedDeviceId, RuleState? state, IEnumerable<StoredReading> readings, TimeProvider time)
     {
         if (rule.Kind == AlertRuleKind.Offline)
         {
-            // Spec #21: any stored Reading ends the silence, a straggler or late backlog included, so Offline rules
-            // keep no order. Resolved at platform time, like the sweep that raised it; a Device time could predate it.
-            return state is { Breached: true } && readings.Any()
+            // Spec #21: any stored Reading from the Device ends the silence, a straggler or late backlog included, so
+            // Offline rules keep no order. Resolved at platform time, like the sweep that raised it; a Device time could
+            // predate it.
+            return state is { Breached: true } && readings.Any(reading => reading.DeviceId == attachedDeviceId)
                 ? new RuleEvaluation(state with { Breached = false }, time.GetUtcNow(), [])
                 : new RuleEvaluation(state, null, []);
         }
