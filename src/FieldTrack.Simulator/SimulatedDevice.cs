@@ -24,6 +24,7 @@ internal sealed class SimulatedDevice
     private readonly Queue<byte[]> _outbox = new();
     private readonly List<PublishedRange> _earlierBoots = [];
     private bool _poweredOff;
+    private bool _hasCoverage = true;
     private TimeSpan _lastStep;
     private long _captured;
     private double _fuelDrained;
@@ -97,13 +98,14 @@ internal sealed class SimulatedDevice
         }
 
         _outbox.Enqueue(Build(now, elapsed));
+        _hasCoverage = _injections.Active(InjectionLane.Connection, elapsed) is not { Kind: InjectionKind.CoverageGap };
     }
 
     /// <summary>
     /// The payload to send next, or null when nothing waits. Until <see cref="Published"/> every call returns the same bytes,
     /// so a retry sends the Reading again and ingest sees an identical duplicate, not a conflicting one (ADR 0001, ADR 0003).
     /// </summary>
-    public byte[]? NextToSend => _outbox.TryPeek(out var payload) ? payload : null;
+    public byte[]? NextToSend => _hasCoverage && _outbox.TryPeek(out var payload) ? payload : null;
 
     /// <summary>Records that the broker acknowledged the Reading <see cref="NextToSend"/> returned.</summary>
     public void Published()
@@ -163,11 +165,19 @@ internal sealed class SimulatedDevice
         return NormalEngineTempC + ((overheat.Amount - NormalEngineTempC) * level);
     }
 
+    // A clock fault shifts the Device's own time, never the moment the broker receives the Reading.
+    private TimeSpan ClockError(TimeSpan elapsed) => _injections.Active(InjectionLane.Clock, elapsed) switch
+    {
+        { Kind: InjectionKind.ClockDrift } drift => TimeSpan.FromSeconds(drift.Amount / 1_000_000 * (elapsed - drift.Start).TotalSeconds),
+        { } step => TimeSpan.FromSeconds(step.Amount),
+        _ => TimeSpan.Zero,
+    };
+
     private byte[] Build(DateTimeOffset now, TimeSpan elapsed)
     {
         var motion = _motion.At(elapsed);
         var message = new Message(
-            Boot, _captured++, now.ToUnixTimeMilliseconds(), Math.Round(motion.Position.Lat, 6), Math.Round(motion.Position.Lon, 6),
+            Boot, _captured++, (now + ClockError(elapsed)).ToUnixTimeMilliseconds(), Math.Round(motion.Position.Lat, 6), Math.Round(motion.Position.Lon, 6),
             Value(Sensor.SpeedKph, motion.SpeedKph),
             Value(Sensor.EngineTempC, EngineTempC(elapsed)),
             Value(Sensor.FuelPct, FuelPct(elapsed)),

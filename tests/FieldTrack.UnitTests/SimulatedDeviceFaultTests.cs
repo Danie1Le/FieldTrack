@@ -57,6 +57,71 @@ public sealed class SimulatedDeviceFaultTests
         device.Ranges.ShouldBe([new PublishedRange(1, 0, 0), new PublishedRange(2, 0, 0)]);
     }
 
+    [Theory]
+    [InlineData("ClockOffset", 99, 0)]
+    [InlineData("ClockOffset", 100, -30)]
+    [InlineData("ClockOffset", 199, -30)]
+    [InlineData("ClockOffset", 200, 0)]
+    [InlineData("ClockDrift", 100, 0)]
+    [InlineData("ClockDrift", 150, 50)]
+    [InlineData("ClockDrift", 199, 99)]
+    [InlineData("ClockDrift", 200, 0)]
+    [InlineData("ClockJump", 99, 0)]
+    [InlineData("ClockJump", 100, 600)]
+    [InlineData("ClockJump", 100000, 600)]
+    public void A_clock_fault_moves_the_Device_time_off_the_real_time_only_while_it_lasts(string kind, double seconds, double errorSeconds)
+    {
+        // Offset -30 s; drift 1,000,000 ppm (one second gained per second); jump 600 s that never ends.
+        var amount = kind switch { "ClockOffset" => -30, "ClockDrift" => 1_000_000, _ => 600 };
+        var end = kind == "ClockJump" ? TimeSpan.MaxValue : TimeSpan.FromSeconds(200);
+        var device = Device([new Injection(Enum.Parse<InjectionKind>(kind), TimeSpan.FromSeconds(100), end, amount)], Sensor.FuelPct);
+
+        var deviceTime = Tick(device, seconds).GetProperty("ts").GetInt64();
+
+        deviceTime.ShouldBe(Now.AddSeconds(seconds + errorSeconds).ToUnixTimeMilliseconds());
+    }
+
+    [Fact]
+    public void A_Coverage_gap_keeps_the_Readings_and_sends_them_late_in_order_in_the_same_Boot()
+    {
+        var device = Device([Window(InjectionKind.CoverageGap, 100, 200)], Sensor.FuelPct);
+        Tick(device, 50).GetProperty("seq").GetInt64().ShouldBe(0);
+
+        foreach (var seconds in new[] { 100, 150 })
+        {
+            device.Step(Now.AddSeconds(seconds), TimeSpan.FromSeconds(seconds));
+            device.NextToSend.ShouldBeNull($"{seconds} s: no coverage, so the Reading stays on the Device");
+        }
+
+        device.Step(Now.AddSeconds(200), TimeSpan.FromSeconds(200));
+        var late = new List<JsonElement>();
+        while (device.NextToSend is { } payload)
+        {
+            late.Add(JsonDocument.Parse(payload).RootElement);
+            device.Published();
+        }
+
+        late.Select(reading => reading.GetProperty("seq").GetInt64()).ShouldBe([1, 2, 3]);
+        late.Select(reading => reading.GetProperty("boot").GetInt32()).ShouldAllBe(boot => boot == 1);
+        long[] capturedAt = [Now.AddSeconds(100).ToUnixTimeMilliseconds(), Now.AddSeconds(150).ToUnixTimeMilliseconds(), Now.AddSeconds(200).ToUnixTimeMilliseconds()];
+        late.Select(reading => reading.GetProperty("ts").GetInt64()).ShouldBe(capturedAt);
+        device.Ranges.ShouldBe([new PublishedRange(1, 0, 3)]);
+    }
+
+    [Fact]
+    public void A_Power_off_in_the_middle_of_a_Coverage_gap_loses_what_was_kept()
+    {
+        var device = Device([Window(InjectionKind.CoverageGap, 100, 150), Window(InjectionKind.PowerOff, 150, 200)], Sensor.FuelPct);
+        Tick(device, 50);
+        device.Step(Now.AddSeconds(120), TimeSpan.FromSeconds(120));
+
+        device.Step(Now.AddSeconds(160), TimeSpan.FromSeconds(160));
+        var back = Tick(device, 200);
+
+        device.Ranges.ShouldBe([new PublishedRange(1, 0, 0), new PublishedRange(2, 0, 0)]);
+        back.GetProperty("seq").GetInt64().ShouldBe(0);
+    }
+
     [Fact]
     public void A_Power_off_between_two_ticks_still_starts_a_new_Boot_taken_from_the_Boot_counter()
     {
