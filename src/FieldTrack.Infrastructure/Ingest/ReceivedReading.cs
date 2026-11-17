@@ -8,4 +8,5 @@ namespace FieldTrack.Infrastructure.Ingest;
 /// <param name="Reading">The parsed payload.</param>
 /// <param name="ReceivedTime">When the platform received the message.</param>
 /// <param name="Payload">The raw payload: hashed to tell identical from conflicting duplicates (ADR 0003), and kept if rejected.</param>
-public sealed record ReceivedReading(string Topic, string SerialNumber, Reading Reading, DateTimeOffset ReceivedTime, byte[] Payload);
+/// <param name="Redelivered">Whether the broker marked the message as sent before (MQTT DUP).</param>
+public sealed record ReceivedReading(string Topic, string SerialNumber, Reading Reading, DateTimeOffset ReceivedTime, byte[] Payload, bool Redelivered);

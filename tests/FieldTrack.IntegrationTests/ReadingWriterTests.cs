@@ -20,12 +20,31 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
         var now = DateTimeOffset.UtcNow;
 
         await WriteAsync(
-            new ReceivedReading(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 49f, null, null), now, [1]),
-            new ReceivedReading(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 9f, null, null), now, [2]));
+            new ReceivedReading(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 49f, null, null), now, [1], false),
+            new ReceivedReading(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, 1, now, 51.5, -0.12, null, null, 9f, null, null), now, [2], false));
 
         await using var database = await OpenDatabaseAsync();
         (await SqlAsync(database, "SELECT count(*) FROM readings WHERE device_id = @p0", device)).ShouldBe(1L);
         (await SqlAsync(database, "SELECT fuel_pct FROM readings WHERE device_id = @p0", device)).ShouldBe(49f);
+    }
+
+    [Fact]
+    public async Task A_redelivered_Rejected_message_already_stored_is_skipped_but_a_fresh_copy_is_stored()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var badJson = new ReceivedRejectedMessage(TelemetryPublisher.TopicOf("TRK-007"), [0x7b], RejectReason.BadJson, now, false);
+        var unknown = new ReceivedReading(
+            TelemetryPublisher.TopicOf("GHOST-1"), "GHOST-1", new Reading(1, 0, now, 51.5, -0.12, null, null, null, null, null), now, [0x7d], false);
+        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), CancellationToken);
+
+        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Count.ShouldBe(2);
+        // The broker's redelivery (DUP) of both, after the batch committed.
+        (await writer.WriteAsync([unknown with { Redelivered = true }], [badJson with { Redelivered = true }], CancellationToken)).ShouldBeEmpty();
+        // Published again by the Device: a new message, so a new Rejected message.
+        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Count.ShouldBe(2);
+
+        await using var database = await OpenDatabaseAsync();
+        (await SqlAsync(database, "SELECT count(*) FROM rejected_messages")).ShouldBe(4L);
     }
 
     [Fact]
@@ -62,7 +81,7 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
     }
 
     private static ReceivedReading Received(long seq, DateTimeOffset deviceTime) =>
-        new(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, seq, deviceTime, 51.5, -0.12, null, null, null, null, null), DateTimeOffset.UtcNow, [0]);
+        new(TelemetryPublisher.TopicOf("TRK-007"), "TRK-007", new Reading(1, seq, deviceTime, 51.5, -0.12, null, null, null, null, null), DateTimeOffset.UtcNow, [0], false);
 
     private async Task WriteAsync(params ReceivedReading[] readings)
     {
