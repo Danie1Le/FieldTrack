@@ -1,0 +1,116 @@
+@if (changes.problems().length) {
+  <ul class="problems" role="alert">
+    @for (problem of changes.problems(); track $index) {
+      <li>{{ problem }}</li>
+    }
+  </ul>
+}
+
+<div class="sections">
+  <section class="panel" aria-label="Devices">
+    <header>
+      <h2>Devices</h2>
+      <button type="button" class="btn" (click)="cancel(); registering.set(true)">Register Device</button>
+    </header>
+
+    @if (registering()) {
+      <form (submit)="$event.preventDefault(); register($any($event.target))">
+        <h3>Register Device</h3>
+        <label>
+          Serial number
+          <input name="serialNumber" required maxlength="64" pattern="[A-Za-z0-9._\-]+" />
+        </label>
+        <span class="muted">Letters, digits, '.', '_' and '-': it becomes part of the Device's telemetry topic.</span>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-solid" [disabled]="changes.busy()">Save</button>
+          <button type="button" class="btn" (click)="cancel()">Cancel</button>
+        </div>
+      </form>
+    }
+
+    @for (session of attaching.sessions(); track session.id) {
+      @let device = session.item;
+      <form (submit)="$event.preventDefault(); attach($any($event.target))">
+        <h3>Attach {{ device.serialNumber }}</h3>
+        @if (freeAssets().length) {
+          <label>
+            Asset
+            <select name="assetId">
+              @for (asset of freeAssets(); track asset.id) {
+                <option [value]="asset.id">{{ asset.name }}</option>
+              }
+            </select>
+          </label>
+        } @else {
+          <span class="muted">Every Asset in use already has a Device. Detach one first.</span>
+        }
+        <div class="form-actions">
+          <button type="submit" class="btn btn-solid" [disabled]="changes.busy() || !freeAssets().length">Save</button>
+          <button type="button" class="btn" (click)="cancel()">Cancel</button>
+        </div>
+      </form>
+    }
+
+    <table>
+      <thead>
+        <tr><th>Serial number</th><th>Asset</th><th>Last received</th><th><span class="sr-only">Actions</span></th></tr>
+      </thead>
+      <tbody>
+        @for (device of devices(); track device.id) {
+          @let attachment = openAttachment(device);
+          <tr>
+            <td class="mono">{{ device.serialNumber }}</td>
+            <td [class.muted]="!attachment">{{ attachment ? assetName(attachment.assetId) : 'Not attached' }}</td>
+            <td class="muted">{{ device.lastReceivedAt ? (device.lastReceivedAt | date: 'yyyy-MM-dd HH:mm:ss') : '—' }}</td>
+            <td class="actions">
+              @if (attachment) {
+                <app-confirm-action
+                  label="Detach"
+                  [question]="'Detach ' + device.serialNumber + ' from ' + assetName(attachment.assetId) + '? The Asset\'s Active Alerts resolve as Device detached.'"
+                  [disabled]="changes.busy()"
+                  (confirmed)="detach(attachment)"
+                />
+              } @else {
+                <button type="button" class="btn" (click)="cancel(); attaching.open(device)">Attach</button>
+              }
+              <button type="button" class="btn" (click)="history.set(device)">History</button>
+              <app-confirm-action
+                label="Delete"
+                [question]="'Delete ' + device.serialNumber + '? With Readings it is Archived instead: kept with its history and detached, so its Asset\'s Active Alerts resolve as Device detached, and its telemetry is rejected from then on.'"
+                [disabled]="changes.busy()"
+                (confirmed)="remove(device)"
+              />
+            </td>
+          </tr>
+        } @empty {
+          <tr><td colspan="4" class="muted">{{ devices() ? 'No Devices yet.' : 'Loading…' }}</td></tr>
+        }
+      </tbody>
+    </table>
+  </section>
+
+  @if (history(); as device) {
+    <section class="panel" aria-label="Attachment history">
+      <header>
+        <h2>Attachment history of <span class="mono">{{ device.serialNumber }}</span></h2>
+        <button type="button" class="btn" (click)="history.set(null)">Close</button>
+      </header>
+      <table>
+        <thead>
+          <tr><th>Asset</th><th>Attached</th><th>Detached</th></tr>
+        </thead>
+        <tbody>
+          @for (attachment of historyOf(device); track attachment.id) {
+            <tr>
+              <td>{{ assetName(attachment.assetId) }}</td>
+              <td class="muted">{{ attachment.attachedAt | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
+              <td class="muted">{{ attachment.detachedAt ? (attachment.detachedAt | date: 'yyyy-MM-dd HH:mm:ss') : 'Still attached' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="3" class="muted">Never attached.</td></tr>
+          }
+        </tbody>
+      </table>
+    </section>
+  }
+</div>

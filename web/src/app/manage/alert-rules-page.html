@@ -1,0 +1,150 @@
+@if (changes.problems().length) {
+  <ul class="problems" role="alert">
+    @for (problem of changes.problems(); track $index) {
+      <li>{{ problem }}</li>
+    }
+  </ul>
+}
+
+<section class="panel" aria-label="Alert Rules">
+  <header>
+    <h2>Alert Rules</h2>
+    <button type="button" class="btn" (click)="open('new')">New Alert Rule</button>
+  </header>
+
+  @for (session of form.sessions(); track session.id) {
+    @let rule = session.item === 'new' ? null : session.item;
+    <form (submit)="$event.preventDefault(); save($any($event.target))">
+      <h3>{{ rule ? 'Edit ' + rule.name : 'New Alert Rule' }}</h3>
+      <label>Name <input name="name" required maxlength="200" [value]="rule?.name ?? ''" /></label>
+      <label>
+        Kind
+        <select name="kind" (change)="kind.set($any($event.target).value)">
+          @for (k of kinds; track k) {
+            <option [value]="k" [selected]="k === kind()">{{ kindLabels[k] }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        Covers
+        <select name="target" required>
+          <optgroup label="One Asset">
+            @for (asset of targetAssets(rule); track asset.id) {
+              <option [value]="'asset:' + asset.id" [selected]="asset.id === rule?.assetId">
+                {{ asset.name }}{{ asset.archived ? ' (Archived)' : '' }}
+              </option>
+            }
+          </optgroup>
+          <optgroup label="Every Asset in an Asset Group">
+            @for (group of groups(); track group.id) {
+              <option [value]="'group:' + group.id" [selected]="group.id === rule?.assetGroupId">{{ group.name }}</option>
+            }
+          </optgroup>
+        </select>
+      </label>
+      <label>
+        Severity
+        <select name="severity">
+          <option value="Warning" [selected]="rule?.severity !== 'Critical'">Warning</option>
+          <option value="Critical" [selected]="rule?.severity === 'Critical'">Critical</option>
+        </select>
+      </label>
+
+      @switch (kind()) {
+        @case ('Threshold') {
+          <label>
+            Sensor
+            <select name="sensor">
+              @for (sensor of sensors; track sensor) {
+                <option [value]="sensor" [selected]="sensor === rule?.sensor">{{ sensorLabels[sensor] }}</option>
+              }
+            </select>
+          </label>
+          <label>
+            Breaches when the value is
+            <select name="operator">
+              <option value="GreaterThan" [selected]="rule?.operator !== 'LessThan'">Above the threshold (&gt;)</option>
+              <option value="LessThan" [selected]="rule?.operator === 'LessThan'">Below the threshold (&lt;)</option>
+            </select>
+          </label>
+          <label>Threshold <input name="threshold" type="number" step="any" required [value]="rule?.threshold ?? ''" /></label>
+          <label>
+            Hysteresis
+            <input name="hysteresis" type="number" step="any" min="0" required [value]="rule?.hysteresis ?? 0" />
+          </label>
+          <span class="muted">The Alert resolves itself once the value is back past the threshold by the Hysteresis.</span>
+        }
+        @case ('Offline') {
+          <label>
+            Seconds without a Reading
+            <input name="offlineSeconds" type="number" step="1" min="1" required [value]="rule?.offlineSeconds ?? 120" />
+          </label>
+        }
+        @default {
+          <label>
+            Geofence
+            <select name="geofenceId" required>
+              @for (geofence of geofences(); track geofence.id) {
+                <option [value]="geofence.id" [selected]="geofence.id === rule?.geofenceId">{{ geofence.name }}</option>
+              }
+            </select>
+          </label>
+          @if (!geofences().length) {
+            <span class="muted">Draw a Geofence on the Geofences page first.</span>
+          }
+        }
+      }
+
+      <label class="inline"><input name="enabled" type="checkbox" [checked]="rule?.enabled ?? true" /> Enabled</label>
+      @if (rule) {
+        <span class="muted">Saving a changed condition resolves the rule's Active Alerts as Rule changed, and the rule starts afresh.</span>
+      }
+      <div class="form-actions">
+        <button type="submit" class="btn btn-solid" [disabled]="changes.busy()">Save</button>
+        <button type="button" class="btn" (click)="cancel()">Cancel</button>
+      </div>
+    </form>
+  }
+
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th><th>Kind</th><th>Covers</th><th>Condition</th><th>Severity</th><th>Enabled</th>
+        <th><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (rule of rules(); track rule.id) {
+        <tr>
+          <td>{{ rule.name }}</td>
+          <td>{{ kindLabels[rule.kind] }}</td>
+          <td>{{ target(rule) }}</td>
+          <td>{{ condition(rule) }}</td>
+          <td>{{ rule.severity }}</td>
+          <td [class.muted]="!rule.enabled">{{ rule.enabled ? 'Enabled' : 'Disabled' }}</td>
+          <td class="actions">
+            <button type="button" class="btn" (click)="open(rule)">Edit</button>
+            @if (rule.enabled) {
+              <app-confirm-action
+                label="Disable"
+                [question]="'Disable ' + rule.name + '? Its Active Alerts resolve as Rule disabled.'"
+                [disabled]="changes.busy()"
+                (confirmed)="setEnabled(rule, false)"
+              />
+            } @else {
+              <button type="button" class="btn" [disabled]="changes.busy()" (click)="setEnabled(rule, true)">Enable</button>
+            }
+            <app-confirm-action
+              label="Delete"
+              [question]="'Delete ' + rule.name + '? Only a rule that never raised an Alert can go; disable the others.'"
+              [disabled]="changes.busy()"
+              (confirmed)="remove(rule)"
+            />
+          </td>
+        </tr>
+      } @empty {
+        <tr><td colspan="7" class="muted">{{ rules() ? 'No Alert Rules yet.' : 'Loading…' }}</td></tr>
+      }
+    </tbody>
+  </table>
+</section>
