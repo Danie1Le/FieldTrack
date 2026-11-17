@@ -1,0 +1,160 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+header {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.views {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.views button {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.views button[aria-pressed="true"] {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
+ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+}
+
+.alert {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 4px 1fr;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.empty {
+  padding: 12px;
+}
+
+.sev {
+  border-radius: 2px;
+}
+
+.sev-Critical { background: var(--alert); }
+.sev-Warning { background: var(--offline); }
+
+.body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+/* Spaced with gap: Angular drops the whitespace between inline elements. */
+.line,
+.meta {
+  display: flex;
+  gap: 4px 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.line strong {
+  font-size: 14px;
+}
+
+.status {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.st-Open { color: var(--alert); }
+.st-Acknowledged { color: var(--acknowledged); }
+.st-Resolved { color: var(--muted); }
+
+.meta {
+  font-size: 12px;
+}
+
+.tag {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.note {
+  color: var(--muted);
+}
+
+.latch {
+  font-size: 12px;
+  color: var(--muted);
+  border-left: 2px solid var(--acknowledged);
+  padding-left: 8px;
+}
+
+.acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+form {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 7px;
+  resize: vertical;
+}
+
+.warn {
+  margin: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  color: var(--alert);
+  background: color-mix(in srgb, var(--alert) 11%, transparent);
+}
+
+.error {
+  margin: 0;
+  color: var(--alert);
+}
