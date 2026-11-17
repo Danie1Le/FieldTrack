@@ -45,9 +45,20 @@ public sealed class BenchTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         var latency = results.GetProperty("ingestLatencyMs");
         latency.GetProperty("count").GetInt64().ShouldBe(results.GetProperty("published").GetInt64());
         latency.GetProperty("p95Ms").GetDouble().ShouldBeInRange(0, 5_000, "commit follows publish, within a few seconds on any machine");
+        var puback = results.GetProperty("tickToPubackMs");
+        puback.GetProperty("count").GetInt64().ShouldBe(results.GetProperty("published").GetInt64());
+        puback.GetProperty("p95Ms").GetDouble().ShouldBeInRange(0, 5_000);
+        results.GetProperty("latencyBasis").GetString()!.ShouldContain("lower bound");
+        results.GetProperty("achievedRatePerSecond").GetDouble().ShouldBeInRange(30, 70);
+        results.GetProperty("rateAchieved").ValueKind.ShouldBeOneOf(JsonValueKind.True, JsonValueKind.False);
+        var offsets = results.GetProperty("clockOffsetMs");
+        offsets.GetProperty("before").GetDouble().ShouldBeInRange(-1_000, 1_000);
+        offsets.GetProperty("after").GetDouble().ShouldBeInRange(-1_000, 1_000);
         results.GetProperty("backlog").GetProperty("samples").GetInt32().ShouldBeGreaterThan(3);
         var environment = result.GetProperty("environment");
         environment.GetProperty("postgres").GetProperty("track_commit_timestamp").GetString().ShouldBe("on");
+        environment.GetProperty("postgres").GetProperty("max_wal_size").GetString().ShouldNotBeNullOrEmpty();
+        environment.GetProperty("postgres").GetProperty("shared_buffers").GetString().ShouldEndWith("MB", Case.Insensitive, "with its unit, not 8 kB blocks");
         environment.GetProperty("os").GetString().ShouldNotBeNullOrEmpty();
         environment.GetProperty("cpu").GetProperty("logicalCores").GetInt32().ShouldBeGreaterThan(0);
     }
@@ -65,6 +76,19 @@ public sealed class BenchTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         results.GetProperty("ingestedPerSecond").GetDouble().ShouldBeGreaterThan(10);
         results.GetProperty("missing").GetInt64().ShouldBe(0);
         outcome.Pass.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_database_clock_ahead_of_ours_lowers_the_latency_by_that_much()
+    {
+        await SeedAsync();
+        await using var ingest = await StartIngestAsync();
+        var run = await BenchRun.RunAsync(Fleet, Target, "offset", rate: 30, TimeSpan.FromSeconds(3), during: null, TextWriter.Null, CancellationToken);
+
+        var plain = await Target.Database.LatencyAsync(run.Manifest.StartedAt, run.Manifest.EndedAt, TimeSpan.Zero, CancellationToken);
+        var corrected = await Target.Database.LatencyAsync(run.Manifest.StartedAt, run.Manifest.EndedAt, TimeSpan.FromSeconds(10), CancellationToken);
+
+        (plain!.P95Ms - corrected!.P95Ms).ShouldBe(10_000, tolerance: 0.001);
     }
 
     [Fact]

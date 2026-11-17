@@ -2,13 +2,19 @@ using Npgsql;
 
 namespace FieldTrack.Simulator.Bench;
 
-/// <summary>Ingest latency of the Readings stored in a window: milliseconds from the Device's publish time to the commit of their batch.</summary>
+/// <summary>A latency distribution in milliseconds: of Readings stored in a window, or of publishes the broker acknowledged.</summary>
 /// <param name="Count">How many Readings.</param>
 /// <param name="P50Ms">Median.</param>
 /// <param name="P95Ms">95th percentile.</param>
 /// <param name="P99Ms">99th percentile.</param>
 /// <param name="MaxMs">Slowest.</param>
-internal sealed record IngestLatency(long Count, double P50Ms, double P95Ms, double P99Ms, double MaxMs);
+internal sealed record LatencySummary(long Count, double P50Ms, double P95Ms, double P99Ms, double MaxMs)
+{
+    /// <summary>The distribution of <paramref name="millis"/>, or null when there are none.</summary>
+    public static LatencySummary? Of(IReadOnlyList<double> millis) => millis.Count == 0
+        ? null
+        : new(millis.Count, BenchStats.Percentile(millis, 0.5), BenchStats.Percentile(millis, 0.95), BenchStats.Percentile(millis, 0.99), millis.Max());
+}
 
 /// <summary>What the database holds of a run, set against its <see cref="RunManifest"/>.</summary>
 /// <param name="Published">Readings the Manifest lists.</param>
@@ -50,11 +56,17 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
 
     /// <summary>
     /// Commit time minus Device time of every Reading in the window, in milliseconds, corrected by <paramref name="clockOffset"/>
-    /// (database clock minus this machine's). Device time is the publish time of a simulated Device (no clock Faults in a bench).
+    /// (database clock minus this machine's). Device time is the tick of a simulated Device, before its publish (no clock Faults in a
+    /// bench), so a slow connect or retry counts as ingest latency; <see cref="MeasuredRun.TickToPubackMs"/> shows how much.
     /// Null when the window holds no Reading.
+    /// <para>
+    /// <b>This is a lower bound.</b> Postgres stamps a commit when the commit starts, before it waits for the WAL flush, and ingest
+    /// acknowledges (ADR 0004) only after that flush. A batch stalled five seconds in <c>IO:WALSync</c> is stamped five seconds early, so
+    /// under WAL stalls this figure understates what a Device waits; the tick-to-PUBACK distribution includes the flush.
+    /// </para>
     /// </summary>
     /// <exception cref="SimulatorException">Postgres does not record commit times (<c>track_commit_timestamp</c> is off).</exception>
-    public async Task<IngestLatency?> LatencyAsync(DateTimeOffset from, DateTimeOffset to, TimeSpan clockOffset, CancellationToken cancellationToken)
+    public async Task<LatencySummary?> LatencyAsync(DateTimeOffset from, DateTimeOffset to, TimeSpan clockOffset, CancellationToken cancellationToken)
     {
         if (await SettingAsync("track_commit_timestamp", cancellationToken) != "on")
         {
@@ -77,7 +89,7 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
 
         var shift = clockOffset.TotalMilliseconds;
         var percentiles = reader.GetFieldValue<double[]>(1);
-        return new IngestLatency(reader.GetInt64(0), percentiles[0] - shift, percentiles[1] - shift, percentiles[2] - shift, reader.GetDouble(2) - shift);
+        return new LatencySummary(reader.GetInt64(0), percentiles[0] - shift, percentiles[1] - shift, percentiles[2] - shift, reader.GetDouble(2) - shift);
     }
 
     /// <summary>
@@ -134,10 +146,10 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
         return new ManifestScore(published, missing, stored, stored - distinct);
     }
 
-    /// <summary>The named Postgres settings, as the server reports them.</summary>
+    /// <summary>The named Postgres settings, as the server formats them with their unit (<c>1GB</c>, <c>5min</c>).</summary>
     public async Task<IReadOnlyDictionary<string, string>> SettingsAsync(IEnumerable<string> names, CancellationToken cancellationToken)
     {
-        await using var command = Command("SELECT name, setting FROM pg_settings WHERE name = ANY(@names)");
+        await using var command = Command("SELECT name, current_setting(name) FROM pg_settings WHERE name = ANY(@names)");
         command.Parameters.AddWithValue("names", names.ToArray());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var settings = new SortedDictionary<string, string>(StringComparer.Ordinal);
