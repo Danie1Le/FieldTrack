@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FieldTrack.Simulator;
 
 namespace FieldTrack.UnitTests;
@@ -16,21 +17,41 @@ public sealed class FleetRunnerTests : IDisposable
         var log = new StringWriter();
 
         var exception = await Should.ThrowAsync<InvalidOperationException>(
-            () => FleetRunner.RunAsync(fleet, options, log, new FailingOnceTimeProvider(failingCall: 2), TestContext.Current.CancellationToken));
+            () => FleetRunner.RunAsync(fleet, options, log, new StumblingClock(failingTimestamp: 2, TimeSpan.Zero), TestContext.Current.CancellationToken));
 
         exception.Message.ShouldBe("clock broke");
         log.ToString().ShouldContain("TRK-001: stopped (clock broke); stopping the run");
         File.Exists(manifestPath).ShouldBeTrue();
     }
 
+    [Fact(Timeout = 30_000)]
+    public async Task The_Manifest_times_the_run_by_the_elapsed_clock_so_a_wall_clock_step_does_not_stretch_it()
+    {
+        var fleet = FleetFile.Parse("""{ "devices": [ { "serial": "TRK-001", "assetType": "Truck" } ] }""", _directory);
+        var manifestPath = Path.Combine(_directory, "manifest.json");
+        var options = new RunOptions("127.0.0.1", 1, 10, Duration: null, Path.Combine(_directory, "state.json"), manifestPath);
+
+        // The wall clock jumps an hour after the run starts, as after an NTP correction or a VM resume.
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => FleetRunner.RunAsync(fleet, options, TextWriter.Null, new StumblingClock(failingTimestamp: 2, TimeSpan.FromHours(1)), TestContext.Current.CancellationToken));
+
+        using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        var length = manifest.RootElement.GetProperty("endedAt").GetDateTimeOffset() - manifest.RootElement.GetProperty("startedAt").GetDateTimeOffset();
+        length.ShouldBeLessThan(TimeSpan.FromMinutes(1));
+    }
+
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
-    // GetUtcNow is called once when the run starts and once per Reading, so failing the second call fails the Device mid-run.
-    private sealed class FailingOnceTimeProvider(int failingCall) : TimeProvider
+    // GetTimestamp is read once when the run starts and once per Reading, so failing the second read fails the Device mid-run.
+    // Every wall-clock read after the first is off by wallClockStep.
+    private sealed class StumblingClock(int failingTimestamp, TimeSpan wallClockStep) : TimeProvider
     {
-        private int _calls;
+        private int _timestamps;
+        private int _wallClockReads;
 
-        public override DateTimeOffset GetUtcNow() =>
-            Interlocked.Increment(ref _calls) == failingCall ? throw new InvalidOperationException("clock broke") : System.GetUtcNow();
+        public override long GetTimestamp() =>
+            Interlocked.Increment(ref _timestamps) == failingTimestamp ? throw new InvalidOperationException("clock broke") : System.GetTimestamp();
+
+        public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + (Interlocked.Increment(ref _wallClockReads) > 1 ? wallClockStep : TimeSpan.Zero);
     }
 }

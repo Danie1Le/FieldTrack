@@ -61,6 +61,12 @@ internal enum InjectionLane
 /// <param name="Amount">How strong it is; the unit depends on <paramref name="Kind"/>. Unused by Power offs and Coverage gaps.</param>
 internal sealed record Injection(InjectionKind Kind, TimeSpan Start, TimeSpan End, double Amount)
 {
+    /// <summary>The peak of an Overheat when a Scenario gives none, in °C: well past a typical alert threshold.</summary>
+    public const double DefaultOverheatPeakC = 120;
+
+    /// <summary>The drain factor of a fuel leak when a Scenario gives none.</summary>
+    public const double DefaultFuelLeakFactor = 10;
+
     /// <summary>When it ends; never at or before <see cref="Start"/>, which would be a window that covers nothing.</summary>
     public TimeSpan End { get; } = End > Start ? End : throw new ArgumentOutOfRangeException(nameof(End), End, $"An Injection must end after it starts ({Start}).");
 
