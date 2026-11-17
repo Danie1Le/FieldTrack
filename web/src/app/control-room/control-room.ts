@@ -23,6 +23,8 @@ export class ControlRoom {
 
   protected readonly tab = signal<'map' | 'assets' | 'alerts'>('map');
   protected readonly selected = signal<string | null>(null);
+  /** Set on every selection, even of the selected Asset, so the map centres again after a pan. */
+  protected readonly focus = signal<{ id: string } | null>(null);
   /** Ticks so "last seen" stays current between pushes. */
   private readonly now = signal(Date.now());
 
@@ -47,8 +49,13 @@ export class ControlRoom {
     return breachedSensors(asset, this.fleet.rules());
   }
 
+  protected select(id: string): void {
+    this.selected.set(id);
+    this.focus.set({ id });
+  }
+
   protected selectRow(asset: LiveAsset): void {
-    this.selected.set(asset.id);
+    this.select(asset.id);
     // On a phone the map is behind its tab; show it so the selection is visible.
     if (onMap(asset) && matchMedia(narrow).matches) {
       this.tab.set('map');

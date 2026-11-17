@@ -13,10 +13,11 @@
   <button type="button" class="btn" (click)="auth.signOut()">Sign out</button>
 </header>
 
-<nav class="tabs" role="tablist" aria-label="Control room">
-  <button type="button" role="tab" [attr.aria-selected]="tab() === 'map'" (click)="tab.set('map')">Map</button>
-  <button type="button" role="tab" [attr.aria-selected]="tab() === 'assets'" (click)="tab.set('assets')">Assets</button>
-  <button type="button" role="tab" [attr.aria-selected]="tab() === 'alerts'" (click)="tab.set('alerts')">Alerts</button>
+<!-- Toggle buttons, not ARIA tabs: the columns stay plain sections, so there is no tabpanel or arrow-key model to wire. -->
+<nav class="tabs" aria-label="Control room view">
+  <button type="button" [attr.aria-pressed]="tab() === 'map'" (click)="tab.set('map')">Map</button>
+  <button type="button" [attr.aria-pressed]="tab() === 'assets'" (click)="tab.set('assets')">Assets</button>
+  <button type="button" [attr.aria-pressed]="tab() === 'alerts'" (click)="tab.set('alerts')">Alerts</button>
 </nav>
 
 <div class="columns" [attr.data-tab]="tab()">
@@ -46,9 +47,10 @@
                 class="asset"
                 tabindex="0"
                 [class.selected]="asset.id === selected()"
-                [attr.aria-selected]="asset.id === selected()"
+                [attr.aria-current]="asset.id === selected() ? 'true' : null"
                 (click)="selectRow(asset)"
                 (keydown.enter)="selectRow(asset)"
+                (keydown.space)="$event.preventDefault(); selectRow(asset)"
               >
                 <td class="name">
                   <strong>{{ asset.name }}</strong> <span class="muted">{{ groupName(asset) }}</span>
@@ -72,7 +74,7 @@
     </div>
   </section>
 
-  <app-fleet-map class="map" [assets]="fleet.assets()" [selected]="selected()" (select)="selected.set($event)" />
+  <app-fleet-map class="map" [assets]="fleet.assets()" [selected]="selected()" [focus]="focus()" (select)="select($event)" />
 
   <section class="panel column alerts" aria-label="Alert feed">
     <header><strong>Alert feed</strong></header>

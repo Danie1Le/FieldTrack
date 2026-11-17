@@ -26,6 +26,8 @@ export function markerElement(asset: LiveAsset, selected: boolean): HTMLElement 
 export class FleetMap {
   readonly assets = input.required<LiveAsset[]>();
   readonly selected = input<string | null>(null);
+  /** Centres on this Asset; a new object each time, so selecting the same Asset again centres it again. */
+  readonly focus = input<{ id: string } | null>(null);
   readonly select = output<string>();
 
   private readonly host: HTMLElement = inject(ElementRef).nativeElement;
@@ -52,7 +54,7 @@ export class FleetMap {
 
     afterRenderEffect(() => this.draw(this.assets(), this.selected()));
     afterRenderEffect(() => {
-      const id = this.selected();
+      const id = this.focus()?.id;
       const marker = id && untracked(() => this.markers.get(id));
       if (marker) {
         this.map.setView(marker.getLatLng(), Math.max(this.map.getZoom(), 14));
