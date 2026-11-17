@@ -19,10 +19,16 @@ public abstract class AlertTest(FieldTrackFixture fixture) : IntegrationTest(fix
     }
 
     protected static ReceivedReading Received(long seq, DateTimeOffset deviceTime, float engineTempC, string serialNumber = "TRK-007") =>
-        new(TelemetryPublisher.TopicOf(serialNumber), serialNumber, new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null),
+        new(TelemetryPublisher.TopicOf(serialNumber), serialNumber, new Reading(1, seq, MillisUp(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null),
             DateTimeOffset.UtcNow, [(byte)seq], Redelivered: false);
 
+    // What a published payload (milliseconds since the epoch) keeps of a time.
     protected static DateTimeOffset Millis(DateTimeOffset time) => DateTimeOffset.FromUnixTimeMilliseconds(time.ToUnixTimeMilliseconds());
+
+    // Device times have millisecond precision. Rounded up, never down: an Attachment covers only Device times at or after its own
+    // (microsecond) instant, so a Reading taken after an attach must not truncate to before it and miss the Asset.
+    protected static DateTimeOffset MillisUp(DateTimeOffset time) =>
+        DateTimeOffset.FromUnixTimeMilliseconds((time.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks + TimeSpan.TicksPerMillisecond - 1) / TimeSpan.TicksPerMillisecond);
 
     protected static async Task<(string Device, string Asset)> AttachedDeviceAsync(HttpClient admin, string serialNumber = "TRK-007", string? assetGroupId = null)
     {

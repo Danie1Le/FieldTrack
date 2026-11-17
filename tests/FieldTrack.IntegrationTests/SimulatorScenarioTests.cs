@@ -19,8 +19,8 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         ] }
         """, AppContext.BaseDirectory);
 
-    private RunOptions Options(TimeSpan duration, double? rate, Scenario? scenario = null) =>
-        new(Fixture.BrokerHost, Fixture.BrokerPort, rate, duration, Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"), scenario);
+    private RunOptions Options(TimeSpan duration, double? rate, Scenario? scenario = null, Action<TimeSpan>? acknowledged = null) =>
+        new(Fixture.BrokerHost, Fixture.BrokerPort, rate, duration, Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"), scenario, Acknowledged: acknowledged);
 
     private async Task<Dictionary<string, JsonElement>> SeedAsync()
     {
@@ -103,20 +103,32 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         var assets = await SeedAsync();
         await using var ingest = await StartIngestAsync();
 
-        var manifest = await FleetRunner.RunAsync(Fleet, Options(TimeSpan.FromSeconds(2), rate: null), TextWriter.Null, TimeProvider.System, CancellationToken);
+        // How many Readings a flood is depends on the machine: a CI runner publishes tens of thousands in 2 s, and ingest there
+        // stores only a few hundred a second once the broker backs up. The run stops after FloodSize acknowledged Readings so
+        // that what is waited for below does not depend on the machine.
+        const int FloodSize = 1000;
+        using var enough = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
+        var acknowledged = 0;
+        var options = Options(TimeSpan.FromSeconds(2), rate: null, acknowledged: _ =>
+        {
+            if (Interlocked.Increment(ref acknowledged) == FloodSize)
+            {
+                enough.Cancel();
+            }
+        });
+
+        var manifest = await FleetRunner.RunAsync(Fleet, options, TextWriter.Null, TimeProvider.System, enough.Token);
 
         manifest.RatePerSecond.ShouldBeNull();
         var total = Fleet.Devices.Sum(device => Published(manifest, device.Serial));
         total.ShouldBeGreaterThan(90, "a paced run of 2 s at 30 a second publishes about 60");
 
-        // A flood is thousands of Readings and ingest stores them slower than the broker accepts them, so the wait is generous and
-        // counts in the database: listing them through the API on every poll would slow the very ingest being waited for.
+        // Counted in the database: listing the Readings through the API on every poll would slow the ingest being waited for.
         var truck = Guid.Parse(assets["Truck 1"].GetProperty("id").GetString()!);
         await using var database = await OpenDatabaseAsync();
         var stored = await EventuallyAsync(
             async () => (long)(await SqlAsync(database, "SELECT count(*) FROM readings WHERE asset_id = @p0", truck))!,
-            count => count >= Published(manifest, "TRK-001"),
-            within: TimeSpan.FromMinutes(2));
+            count => count >= Published(manifest, "TRK-001"));
         stored.ShouldBe(Published(manifest, "TRK-001"));
     }
 

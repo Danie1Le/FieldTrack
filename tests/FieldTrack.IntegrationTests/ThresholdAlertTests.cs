@@ -107,8 +107,8 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(f
 
         var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
         alert.GetProperty("status").GetString().ShouldBe("Resolved");
-        alert.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(Millis(t.AddSeconds(1)));
-        alert.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(Millis(t.AddSeconds(2)));
+        alert.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(MillisUp(t.AddSeconds(1)));
+        alert.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(MillisUp(t.AddSeconds(2)));
         alert.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
         alert.GetProperty("fromBacklog").GetBoolean().ShouldBeTrue();
     }
