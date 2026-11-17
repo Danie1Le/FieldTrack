@@ -33,12 +33,15 @@ internal static class SimulatorCli
           bench throughput|flood|crash --fleet <file> [--rate <readings per second>] [--duration <seconds>]
               Seeds the fleet, then measures telemetry ingest against the running compose stack and writes JSON (metrics plus git SHA,
               CPU, RAM, OS, Docker limits, Postgres settings and image tags) to --out (bench/results). `throughput` holds --rate
-              (default 2000) for --duration (default 600) and passes when ingest latency p95 < 200 ms, the broker backlog stays flat and
-              nothing is lost; `flood` publishes flat out for --duration (default 60) and reports the rate ingest absorbed; `crash`
-              publishes --rate (default 500) for --duration (default 600) while `docker kill` hits the ingest (api) container --kills
-              times (default 10) at random moments, and passes with 0 missing and 0 duplicate Readings against the Manifest and the
-              broker's received count.
-              Also: [--db <connection string>] [--compose-project fieldtrack] [--mqtt-host --mqtt-port --api --email --state --out]
+              (default 2000) for --duration (default 600) and passes when the fleet achieves the rate (within 2%), ingest latency p95 < 200 ms,
+              the broker backlog stays flat and nothing is lost; `flood` publishes flat out for --duration (default 60) and reports the rate
+              ingest absorbed; `crash` publishes --rate (default 500) for --duration (default 600) while `docker kill` hits the ingest (api)
+              container of --compose-project --kills times (default 10) at random moments, and passes with 0 missing and 0 duplicate
+              Readings against the Manifest and the broker's received count, and only if every kill took the measured stack's /health down.
+              Requires --compose-project <name>, the stack that --api serves. Also: [--db <connection string without password>]
+              [--mqtt-host --mqtt-port --api --email --state --out]
+              The database password comes from FIELDTRACK_DB_PASSWORD (the compose development password only against localhost).
+              A run refuses a working tree with uncommitted changes unless --allow-dirty true is given.
               Start the stack with bench/docker-compose.bench.yml. Exit code 3 means the run finished but missed its bar.
 
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from

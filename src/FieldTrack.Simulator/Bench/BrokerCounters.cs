@@ -4,7 +4,7 @@ using MQTTnet;
 namespace FieldTrack.Simulator.Bench;
 
 /// <summary>
-/// Mosquitto's own counts, read from its <c>$SYS</c> topics (refreshed every <c>sys_interval</c>, one second in <c>mosquitto.conf</c>): how many
+/// Mosquitto's own counts, read from its <c>$SYS</c> topics (refreshed every <c>sys_interval</c>; <c>bench/docker-compose.bench.yml</c> sets one second, and <see cref="SettleAsync"/> assumes it): how many
 /// PUBLISH messages the broker has received, the ground truth a crash benchmark scores stored Readings against, and how many messages it
 /// holds for subscribers that have not acknowledged them yet, the backlog a sustained run must keep flat.
 /// </summary>
@@ -58,7 +58,7 @@ internal sealed class BrokerCounters : IAsyncDisposable
         {
             if (waited > TimeSpan.FromSeconds(5))
             {
-                throw new SimulatorException($"The broker at {host}:{port} publishes no $SYS counts; set sys_interval in mosquitto.conf.");
+                throw new SimulatorException($"The broker at {host}:{port} publishes no $SYS counts; start the stack with bench/docker-compose.bench.yml (it sets sys_interval).");
             }
 
             await Task.Delay(100, cancellationToken);

@@ -37,9 +37,47 @@ public sealed class BenchStatsTests
     }
 
     [Fact]
+    public void A_backlog_that_starts_climbing_in_the_last_tenth_is_not_flat()
+    {
+        // The last third's median is still low; only the last few samples show the climb.
+        double[] backlog = [.. Enumerable.Range(0, 90).Select(second => second < 80 ? 200.0 : 200.0 + ((second - 79) * 2_000))];
+
+        BenchStats.IsFlat(backlog, tolerance: 1_000).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Fewer_than_three_samples_say_nothing_about_a_trend()
     {
         Should.Throw<ArgumentException>(() => BenchStats.IsFlat([1, 2], tolerance: 1_000));
+    }
+
+    [Theory]
+    [InlineData(2_000, true)]
+    [InlineData(1_961, true)]
+    [InlineData(1_959, false)]
+    [InlineData(1_000, false)]
+    public void A_run_holds_its_rate_within_two_percent(double achieved, bool holds)
+    {
+        ThroughputBench.HoldsRate(achieved, target: 2_000).ShouldBe(holds);
+    }
+
+    [Fact]
+    public void Clocks_that_moved_more_than_a_few_milliseconds_during_a_run_are_flagged_and_latency_uses_the_mean()
+    {
+        var steady = new ClockOffsets(TimeSpan.FromMilliseconds(12), TimeSpan.FromMilliseconds(18));
+        var moved = new ClockOffsets(TimeSpan.FromMilliseconds(12), TimeSpan.FromMilliseconds(112));
+
+        steady.Drifted.ShouldBeFalse();
+        steady.Mean.ShouldBe(TimeSpan.FromMilliseconds(15));
+        moved.Drifted.ShouldBeTrue();
+        moved.Drift.ShouldBe(TimeSpan.FromMilliseconds(100));
+    }
+
+    [Fact]
+    public void A_percentile_interpolates_between_neighbours()
+    {
+        BenchStats.Percentile([1, 2, 3, 4, 5], 0.95).ShouldBe(4.8, 1e-9);
+        BenchStats.Percentile([7], 0.99).ShouldBe(7);
     }
 
     [Theory]
