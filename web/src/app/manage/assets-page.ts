@@ -5,6 +5,7 @@ import { AssetGroup } from '../control-room/live';
 import { Asset, assetTypes } from './api';
 import { Changes } from './changes';
 import { ConfirmAction } from './confirm-action';
+import { Editing } from './editing';
 
 /** Assets and Asset Groups (Admins only, spec #21 stories 17, 21-24): create, edit, and Archive or delete. */
 @Component({
@@ -20,9 +21,9 @@ export class AssetsPage {
 
   protected readonly assets = signal<Asset[] | null>(null);
   protected readonly groups = signal<AssetGroup[]>([]);
-  /** The Asset being edited, 'new' while one is being created, else null. */
-  protected readonly assetForm = signal<Asset | 'new' | null>(null);
-  protected readonly groupForm = signal<AssetGroup | 'new' | null>(null);
+  /** The Asset being edited, or 'new' while one is being created. */
+  protected readonly assetForm = new Editing<Asset | 'new'>();
+  protected readonly groupForm = new Editing<AssetGroup | 'new'>();
 
   constructor() {
     void this.load();
@@ -39,7 +40,7 @@ export class AssetsPage {
   protected saveAsset(form: HTMLFormElement): Promise<void> {
     const values = new FormData(form);
     const body = { name: values.get('name'), type: values.get('type'), assetGroupId: values.get('assetGroupId') || null };
-    const editing = this.assetForm();
+    const editing = this.assetForm.item();
     return this.changes.send(
       editing === 'new' ? this.http.post('/api/assets', body) : this.http.put(`/api/assets/${encodeURIComponent(editing!.id)}`, body),
       () => this.done(),
@@ -52,7 +53,7 @@ export class AssetsPage {
 
   protected saveGroup(form: HTMLFormElement): Promise<void> {
     const body = { name: new FormData(form).get('groupName') };
-    const editing = this.groupForm();
+    const editing = this.groupForm.item();
     return this.changes.send(
       editing === 'new'
         ? this.http.post('/api/asset-groups', body)
@@ -66,14 +67,14 @@ export class AssetsPage {
   }
 
   protected cancel(): void {
-    this.assetForm.set(null);
-    this.groupForm.set(null);
+    this.assetForm.close();
+    this.groupForm.close();
     this.changes.problems.set([]);
   }
 
   private done(): Promise<void> {
-    this.assetForm.set(null);
-    this.groupForm.set(null);
+    this.assetForm.close();
+    this.groupForm.close();
     return this.load();
   }
 

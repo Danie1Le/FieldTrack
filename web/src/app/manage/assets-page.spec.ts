@@ -81,6 +81,33 @@ describe('AssetsPage', () => {
     await serve([], []);
   });
 
+  it('builds the form afresh from each Asset it opens, so unsaved choices never reach another Asset', async () => {
+    view.button('Edit', 'Haul truck 7').click();
+    await view.settle();
+    view.fill('type', 'Excavator');
+    view.fill('assetGroupId', 'quarry');
+    view.button('Edit', 'Generator 1').click();
+    await view.settle();
+    view.button('Save').click();
+
+    const edit = api.expectOne({ method: 'PUT', url: '/api/assets/gen' });
+    expect(edit.request.body).toEqual({ name: 'Generator 1', type: 'Generator', assetGroupId: null });
+    edit.flush(asset('gen', 'Generator 1', 'Generator'));
+    await serve([asset('truck', 'Haul truck 7', 'Truck', 'depot')], [group('depot', 'Depot'), group('quarry', 'Quarry')]);
+
+    view.button('Edit', 'Haul truck 7').click();
+    await view.settle();
+    view.fill('assetGroupId', 'quarry');
+    view.button('Edit', 'Haul truck 7').click();
+    await view.settle();
+    view.button('Save').click();
+
+    const again = api.expectOne({ method: 'PUT', url: '/api/assets/truck' });
+    expect(again.request.body).toEqual({ name: 'Haul truck 7', type: 'Truck', assetGroupId: 'depot' });
+    again.flush(asset('truck', 'Haul truck 7', 'Truck', 'depot'));
+    await serve([], []);
+  });
+
   it('deletes an Asset only once the Admin confirms it in the page', async () => {
     view.button('Delete', 'Haul truck 7').click();
     await view.settle();
