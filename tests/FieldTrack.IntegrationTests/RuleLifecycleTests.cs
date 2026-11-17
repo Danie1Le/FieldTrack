@@ -46,6 +46,24 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
     }
 
     [Fact]
+    public async Task A_rename_or_a_new_severity_keeps_the_Active_Alert_and_the_rule_state()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset, rule, alert) = await OpenAlertAsync(admin);
+
+        using (var renamed = await admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { name = "Engine hot", severity = "Warning" }, CancellationToken))
+        {
+            renamed.EnsureSuccessStatusCode();
+        }
+
+        // Still past the threshold: a rule that lost its breached state would raise a second Alert.
+        await WriteAsync([Received(1, DateTimeOffset.UtcNow, 111)]);
+
+        (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem().GetProperty("id").GetString().ShouldBe(alert);
+        (await ListAsync(admin, "/alerts?active=true")).ShouldHaveSingleItem();
+    }
+
+    [Fact]
     public async Task After_a_detach_the_next_Device_starts_the_Asset_from_clean_state()
     {
         using var admin = await AdminClientAsync();
@@ -105,22 +123,68 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
     }
 
     [Fact]
-    public async Task A_rule_created_while_its_Asset_is_being_Archived_waits_for_the_Archive_instead_of_deadlocking()
+    public async Task A_rule_created_while_its_Asset_is_being_Archived_waits_for_the_Archive_and_is_refused()
     {
         using var admin = await AdminClientAsync();
         var (_, asset) = await AttachedDeviceAsync(admin);
         await using var archiver = await OpenDatabaseAsync();
         await using var archive = await archiver.BeginTransactionAsync(CancellationToken);
-        // What Asset delete does: lock the Asset, then raise the Alert Rule version.
+        // What Asset Archive does: lock the Asset, bump the Alert Rule version, disable the Asset's rules.
         await SqlAsync(archiver, "SELECT FROM assets WHERE id = @p0 FOR UPDATE", Guid.Parse(asset));
+        await SqlAsync(archiver, "UPDATE alert_rule_version SET version = version + 1");
 
         var create = admin.PostAsJsonAsync("/alert-rules", Overheat(asset), CancellationToken);
         await LockWaitsAsync(1);
-        await SqlAsync(archiver, "UPDATE alert_rule_version SET version = version + 1");
+        await SqlAsync(archiver, "UPDATE alert_rules SET enabled = false WHERE asset_id = @p0", Guid.Parse(asset));
+        await SqlAsync(archiver, "UPDATE assets SET archived = true WHERE id = @p0", Guid.Parse(asset));
         await archive.CommitAsync(CancellationToken);
 
         using var created = await create;
-        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        created.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await ListAsync(admin, "/alert-rules")).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_rule_edited_while_its_Asset_is_being_Archived_waits_for_the_Archive_instead_of_deadlocking()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        await using var archiver = await OpenDatabaseAsync();
+        await using var archive = await archiver.BeginTransactionAsync(CancellationToken);
+        // What Asset Archive does: lock the Asset, bump the Alert Rule version, then disable the Asset's rules.
+        await SqlAsync(archiver, "SELECT FROM assets WHERE id = @p0 FOR UPDATE", Guid.Parse(asset));
+        await SqlAsync(archiver, "UPDATE alert_rule_version SET version = version + 1");
+
+        var edit = admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { threshold = 100 }, CancellationToken);
+        await LockWaitsAsync(1);
+        // An edit that took the rule row before the version would hold it here: a deadlock.
+        await SqlAsync(archiver, "UPDATE alert_rules SET enabled = false WHERE asset_id = @p0", Guid.Parse(asset));
+        await archive.CommitAsync(CancellationToken);
+
+        using var edited = await edit;
+        edited.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task A_rule_edited_while_it_is_being_deleted_waits_for_the_delete_instead_of_deadlocking()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        await using var deleter = await OpenDatabaseAsync();
+        await using var delete = await deleter.BeginTransactionAsync(CancellationToken);
+        // What rule delete does: bump the Alert Rule version, then delete the rule row.
+        await SqlAsync(deleter, "UPDATE alert_rule_version SET version = version + 1");
+
+        var edit = admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { threshold = 100 }, CancellationToken);
+        await LockWaitsAsync(1);
+        // An edit that took the rule row before the version would hold it here: a deadlock.
+        await SqlAsync(deleter, "DELETE FROM alert_rules WHERE id = @p0", Guid.Parse(rule));
+        await delete.CommitAsync(CancellationToken);
+
+        using var edited = await edit;
+        edited.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -197,7 +261,7 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
     {
         using var response = change switch
         {
-            "edit rule" => await admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { name = "Engine hot" }, CancellationToken),
+            "edit rule" => await admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { threshold = 100 }, CancellationToken),
             "disable rule" => await admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { enabled = false }, CancellationToken),
             "archive Asset" => await admin.DeleteAsync($"/assets/{asset}", CancellationToken),
             "detach Device" => await admin.PostAsync(

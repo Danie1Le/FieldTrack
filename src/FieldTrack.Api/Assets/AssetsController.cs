@@ -94,16 +94,19 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             return NotFound();
         }
 
-        // Either way the Asset's own rules stop: disabled with it, or deleted with it.
-        await db.RaiseAlertRuleVersionAsync(cancellationToken);
-        IReadOnlyList<Guid> resolved = [];
-        if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken))
+        var hasReadings = await readingHistory.AssetHasReadingsAsync(id, cancellationToken);
+        // Either way the Asset's own rules stop: disabled with it, or deleted with it. Bumped after the Reading history
+        // check, which can be slow and would hold up every ingest batch meanwhile (ADR 0005); the Asset lock already
+        // keeps ingest from stamping a Reading on it.
+        await db.BumpAlertRuleVersionAsync(cancellationToken);
+        List<Guid> resolved = [];
+        if (hasReadings)
         {
             asset.Archived = true;
             var now = time.GetUtcNow();
             await db.AlertRules.Where(rule => rule.AssetId == id).ExecuteUpdateAsync(set => set.SetProperty(rule => rule.Enabled, false), cancellationToken);
             // Before the Attachment ends, which would resolve them as Device detached.
-            resolved = await db.ResolveActiveAlertsAsync(alert => alert.AssetId == id, ResolveReason.AssetArchived, now, cancellationToken);
+            resolved = await db.ResolveActiveAlertsOfAssetsAsync([id], ResolveReason.AssetArchived, now, cancellationToken);
             await db.EndOpenAttachmentsAsync(attachment => attachment.AssetId == id, now, cancellationToken);
         }
         else
@@ -115,7 +118,7 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await live.PushAsync([], [], resolved, cancellationToken);
+        await live.AlertsUpdatedAsync(resolved, cancellationToken);
         return NoContent();
     }
 

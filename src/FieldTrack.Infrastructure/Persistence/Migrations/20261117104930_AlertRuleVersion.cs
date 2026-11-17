@@ -5,9 +5,10 @@
 namespace FieldTrack.Infrastructure.Persistence.Migrations
 {
     /// <summary>
-    /// The version row of ADR 0005: one counter that every change to what ingest evaluates (Alert Rules, Geofences,
-    /// rule state reset outside ingest) raises in its own transaction, so the ingest worker reloads only when it
-    /// moved. Hand-written and outside the EF model, like the readings tables, because only SQL reads and raises it.
+    /// The Alert Rule version row of ADR 0005: one counter that every change to what the ingest worker evaluates or
+    /// caches (Alert Rules, Geofences, and the Archives and detaches that resolve Active Alerts or reset rule state)
+    /// bumps in its own transaction, so the worker reloads only when it moved. Hand-written and outside the EF model,
+    /// like the readings tables, because only SQL reads and bumps it.
     /// </summary>
     public partial class AlertRuleVersion : Migration
     {

@@ -67,6 +67,10 @@ public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFact
     public Task AlertUpdatedAsync(Guid alertId, CancellationToken cancellationToken) =>
         PushAsync([], [], [alertId], cancellationToken);
 
+    /// <summary>Sends Alerts the platform resolved outside ingest, and their Assets; call it once that change commits.</summary>
+    public Task AlertsUpdatedAsync(IReadOnlyCollection<Guid> alertIds, CancellationToken cancellationToken) =>
+        PushAsync([], [], alertIds, cancellationToken);
+
     [LoggerMessage(LogLevel.Warning, "Live push failed; dashboards catch up when they reload.")]
     private partial void LogPushFailed(Exception exception);
 }
