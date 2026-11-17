@@ -91,7 +91,7 @@ internal static class FleetRunner
         {
             try
             {
-                await PublishAsync(device, publisher, index, pacing, log, time, startedAt, startTimestamp, stop.Token, drain.Token);
+                await PublishAsync(device, publisher, index, pacing, options.Acknowledged, log, time, startedAt, startTimestamp, stop.Token, drain.Token);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -103,7 +103,7 @@ internal static class FleetRunner
     }
 
     private static async Task PublishAsync(
-        SimulatedDevice device, ReconnectingPublisher publisher, int index, Pacing? pacing, TextWriter log, TimeProvider time, DateTimeOffset startedAt, long startTimestamp,
+        SimulatedDevice device, ReconnectingPublisher publisher, int index, Pacing? pacing, Action<TimeSpan>? acknowledged, TextWriter log, TimeProvider time, DateTimeOffset startedAt, long startTimestamp,
         CancellationToken stop, CancellationToken drain)
     {
         if (pacing is { } paced)
@@ -137,7 +137,7 @@ internal static class FleetRunner
             {
                 await publisher.PublishAsync(device.Topic, payload, drain);
                 device.Published();
-                options.Acknowledged?.Invoke(time.GetElapsedTime(startTimestamp) - elapsed);
+                acknowledged?.Invoke(time.GetElapsedTime(startTimestamp) - elapsed);
             }
         }
     }
