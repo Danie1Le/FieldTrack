@@ -3,7 +3,10 @@ namespace FieldTrack.Domain.Telemetry;
 /// <summary>Why a telemetry payload cannot become a Reading (spec #21, Telemetry contract).</summary>
 public enum RejectReason
 {
-    /// <summary>Not a UTF-8 JSON object, or a field holds the wrong type of value.</summary>
+    /// <summary>
+    /// Not a UTF-8 JSON object of at most <see cref="TelemetryPayload.MaxPayloadBytes"/> bytes, a field sent twice,
+    /// or a field holding a value of the wrong kind (wrong type, negative <c>boot</c> or <c>seq</c>, non-finite sensor).
+    /// </summary>
     BadJson,
 
     /// <summary>One of <c>boot</c>, <c>seq</c>, <c>ts</c>, <c>lat</c> or <c>lon</c> is absent or null.</summary>
