@@ -30,6 +30,11 @@
     <None Include="..\..\docker-compose.yml" Link="docker-compose.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- FleetFileTests and GpxRouteTests check that the committed fleet file loads and every route in it can be followed. -->
+  <ItemGroup>
+    <None Include="..\..\src\FieldTrack.Simulator\fleets\**" LinkBase="fleets" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- TelemetryPayloadTests checks the broker's payload limit matches the contract's. -->
   <ItemGroup>
     <None Include="..\..\docker\mosquitto\mosquitto.conf" Link="mosquitto.conf" CopyToOutputDirectory="PreserveNewest" />
