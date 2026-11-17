@@ -33,9 +33,34 @@ public sealed class RunManifestTests : IDisposable
     }
 
     [Fact]
+    public void Each_Device_lists_the_windows_of_what_was_injected_with_times_cut_to_the_run()
+    {
+        var schedule = new InjectionSchedule();
+        schedule.TryAdd(new Injection(InjectionKind.PowerOff, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20), 0));
+        schedule.TryAdd(new Injection(InjectionKind.Overheat, TimeSpan.FromSeconds(50), TimeSpan.FromSeconds(650), 120));
+        schedule.TryAdd(new Injection(InjectionKind.ClockJump, TimeSpan.FromSeconds(55), TimeSpan.MaxValue, 900));
+        schedule.TryAdd(new Injection(InjectionKind.CoverageGap, TimeSpan.FromSeconds(1000), TimeSpan.FromSeconds(1100), 0));
+        var injected = new SimulatedDevice(
+            new FleetDevice("TRK-001", "TRK-001", AssetType.Truck, null, null, 30, []), 1, new FixedMotion(new Position(1, 2)), schedule);
+
+        var manifest = RunManifest.Of(Start, Start.AddSeconds(60), ratePerSecond: 20, [injected, Device("GEN-001", boot: 1)]);
+
+        manifest.Devices[0].Windows.ShouldBe(
+        [
+            new ManifestWindow(InjectionKind.PowerOff, Start.AddSeconds(10), Start.AddSeconds(20), 0),
+            new ManifestWindow(InjectionKind.Overheat, Start.AddSeconds(50), Start.AddSeconds(60), 120),
+            new ManifestWindow(InjectionKind.ClockJump, Start.AddSeconds(55), Start.AddSeconds(60), 900),
+        ]);
+        manifest.Devices[1].Windows.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void The_file_is_JSON_a_benchmark_can_read_back()
     {
-        var device = Device("TRK-001", boot: 2);
+        var schedule = new InjectionSchedule();
+        schedule.TryAdd(new Injection(InjectionKind.CoverageGap, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), 0));
+        var device = new SimulatedDevice(
+            new FleetDevice("TRK-001", "TRK-001", AssetType.Truck, null, null, 30, []), 2, new FixedMotion(new Position(1, 2)), schedule);
         device.Step(Start, TimeSpan.Zero);
         device.Published();
         var path = Path.Combine(_directory, "nested", "manifest.json");
@@ -51,6 +76,21 @@ public sealed class RunManifestTests : IDisposable
         range.GetProperty("boot").GetInt32().ShouldBe(2);
         range.GetProperty("firstSequence").GetInt64().ShouldBe(0);
         range.GetProperty("lastSequence").GetInt64().ShouldBe(0);
+        var window = root.GetProperty("devices")[0].GetProperty("windows")[0];
+        window.GetProperty("kind").GetString().ShouldBe("coverageGap");
+        window.GetProperty("start").GetDateTimeOffset().ShouldBe(Start.AddSeconds(5));
+        window.GetProperty("end").GetDateTimeOffset().ShouldBe(Start.AddSeconds(15));
+    }
+
+    [Fact]
+    public void A_maximum_rate_run_has_no_target_rate()
+    {
+        var path = Path.Combine(_directory, "max.json");
+
+        RunManifest.Of(Start, Start.AddSeconds(30), ratePerSecond: null, [Device("TRK-001", 1)]).Write(path);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        document.RootElement.GetProperty("ratePerSecond").ValueKind.ShouldBe(JsonValueKind.Null);
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);

@@ -73,6 +73,9 @@ internal sealed class SimulatedDevice
     /// <summary>What the broker acknowledged, one range per Boot; a Boot that published nothing has none.</summary>
     public IReadOnlyList<PublishedRange> Ranges => [.. _earlierBoots, .. Range(Boot, PublishedCount)];
 
+    /// <summary>What was injected into the Device so far, scripted or drawn, in the order it was scheduled.</summary>
+    public IReadOnlyList<Injection> Injections => _injections.All;
+
     /// <summary>
     /// Advances the Device to <paramref name="elapsed"/> into the run, <paramref name="now"/> by the wall clock: it takes a Reading
     /// unless a Power off has it switched off, and starts its new Boot when a Power off ends. A Power off that began and ended
