@@ -98,8 +98,6 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
 
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Reading", "FieldTrack.Domain.Alerts.Alert.Reading#ReadingId", b1 =>
                         {
-                            b1.IsRequired();
-
                             b1.Property<int>("Boot")
                                 .HasColumnType("integer")
                                 .HasColumnName("reading_boot");
@@ -138,6 +136,8 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
 
                     b.ToTable("alerts", null, t =>
                         {
+                            t.HasCheckConstraint("ck_alerts_reading", "(reading_device_id IS NULL) = (reading_boot IS NULL) AND (reading_boot IS NULL) = (reading_sequence_number IS NULL)");
+
                             t.HasCheckConstraint("ck_alerts_resolution", "(status = 'Resolved') = (resolved_at IS NOT NULL) AND (resolved_at IS NULL) = (resolve_reason IS NULL) AND (NOT from_backlog OR resolve_reason IS NOT DISTINCT FROM 'Cleared')");
 
                             t.HasCheckConstraint("ck_alerts_resolve_reason", "resolve_reason IN ('Cleared', 'Manual', 'RuleChanged', 'RuleDisabled', 'AssetArchived', 'DeviceDetached')");
@@ -185,6 +185,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("name");
 
+                    b.Property<int?>("OfflineSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("offline_seconds");
+
                     b.Property<string>("Severity")
                         .IsRequired()
                         .HasColumnType("text")
@@ -227,7 +231,9 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_alert_rules_geofence", "(kind IN ('GeofenceExit', 'GeofenceEnter')) = (geofence_id IS NOT NULL)");
 
-                            t.HasCheckConstraint("ck_alert_rules_kind", "kind IN ('Threshold', 'GeofenceExit', 'GeofenceEnter')");
+                            t.HasCheckConstraint("ck_alert_rules_kind", "kind IN ('Threshold', 'GeofenceExit', 'GeofenceEnter', 'Offline')");
+
+                            t.HasCheckConstraint("ck_alert_rules_offline", "(kind = 'Offline') = (offline_seconds IS NOT NULL) AND (offline_seconds IS NULL OR offline_seconds > 0)");
 
                             t.HasCheckConstraint("ck_alert_rules_operator", "operator IN ('GreaterThan', 'LessThan')");
 
@@ -571,15 +577,15 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("breached");
 
-                    b.Property<int>("LastBoot")
+                    b.Property<int?>("LastBoot")
                         .HasColumnType("integer")
                         .HasColumnName("last_boot");
 
-                    b.Property<Guid>("LastDeviceId")
+                    b.Property<Guid?>("LastDeviceId")
                         .HasColumnType("uuid")
                         .HasColumnName("last_device_id");
 
-                    b.Property<long>("LastSequenceNumber")
+                    b.Property<long?>("LastSequenceNumber")
                         .HasColumnType("bigint")
                         .HasColumnName("last_sequence_number");
 
@@ -589,7 +595,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.HasIndex("AssetId")
                         .HasDatabaseName("ix_alert_rule_states_asset_id");
 
-                    b.ToTable("alert_rule_states", (string)null);
+                    b.ToTable("alert_rule_states", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_alert_rule_states_last_evaluated", "(last_device_id IS NULL) = (last_boot IS NULL) AND (last_boot IS NULL) = (last_sequence_number IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("FieldTrack.Infrastructure.Persistence.Geofence", b =>

@@ -11,4 +11,7 @@ public enum AlertRuleKind
 
     /// <summary>An Asset seen outside the rule's Geofence and then inside it.</summary>
     GeofenceEnter,
+
+    /// <summary>No Reading received from the Asset's Device for the rule's own number of seconds.</summary>
+    Offline,
 }

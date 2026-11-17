@@ -141,9 +141,11 @@ public sealed class ReadingWriter : IAsyncDisposable
             WHERE d.id = r.device_id
         ), evaluated AS (
             -- The new Readings of Assets in use, for rule evaluation (ADR 0005). A backlog Reading stamped with an
-            -- Asset Archived since is stored but evaluates no rule.
+            -- Asset Archived since is stored but evaluates no rule. The Asset's Device now (one open Attachment at
+            -- most) tells a former Device's backlog apart for Offline rules.
             SELECT s.ordinal, s.device_id, r.asset_id, a.asset_group_id, s.boot, s.seq, s.device_time, s.lat, s.lon,
-                   s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
+                   s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v,
+                   (SELECT t.device_id FROM attachments t WHERE t.asset_id = r.asset_id AND t.detached_at IS NULL) AS attached_device_id
             FROM stored r
             JOIN staged s USING (device_id, boot, seq)
             JOIN assets a ON a.id = r.asset_id
@@ -172,7 +174,8 @@ public sealed class ReadingWriter : IAsyncDisposable
         var reading = new Reading(
             reader.GetInt32(6), reader.GetInt64(7), reader.GetFieldValue<DateTimeOffset>(8), reader.GetDouble(9), reader.GetDouble(10),
             Sensor(11), Sensor(12), Sensor(13), Sensor(14), Sensor(15));
-        return new AssetReading(reader.GetGuid(4), reader.IsDBNull(5) ? null : reader.GetGuid(5), new StoredReading(reader.GetGuid(3), reading));
+        return new AssetReading(reader.GetGuid(4), reader.IsDBNull(5) ? null : reader.GetGuid(5), reader.IsDBNull(16) ? null : reader.GetGuid(16),
+            new StoredReading(reader.GetGuid(3), reading));
 
         float? Sensor(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
     }
