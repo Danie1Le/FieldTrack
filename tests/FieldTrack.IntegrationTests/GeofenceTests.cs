@@ -192,14 +192,20 @@ public sealed class GeofenceTests(FieldTrackFixture fixture) : AlertTest(fixture
         var named = await CreateAsync(admin, "/geofences", Depot());
         await live.NextAsync(LiveHub.GeofencesChanged);
         await CreateAsync(admin, "/alert-rules", LeftDepot(asset, named));
+        using var invalid = await admin.PostAsJsonAsync("/geofences", Depot() with { name = "" }, CancellationToken);
+        using var unknown = await admin.PutAsJsonAsync($"/geofences/{Guid.NewGuid()}", Depot(), CancellationToken);
         using var refused = await admin.DeleteAsync($"/geofences/{named}", CancellationToken);
+        // Each push is sent before its response returns, so a push by a refused change would already be queued.
+        (await live.AnyWithinAsync(TimeSpan.FromSeconds(1))).ShouldBeNull();
         var geofence = await CreateAsync(admin, "/geofences", Depot() with { name = "Yard" });
-        (await live.NextAsync()).Name.ShouldBe(LiveHub.GeofencesChanged);
+        await live.NextAsync(LiveHub.GeofencesChanged);
         (await admin.PutAsJsonAsync($"/geofences/{geofence}", Depot() with { area = Square(0, 0, 1) }, CancellationToken)).EnsureSuccessStatusCode();
         await live.NextAsync(LiveHub.GeofencesChanged);
         (await admin.DeleteAsync($"/geofences/{geofence}", CancellationToken)).EnsureSuccessStatusCode();
         await live.NextAsync(LiveHub.GeofencesChanged);
 
+        invalid.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         refused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
     }
 
