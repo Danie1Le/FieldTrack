@@ -129,6 +129,9 @@ internal static class BenchCli
             ?? (_loopback.Contains(builder.Host, StringComparer.OrdinalIgnoreCase)
                 ? DevelopmentPassword
                 : throw new SimulatorException("Set FIELDTRACK_DB_PASSWORD: the development password only applies to a database on localhost."));
+        // Npgsql applies the command timeout to every write of a COPY stream, and a busy server stops reading it while it maintains indexes
+        // (seed-history); the individual bench queries set the same bound.
+        builder.CommandTimeout = 600;
         return builder.ConnectionString;
     }
 

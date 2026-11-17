@@ -32,4 +32,11 @@ public sealed class BenchCliTests
     {
         Should.Throw<SimulatorException>(() => BenchCli.DatabaseConnection("Host=localhost;Username=bench;Password=oops", null));
     }
+
+    [Fact]
+    public void A_bulk_copy_may_stall_for_minutes_without_timing_out()
+    {
+        // Npgsql applies the command timeout to every write of a COPY stream, and a busy server stops reading it while it maintains indexes.
+        new NpgsqlConnectionStringBuilder(BenchCli.DatabaseConnection(null, null)).CommandTimeout.ShouldBeGreaterThanOrEqualTo(600);
+    }
 }
