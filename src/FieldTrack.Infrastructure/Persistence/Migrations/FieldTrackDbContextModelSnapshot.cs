@@ -78,6 +78,87 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.ToTable("asset_groups", (string)null);
                 });
 
+            modelBuilder.Entity("FieldTrack.Domain.Assets.Attachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_id");
+
+                    b.Property<DateTimeOffset>("AttachedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("attached_at");
+
+                    b.Property<DateTimeOffset?>("DetachedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("detached_at");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_attachments");
+
+                    b.HasIndex("AssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_attachments_asset_id_open")
+                        .HasFilter("detached_at IS NULL");
+
+                    b.HasIndex("DeviceId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_attachments_device_id_open")
+                        .HasFilter("detached_at IS NULL");
+
+                    b.HasIndex("AssetId", "AttachedAt")
+                        .HasDatabaseName("ix_attachments_asset_id_attached_at");
+
+                    b.HasIndex("DeviceId", "AttachedAt")
+                        .HasDatabaseName("ix_attachments_device_id_attached_at");
+
+                    b.ToTable("attachments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_attachments_period", "detached_at IS NULL OR detached_at >= attached_at");
+                        });
+                });
+
+            modelBuilder.Entity("FieldTrack.Domain.Assets.Device", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Archived")
+                        .HasColumnType("boolean")
+                        .HasColumnName("archived");
+
+                    b.Property<DateTimeOffset?>("LastReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_received_at");
+
+                    b.Property<string>("SerialNumber")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("serial_number");
+
+                    b.HasKey("Id")
+                        .HasName("pk_devices");
+
+                    b.HasIndex("SerialNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_devices_serial_number");
+
+                    b.ToTable("devices", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_devices_serial_number", "serial_number ~ '^[A-Za-z0-9._-]{1,64}$'");
+                        });
+                });
+
             modelBuilder.Entity("FieldTrack.Infrastructure.Identity.FieldTrackUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -373,6 +454,23 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AssetGroupId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_assets_asset_groups_asset_group_id");
+                });
+
+            modelBuilder.Entity("FieldTrack.Domain.Assets.Attachment", b =>
+                {
+                    b.HasOne("FieldTrack.Domain.Assets.Asset", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_attachments_assets_asset_id");
+
+                    b.HasOne("FieldTrack.Domain.Assets.Device", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_attachments_devices_device_id");
                 });
 
             modelBuilder.Entity("FieldTrack.Infrastructure.Identity.RefreshToken", b =>
