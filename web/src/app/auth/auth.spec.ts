@@ -50,6 +50,23 @@ describe('AuthService', () => {
     expect(stored).not.toContain('access-1');
   });
 
+  it('knows an Admin by the role in the access token', async () => {
+    // A JWT whose payload carries the role claim as the API writes it: an array of role names.
+    const jwt = (role: unknown) => `e30.${btoa(JSON.stringify({ role })).replace(/=+$/, '')}.signature`;
+    const signInAs = async (role: unknown) => {
+      const outcome = auth.signIn('someone@example.com', 'pw');
+      api.expectOne('/api/auth/sign-in').flush({ ...tokens(1), accessToken: jwt(role) });
+      await outcome;
+      return auth.isAdmin();
+    };
+
+    expect(await signInAs(['Admin'])).toBe(true);
+    expect(await signInAs('Admin')).toBe(true);
+    expect(await signInAs(['Operator'])).toBe(false);
+    auth.signOut();
+    expect(auth.isAdmin()).toBe(false);
+  });
+
   it('asks for a new password when the API says the password is temporary', async () => {
     const outcome = auth.signIn('admin@example.com', 'temporary');
     api.expectOne('/api/auth/sign-in').flush({ title: 'Password change required' }, { status: 403, statusText: 'Forbidden' });

@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 import { SignIn } from './auth/sign-in';
-import { signedInGuard } from './auth/signed-in.guard';
+import { adminGuard, signedInGuard } from './auth/signed-in.guard';
 
 export const routes: Routes = [
   { path: 'sign-in', component: SignIn, title: 'Sign in · FieldTrack' },
@@ -10,6 +10,13 @@ export const routes: Routes = [
     loadComponent: () => import('./control-room/control-room').then((m) => m.ControlRoom),
     canActivate: [signedInGuard],
     title: 'Control room · FieldTrack',
+  },
+  {
+    path: 'geofences',
+    // Lazy, and Leaflet-Geoman lazier still: only Admins on this page load the drawing toolbar.
+    loadComponent: () => import('./geofences/geofences-page').then((m) => m.GeofencesPage),
+    canActivate: [adminGuard],
+    title: 'Geofences · FieldTrack',
   },
   { path: '**', redirectTo: '' },
 ];
