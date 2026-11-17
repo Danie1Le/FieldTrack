@@ -1,5 +1,7 @@
 using System.Text.Json;
 using FieldTrack.Simulator;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -97,11 +99,18 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         (storedGenerator.Length + rejected.Length).ShouldBe((int)Published(manifest, "GEN-001"));
     }
 
-    [Fact]
-    public async Task Maximum_mode_publishes_as_fast_as_the_broker_acknowledges_and_the_Manifest_has_no_target_rate()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public async Task Maximum_mode_publishes_as_fast_as_the_broker_acknowledges_and_the_Manifest_has_no_target_rate(int run)
     {
         var assets = await SeedAsync();
-        await using var ingest = await StartIngestAsync();
+        var logs = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var ingest = await StartIngestAsync(services: collection => collection.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(new CollectingLogger(logs)));
 
         var manifest = await FleetRunner.RunAsync(Fleet, Options(TimeSpan.FromSeconds(2), rate: null), TextWriter.Null, TimeProvider.System, CancellationToken);
 
@@ -109,15 +118,60 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         var total = Fleet.Devices.Sum(device => Published(manifest, device.Serial));
         total.ShouldBeGreaterThan(90, "a paced run of 2 s at 30 a second publishes about 60");
 
-        // A flood is thousands of Readings and ingest stores them slower than the broker accepts them, so the wait is generous and
-        // counts in the database: listing them through the API on every poll would slow the very ingest being waited for.
         var truck = Guid.Parse(assets["Truck 1"].GetProperty("id").GetString()!);
         await using var database = await OpenDatabaseAsync();
-        var stored = await EventuallyAsync(
-            async () => (long)(await SqlAsync(database, "SELECT count(*) FROM readings WHERE asset_id = @p0", truck))!,
-            count => count >= Published(manifest, "TRK-001"),
-            within: TimeSpan.FromMinutes(2));
-        stored.ShouldBe(Published(manifest, "TRK-001"));
+        var timeline = new List<string>();
+        var started = DateTime.UtcNow;
+        long stored = 0;
+        for (var i = 0; i < 40; i++)
+        {
+            stored = (long)(await SqlAsync(database, "SELECT count(*) FROM readings WHERE asset_id = @p0", truck))!;
+            var all = (long)(await SqlAsync(database, "SELECT count(*) FROM readings"))!;
+            var keys = (long)(await SqlAsync(database, "SELECT count(*) FROM reading_keys"))!;
+            var rejected = (long)(await SqlAsync(database, "SELECT count(*) FROM rejected_messages"))!;
+            timeline.Add($"{(DateTime.UtcNow - started).TotalSeconds:F0}s trk={stored} all={all} keys={keys} rejected={rejected}");
+            if (stored >= Published(manifest, "TRK-001"))
+            {
+                break;
+            }
+
+            await Task.Delay(1500, CancellationToken);
+        }
+
+        var states = string.Join("; ", await ActivityAsync(database));
+        var counts = string.Join(",", Fleet.Devices.Select(d => $"{d.Serial}={Published(manifest, d.Serial)}"));
+        File.AppendAllText(Path.Combine(Path.GetTempPath(), "max-diag.log"), $"run {run} published={counts} stored={stored}\n");
+        stored.ShouldBe(Published(manifest, "TRK-001"), $"run {run} published {counts}\nTIMELINE\n{string.Join("\n", timeline)}\nPG {states}\nLOGS\n{string.Join("\n", logs.Take(60))}");
+    }
+
+    private static async Task<List<string>> ActivityAsync(NpgsqlConnection database)
+    {
+        var result = new List<string>();
+        await using var command = new NpgsqlCommand("SELECT state, wait_event_type, wait_event, left(query, 60) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()", database);
+        await using var reader = await command.ExecuteReaderAsync(CancellationToken);
+        while (await reader.ReadAsync(CancellationToken))
+        {
+            result.Add($"[{reader.GetValue(0)}|{reader.GetValue(1)}|{reader.GetValue(2)}|{reader.GetValue(3)}]");
+        }
+
+        return result;
+    }
+
+    private sealed class CollectingLogger(System.Collections.Concurrent.ConcurrentQueue<string> lines) : Microsoft.Extensions.Logging.ILoggerProvider, Microsoft.Extensions.Logging.ILogger
+    {
+        public Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) => this;
+
+        public void Dispose()
+        {
+        }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => logLevel >= Microsoft.Extensions.Logging.LogLevel.Warning;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            lines.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} {logLevel} {formatter(state, exception)} {exception?.GetType().Name}: {exception?.Message}");
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
