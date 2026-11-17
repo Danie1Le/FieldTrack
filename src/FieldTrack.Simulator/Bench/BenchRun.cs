@@ -5,7 +5,8 @@ namespace FieldTrack.Simulator.Bench;
 /// <param name="Backlog">The broker's backlog, one sample a second while the run lasted.</param>
 /// <param name="BrokerReceived">PUBLISH messages the broker received over the run, from its own counter.</param>
 /// <param name="DrainSeconds">How long after the run ended until every listed Reading was stored; null if some never were.</param>
-internal sealed record MeasuredRun(RunManifest Manifest, IReadOnlyList<double> Backlog, long BrokerReceived, double? DrainSeconds)
+/// <param name="ReadingsAtStart">How many Readings the database held before the run.</param>
+internal sealed record MeasuredRun(RunManifest Manifest, IReadOnlyList<double> Backlog, long BrokerReceived, double? DrainSeconds, long ReadingsAtStart)
 {
     /// <summary>Readings the Manifest lists.</summary>
     public long Published => Manifest.Devices.Sum(device => device.Ranges.Sum(range => range.LastSequence - range.FirstSequence + 1));
@@ -32,6 +33,7 @@ internal static class BenchRun
         await using var counters = await BrokerCounters.ConnectAsync(target.BrokerHost, target.BrokerPort, cancellationToken);
         await BrokerCounters.SettleAsync(cancellationToken);
         var receivedBefore = counters.PublishesReceived;
+        var readingsAtStart = await target.Database.CountAllReadingsAsync(cancellationToken);
 
         using var publishing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var backlog = new List<double>();
@@ -55,7 +57,7 @@ internal static class BenchRun
         await alongside;
         var drain = await WaitForStoredAsync(target.Database, manifest, cancellationToken);
         await BrokerCounters.SettleAsync(cancellationToken);
-        return new MeasuredRun(manifest, backlog, counters.PublishesReceived - receivedBefore, drain);
+        return new MeasuredRun(manifest, backlog, counters.PublishesReceived - receivedBefore, drain, readingsAtStart);
     }
 
     private static async Task SampleBacklogAsync(BrokerCounters counters, List<double> samples, TextWriter log, CancellationToken stop)

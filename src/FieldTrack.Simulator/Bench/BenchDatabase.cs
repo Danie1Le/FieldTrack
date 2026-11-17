@@ -31,6 +31,16 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
     public async Task<long> CountReadingsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken) =>
         await ScalarAsync<long>("SELECT count(*) FROM readings WHERE device_time >= @from AND device_time < @to", from, to, cancellationToken);
 
+    /// <summary>
+    /// Every stored Reading. Insert cost grows with the table and its indexes, so a result says how big the database was when the run began;
+    /// compare runs on an empty one (<c>docker compose down -v</c>).
+    /// </summary>
+    public async Task<long> CountAllReadingsAsync(CancellationToken cancellationToken)
+    {
+        await using var command = Command("SELECT count(*) FROM readings");
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
     /// <summary>How many Rejected messages are stored.</summary>
     public async Task<long> CountRejectedAsync(CancellationToken cancellationToken)
     {

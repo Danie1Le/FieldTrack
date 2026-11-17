@@ -32,6 +32,7 @@ internal static class ThroughputBench
             new { devices = fleet.Devices.Count, targetRatePerSecond = rate, durationSeconds = duration.TotalSeconds, p95LimitMs = P95LimitMs },
             new
             {
+                readingsInDatabaseAtStart = run.ReadingsAtStart,
                 published = run.Published,
                 achievedRatePerSecond = run.Published / run.Elapsed.TotalSeconds,
                 stored = score.Stored,
@@ -68,6 +69,7 @@ internal static class ThroughputBench
             new { devices = fleet.Devices.Count, durationSeconds = duration.TotalSeconds },
             new
             {
+                readingsInDatabaseAtStart = run.ReadingsAtStart,
                 published = run.Published,
                 publishedPerSecond = run.Published / run.Elapsed.TotalSeconds,
                 // Stored over the run plus the time ingest needed to catch up: the rate ingest absorbed end to end.
