@@ -27,8 +27,11 @@ public sealed partial class IngestWorker(
     TimeProvider time,
     ILogger<IngestWorker> logger) : BackgroundService
 {
+    private const string TopicPrefix = "fieldtrack/v1/devices/";
+    private const string TopicSuffix = "/telemetry";
+
     /// <summary>Every Device's telemetry topic, version 1 of the contract (spec #21).</summary>
-    public const string TopicFilter = "fieldtrack/v1/devices/+/telemetry";
+    public const string TopicFilter = TopicPrefix + "+" + TopicSuffix;
 
     /// <summary>How long the broker keeps the session, and its queued messages, while the worker is away.</summary>
     public const uint SessionExpirySeconds = 3_600;
@@ -40,6 +43,9 @@ public sealed partial class IngestWorker(
     public static readonly TimeSpan FlushAfter = TimeSpan.FromMilliseconds(25);
 
     private static readonly TimeSpan _retryAfter = TimeSpan.FromSeconds(2);
+
+    /// <summary>The Device serial number in a topic that matches <see cref="TopicFilter"/>.</summary>
+    public static string SerialNumberOf(string topic) => topic[TopicPrefix.Length..^TopicSuffix.Length];
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -74,13 +80,27 @@ public sealed partial class IngestWorker(
     private async Task RunSessionAsync(CancellationToken stoppingToken)
     {
         // The MQTT client calls the handler for one message at a time, so channel order is receive order.
-        var received = Channel.CreateUnbounded<Message>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+        // ReceiveMaximum bounds only QoS 1 messages; a full channel makes the handler wait, which stalls the
+        // client's receive loop and so pushes back on a QoS 0 flood instead of growing memory. The capacity
+        // holds every QoS 1 message the broker may have in flight, so those never wait.
+        var received = Channel.CreateBounded<ReceivedMessage>(new BoundedChannelOptions(2 * BatchSize)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = true,
+        });
         using var client = new MqttClientFactory().CreateMqttClient();
-        client.ApplicationMessageReceivedAsync += args =>
+        client.ApplicationMessageReceivedAsync += async args =>
         {
             args.AutoAcknowledge = false;
-            received.Writer.TryWrite(new Message(args, time.GetUtcNow()));
-            return Task.CompletedTask;
+            try
+            {
+                await received.Writer.WriteAsync(new ReceivedMessage(args, time.GetUtcNow()));
+            }
+            catch (ChannelClosedException)
+            {
+                // The session is ending; the unacknowledged message is redelivered on the next connect.
+            }
         };
         client.DisconnectedAsync += args =>
         {
@@ -90,6 +110,12 @@ public sealed partial class IngestWorker(
 
         await using var writer = await ReadingWriter.OpenAsync(dataSource, stoppingToken);
         var connected = await client.ConnectAsync(ClientOptions(), stoppingToken);
+        // MQTTnet returns a refused CONNACK (bad credentials, say) instead of throwing.
+        if (connected.ResultCode != MqttClientConnectResultCode.Success)
+        {
+            throw new MqttCommunicationException($"The broker refused the connection: {connected.ResultCode}.");
+        }
+
         // Subscribing again is harmless on a resumed session and restores the subscription if it expired.
         await client.SubscribeAsync(
             new MqttClientSubscribeOptionsBuilder().WithTopicFilter(TopicFilter, MqttQualityOfServiceLevel.AtLeastOnce).Build(),
@@ -101,7 +127,7 @@ public sealed partial class IngestWorker(
             while (true)
             {
                 var batch = await NextBatchAsync(received.Reader, stoppingToken);
-                await writer.WriteAsync(Accept(batch), stoppingToken);
+                await writer.WriteAsync(ToReceivedReadings(batch), stoppingToken);
                 // Committed: from here a crash only causes redelivery of stored Readings, which the key
                 // table drops, so finish acknowledging even while stopping.
                 foreach (var message in batch)
@@ -112,6 +138,8 @@ public sealed partial class IngestWorker(
         }
         finally
         {
+            // Release a handler waiting on a full channel, so the client can disconnect.
+            received.Writer.TryComplete();
             if (client.IsConnected)
             {
                 await client.DisconnectAsync(cancellationToken: CancellationToken.None);
@@ -129,9 +157,9 @@ public sealed partial class IngestWorker(
             .WithReceiveMaximum(2 * BatchSize)
             .Build();
 
-    private static async Task<List<Message>> NextBatchAsync(ChannelReader<Message> reader, CancellationToken stoppingToken)
+    private static async Task<List<ReceivedMessage>> NextBatchAsync(ChannelReader<ReceivedMessage> reader, CancellationToken stoppingToken)
     {
-        var batch = new List<Message>(BatchSize) { await reader.ReadAsync(stoppingToken) };
+        var batch = new List<ReceivedMessage>(BatchSize) { await reader.ReadAsync(stoppingToken) };
         using var flush = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         flush.CancelAfter(FlushAfter);
         while (batch.Count < BatchSize)
@@ -158,17 +186,19 @@ public sealed partial class IngestWorker(
         return batch;
     }
 
-    private List<ReceivedReading> Accept(List<Message> batch)
+    /// <summary>Parses and hashes each message, keeping those that are Readings and logging the rest.</summary>
+    private List<ReceivedReading> ToReceivedReadings(List<ReceivedMessage> batch)
     {
         var readings = new List<ReceivedReading>(batch.Count);
         foreach (var (args, receivedTime) in batch)
         {
-            var message = args.ApplicationMessage;
-            // The subscription matches fieldtrack/v1/devices/{serialNumber}/telemetry only.
-            var serialNumber = message.Topic.Split('/')[3];
-            var payload = message.Payload.ToArray();
+            var applicationMessage = args.ApplicationMessage;
+            var serialNumber = SerialNumberOf(applicationMessage.Topic);
+            var payload = applicationMessage.Payload.ToArray();
             if (TelemetryPayload.TryParse(payload, receivedTime, out var reading, out var reason))
             {
+                // Over the raw bytes: a Device resends a Reading byte for byte, so "identical duplicate"
+                // (ADR 0003) means an identical payload, and any other copy is conflicting.
                 readings.Add(new ReceivedReading(serialNumber, reading, receivedTime, SHA256.HashData(payload)));
             }
             else
@@ -190,5 +220,5 @@ public sealed partial class IngestWorker(
     [LoggerMessage(LogLevel.Warning, "Refused telemetry from {SerialNumber}: {Reason}.")]
     private partial void LogRefused(string serialNumber, RejectReason reason);
 
-    private sealed record Message(MqttApplicationMessageReceivedEventArgs Args, DateTimeOffset ReceivedTime);
+    private sealed record ReceivedMessage(MqttApplicationMessageReceivedEventArgs Args, DateTimeOffset ReceivedTime);
 }

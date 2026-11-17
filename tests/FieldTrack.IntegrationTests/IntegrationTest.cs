@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -92,6 +93,26 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
 
             await Task.Delay(50, CancellationToken);
         }
+    }
+
+    /// <summary>A connection of the test's own to the API's database, for SQL the API does not expose.</summary>
+    protected async Task<NpgsqlConnection> OpenDatabaseAsync()
+    {
+        var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
+        await connection.OpenAsync(CancellationToken);
+        return connection;
+    }
+
+    /// <summary>Runs <paramref name="sql"/> with parameters <c>@p0</c>, <c>@p1</c>... and returns the first column of the first row.</summary>
+    protected static async Task<object?> SqlAsync(NpgsqlConnection connection, string sql, params object[] parameters)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+        for (var i = 0; i < parameters.Length; i++)
+        {
+            command.Parameters.AddWithValue($"p{i}", parameters[i]);
+        }
+
+        return await command.ExecuteScalarAsync(CancellationToken);
     }
 
     /// <summary>A client signed in as the Admin, on <paramref name="api"/> or the shared host.</summary>

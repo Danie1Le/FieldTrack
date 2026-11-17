@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using FieldTrack.Api.Assets;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -133,6 +134,111 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         // Kept: a Device with Readings is Archived, not removed (#25).
         deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         (await ListAsync(admin, "/devices?includeArchived=true")).Single().GetProperty("archived").GetBoolean().ShouldBeTrue();
+        await using var database = await OpenDatabaseAsync();
+        (await SqlAsync(database, "SELECT count(*) FROM readings WHERE device_id = @p0 AND asset_id IS NULL", Guid.Parse(device))).ShouldBe(1L);
+        (await SqlAsync(database, "SELECT count(*) FROM readings")).ShouldBe(1L);
+    }
+
+    [Fact]
+    public async Task A_batch_that_fails_is_not_acknowledged_so_the_broker_redelivers_it_and_it_is_stored_once()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        var now = DateTimeOffset.UtcNow;
+        var day = DateOnly.FromDateTime(now.UtcDateTime);
+        var partition = string.Create(CultureInfo.InvariantCulture, $"readings_{day:yyyyMMdd}");
+        await using var database = await OpenDatabaseAsync();
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        // Without its partition the Reading cannot be stored, so every batch holding it fails and rolls back.
+        await SqlAsync(database, $"ALTER TABLE readings DETACH PARTITION {partition}");
+        try
+        {
+            await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, now));
+            // Long enough for the worker to fail, reconnect (2 s) and fail again on the redelivered message.
+            await Task.Delay(TimeSpan.FromSeconds(5), CancellationToken);
+            (await SqlAsync(database, "SELECT count(*) FROM reading_keys")).ShouldBe(0L);
+        }
+        finally
+        {
+            await SqlAsync(database, string.Create(CultureInfo.InvariantCulture,
+                $"ALTER TABLE readings ATTACH PARTITION {partition} FOR VALUES FROM ('{day:yyyy-MM-dd}T00:00:00Z') TO ('{day.AddDays(1):yyyy-MM-dd}T00:00:00Z')"));
+        }
+
+        // Acknowledging before commit would have lost it; instead the broker redelivers it on reconnect.
+        await HistoryWhenAsync(admin, asset, count: 1);
+    }
+
+    [Fact]
+    public async Task An_Asset_delete_that_comes_while_a_batch_is_storing_waits_for_it_and_then_Archives()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        await using var blocker = await OpenDatabaseAsync();
+        await using var hold = await blocker.BeginTransactionAsync(CancellationToken);
+        // Holds the batch in its last statement, after it has locked its Device and Asset.
+        await SqlAsync(blocker, "LOCK TABLE reading_keys IN SHARE MODE");
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+        await LockWaitsAsync(1);
+        var delete = admin.DeleteAsync($"/assets/{asset}", CancellationToken);
+        await LockWaitsAsync(2);
+        await hold.CommitAsync(CancellationToken);
+        using var deleted = await delete;
+
+        deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        (await ListAsync(admin, "/assets?includeArchived=true")).Single().GetProperty("archived").GetBoolean().ShouldBeTrue();
+        await HistoryWhenAsync(admin, asset, count: 1);
+    }
+
+    [Fact]
+    public async Task A_batch_that_comes_while_its_Device_is_being_removed_waits_and_stores_nothing_for_it()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (device, _) = await AttachedDeviceAsync(admin, "TRK-007");
+        var (_, other) = await AttachedDeviceAsync(admin, "TRK-008");
+        await using var remover = await OpenDatabaseAsync();
+        await using var removal = await remover.BeginTransactionAsync(CancellationToken);
+        // What Device delete does for a Device without Readings (#25).
+        await SqlAsync(remover, "SELECT FROM devices WHERE id = @p0 FOR UPDATE", Guid.Parse(device));
+        await SqlAsync(remover, "DELETE FROM attachments WHERE device_id = @p0", Guid.Parse(device));
+        await SqlAsync(remover, "DELETE FROM devices WHERE id = @p0", Guid.Parse(device));
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+        await LockWaitsAsync(1);
+        await removal.CommitAsync(CancellationToken);
+        await publisher.PublishAsync("TRK-008", TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+
+        // Ingest carries on, and nothing refers to the removed Device.
+        await HistoryWhenAsync(admin, other, count: 1);
+        (await SqlAsync(remover, "SELECT count(*) FROM readings WHERE device_id = @p0", Guid.Parse(device))).ShouldBe(0L);
+        (await SqlAsync(remover, "SELECT count(*) FROM reading_keys WHERE device_id = @p0", Guid.Parse(device))).ShouldBe(0L);
+    }
+
+    [Fact]
+    public async Task Asset_history_refuses_a_range_holding_more_than_MaxReadings()
+    {
+        using var admin = await AdminClientAsync();
+        var (device, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        var from = DateTimeOffset.UtcNow.AddHours(-1);
+        await using var database = await OpenDatabaseAsync();
+        // One Reading per millisecond from `from`, one more than the cap.
+        await SqlAsync(database, """
+            INSERT INTO readings (device_id, boot, seq, asset_id, device_time, received_time, location)
+            SELECT @p0, 1, g, @p1, @p2 + g * interval '1 millisecond', now(), ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography
+            FROM generate_series(0, @p3) g
+            """, Guid.Parse(device), Guid.Parse(asset), from, (long)ReadingsController.MaxReadings);
+
+        using var tooMany = await admin.GetAsync($"/assets/{asset}/readings?{Range(from, from.AddHours(1))}", CancellationToken);
+        using var atTheCap = await admin.GetAsync($"/assets/{asset}/readings?{Range(from, from.AddMilliseconds(ReadingsController.MaxReadings))}", CancellationToken);
+
+        tooMany.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        atTheCap.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -206,10 +312,23 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
     private static async Task<JsonElement[]> HistoryWhenAsync(
         HttpClient admin, string asset, int count, DateTimeOffset? from = null, DateTimeOffset? to = null)
     {
-        var range = $"from={Uri.EscapeDataString(Format(from ?? DateTimeOffset.UtcNow.AddHours(-1)))}&to={Uri.EscapeDataString(Format(to ?? DateTimeOffset.UtcNow.AddHours(1)))}";
+        var range = Range(from ?? DateTimeOffset.UtcNow.AddHours(-1), to ?? DateTimeOffset.UtcNow.AddHours(1));
         var history = await EventuallyAsync(() => ListAsync(admin, $"/assets/{asset}/readings?{range}"), readings => readings.Length >= count);
         history.Length.ShouldBe(count);
         return history;
+    }
+
+    private static string Range(DateTimeOffset from, DateTimeOffset to) =>
+        $"from={Uri.EscapeDataString(Format(from))}&to={Uri.EscapeDataString(Format(to))}";
+
+    /// <summary>Waits until <paramref name="count"/> sessions on the database are waiting for a lock.</summary>
+    private async Task LockWaitsAsync(int count)
+    {
+        await using var database = await OpenDatabaseAsync();
+        var waiting = await EventuallyAsync(
+            async () => (long)(await SqlAsync(database, "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"))!,
+            waiting => waiting >= count);
+        waiting.ShouldBe(count);
     }
 
     private static string Format(DateTimeOffset time) => time.ToString("O", CultureInfo.InvariantCulture);

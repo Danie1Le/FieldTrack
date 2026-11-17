@@ -59,6 +59,10 @@ public sealed class ReadingWriter : IAsyncDisposable
     // so the first stored copy wins, across batches and within one (lowest ordinal = received first).
     // Telemetry from unknown or Archived Devices is skipped (#27 records it as Rejected messages).
     // Among overlapping ended Attachments, the one attached last wins (#25).
+    // Stamping is one-shot, from the Attachments committed when the Reading is stored, and is never redone.
+    // Device time may run up to TelemetryPayload.MaxAhead past Received time, so a Reading near an attach
+    // or detach can land on the neighbouring side: stored before an attach that covers it, it keeps no Asset;
+    // stored before a detach that ends before its Device time, it keeps the old Asset.
     private const string Store = $"""
         WITH staged AS (
             SELECT DISTINCT ON (d.id, s.boot, s.seq) d.id AS device_id, s.*
