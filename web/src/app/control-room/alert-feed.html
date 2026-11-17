@@ -1,0 +1,81 @@
+<header>
+  <strong>Alert feed</strong>
+  <div class="views" role="group" aria-label="Alert feed view">
+    <button type="button" [attr.aria-pressed]="view() === 'active'" (click)="view.set('active')">
+      Active <span class="mono">{{ active().length }}</span>
+    </button>
+    <button type="button" [attr.aria-pressed]="view() === 'history'" (click)="view.set('history')">History</button>
+  </div>
+</header>
+
+<ol class="scroll">
+  @for (alert of view() === 'active' ? active() : history(); track alert.id) {
+    <li class="alert" [attr.data-alert]="alert.id">
+      <span class="sev sev-{{ alert.severity }}" aria-hidden="true"></span>
+      <div class="body">
+        <div class="line">
+          <strong>{{ assetName(alert) }}</strong>
+          <span>{{ ruleName(alert) }}</span>
+          <span class="status st-{{ alert.status }}">
+            @if (alert.status === 'Resolved') {
+              {{ reasonLabels[alert.resolveReason!] }}
+            } @else if (alert.status === 'Acknowledged') {
+              Acknowledged by {{ alert.acknowledgedBy }}
+            } @else {
+              Open
+            }
+          </span>
+        </div>
+        <div class="muted">{{ alert.severity }}: {{ alert.message }}</div>
+        <div class="muted mono meta">
+          <span>raised {{ alert.raisedAt | date: 'HH:mm:ss' }}</span>
+          @if (alert.resolvedAt) {
+            <span>resolved {{ alert.resolvedAt | date: 'HH:mm:ss' }}</span>
+          }
+          @if (alert.resolvedBy) {
+            <span>by {{ alert.resolvedBy }}</span>
+          }
+          @if (alert.fromBacklog) {
+            <span class="tag">From backlog</span>
+          }
+        </div>
+        @if (alert.note) {
+          <q class="note">{{ alert.note }}</q>
+        }
+        @if (alert.status === 'Resolved' && alert.resolveReason === 'Manual' && alert.latched) {
+          <div class="latch">Latched: resolved while still breaching, so no new Alert until it clears.</div>
+        }
+
+        @if (alert.status !== 'Resolved') {
+          @if (resolving() === alert.id) {
+            <form (submit)="$event.preventDefault(); confirmResolve(alert)">
+              @if (alert.latched) {
+                <p class="warn" role="note">Still breaching: no new Alert until it clears.</p>
+              }
+              <label [for]="'note-' + alert.id">Note (optional)</label>
+              <textarea #noteField [id]="'note-' + alert.id" rows="2" maxlength="1000" [value]="note()" (input)="note.set(noteField.value)"></textarea>
+              <div class="acts">
+                <button type="submit" class="btn btn-solid" [disabled]="busy() === alert.id">Confirm</button>
+                <button type="button" class="btn" (click)="cancelResolve()">Cancel</button>
+              </div>
+            </form>
+          } @else {
+            <div class="acts">
+              @if (alert.status === 'Open') {
+                <button type="button" class="btn" [disabled]="busy() === alert.id" (click)="acknowledge(alert)">Acknowledge</button>
+              }
+              <button type="button" class="btn" (click)="openResolve(alert)">Resolve</button>
+            </div>
+          }
+          @if (failure()?.alertId === alert.id) {
+            <p class="error" role="alert">{{ failure()!.text }}</p>
+          }
+        }
+      </div>
+    </li>
+  } @empty {
+    <li class="muted empty">
+      {{ fleet.connection() !== 'live' ? 'Loading…' : view() === 'active' ? 'No Active Alerts.' : 'No Resolved Alerts yet.' }}
+    </li>
+  }
+</ol>

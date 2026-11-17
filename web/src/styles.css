@@ -2,7 +2,7 @@
 :root {
   --bg: #eef1f2; --panel: #ffffff; --panel-2: #f4f6f7; --fg: #16212a; --muted: #5a6770; --line: #d4dbe0;
   --accent: #1c6ea4; --map-bg: #e3e9e4;
-  --ok: #2e8b4c; --alert: #c4382c; --offline: #b0751a; --nodev: #87929a; --on-solid: #ffffff;
+  --ok: #2e8b4c; --alert: #c4382c; --offline: #b0751a; --nodev: #87929a; --ack: #6457b3; --on-solid: #ffffff;
   --font-ui: "Segoe UI", system-ui, sans-serif;
   --font-data: ui-monospace, "Cascadia Mono", Consolas, monospace;
   color-scheme: light;
@@ -12,7 +12,7 @@
   :root {
     --bg: #0e151a; --panel: #151f26; --panel-2: #1b2730; --fg: #e3e9ed; --muted: #94a2ac; --line: #293640;
     --accent: #5aa8da; --map-bg: #17211d;
-    --ok: #4bb96a; --alert: #ee5e50; --offline: #dfa23a; --nodev: #7c8992; --on-solid: #0e151a;
+    --ok: #4bb96a; --alert: #ee5e50; --offline: #dfa23a; --nodev: #7c8992; --ack: #9c91e5; --on-solid: #0e151a;
     color-scheme: dark;
   }
 }
