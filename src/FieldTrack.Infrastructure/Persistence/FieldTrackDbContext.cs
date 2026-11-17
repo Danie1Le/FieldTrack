@@ -173,6 +173,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                     $"kind <> '{nameof(AlertRuleKind.Threshold)}' OR (sensor IS NOT NULL AND operator IS NOT NULL"
                     + " AND threshold IS NOT NULL AND threshold NOT IN ('NaN', 'Infinity', '-Infinity')"
                     + " AND hysteresis IS NOT NULL AND hysteresis >= 0 AND hysteresis < 'Infinity')");
+                // An Offline rule waits at least one 1 s sweep; only Offline rules have seconds.
+                table.HasCheckConstraint("ck_alert_rules_offline",
+                    $"(kind = '{nameof(AlertRuleKind.Offline)}') = (offline_seconds IS NOT NULL) AND offline_seconds > 0");
             });
             // A rule on one Asset goes with it when the Asset is deleted outright, which happens only while it has no
             // Readings and so no Alerts; an Asset with history is Archived instead (#24).
@@ -182,7 +185,13 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
         builder.Entity<Alert>(alert =>
         {
-            alert.ComplexProperty(a => a.Reading);
+            // Optional: an Offline Alert has no Reading (silence raised it). Same column names as when it was required.
+            alert.ComplexProperty(a => a.Reading, reading =>
+            {
+                reading.Property(r => r.DeviceId).HasColumnName("reading_device_id");
+                reading.Property(r => r.Boot).HasColumnName("reading_boot");
+                reading.Property(r => r.SequenceNumber).HasColumnName("reading_sequence_number");
+            });
             alert.Property(a => a.Severity).HasConversion<string>();
             alert.Property(a => a.Status).HasConversion<string>();
             alert.Property(a => a.ResolveReason).HasConversion<string>();
@@ -203,6 +212,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                     + $" AND (status <> '{nameof(AlertStatus.Open)}' OR acknowledged_at IS NULL)"
                     + $" AND (status <> '{nameof(AlertStatus.Acknowledged)}' OR acknowledged_at IS NOT NULL)");
                 // Only a user Resolving by hand leaves their id, a note or a latch; the platform leaves none (#10).
+                // The triggering Reading is whole or absent (Offline Alerts).
+                table.HasCheckConstraint("ck_alerts_reading",
+                    "(reading_device_id IS NULL) = (reading_boot IS NULL) AND (reading_boot IS NULL) = (reading_sequence_number IS NULL)");
                 table.HasCheckConstraint("ck_alerts_resolved_by",
                     $"(resolved_by IS NOT NULL) = (resolve_reason IS NOT DISTINCT FROM '{nameof(ResolveReason.Manual)}')"
                     + " AND (resolved_by IS NOT NULL OR (note IS NULL AND NOT latched))");
@@ -230,6 +242,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
         builder.Entity<AlertRuleState>(state =>
         {
             state.HasKey(s => new { s.AlertRuleId, s.AssetId });
+            // The last evaluated Reading is whole or absent: an Offline rule's sweep can set state before any Reading.
+            state.ToTable(table => table.HasCheckConstraint("ck_alert_rule_states_last_evaluated",
+                "(last_device_id IS NULL) = (last_boot IS NULL) AND (last_boot IS NULL) = (last_sequence_number IS NULL)"));
             state.HasOne<AlertRule>().WithMany().HasForeignKey(s => s.AlertRuleId).OnDelete(DeleteBehavior.Cascade);
             state.HasOne<Asset>().WithMany().HasForeignKey(s => s.AssetId).OnDelete(DeleteBehavior.Cascade);
         });

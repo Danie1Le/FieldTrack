@@ -67,8 +67,9 @@ public sealed class AlertRuleRunner
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            states[(reader.GetGuid(0), reader.GetGuid(1))] =
-                new RuleState(reader.GetBoolean(2), new ReadingId(reader.GetGuid(3), reader.GetInt32(4), reader.GetInt64(5)));
+            // ck_alert_rule_states_last_evaluated keeps the three columns all set or all null.
+            states[(reader.GetGuid(0), reader.GetGuid(1))] = new RuleState(reader.GetBoolean(2),
+                reader.IsDBNull(3) ? null : new ReadingId(reader.GetGuid(3), reader.GetInt32(4), reader.GetInt64(5)));
         }
 
         return new AlertRuleRunner(states, time);
@@ -108,9 +109,7 @@ public sealed class AlertRuleRunner
                 if (evaluation.State is { } newState && newState != state)
                 {
                     changed[key] = newState;
-                    writes.BatchCommands.Add(Command(SaveState,
-                        ("rule", rule.Id), ("asset", assetId), ("breached", newState.Breached), ("device", newState.LastEvaluated.DeviceId),
-                        ("boot", newState.LastEvaluated.Boot), ("seq", newState.LastEvaluated.SequenceNumber)));
+                    writes.BatchCommands.Add(Save(rule.Id, assetId, newState));
                 }
             }
         }
@@ -172,10 +171,17 @@ public sealed class AlertRuleRunner
         return rules;
     }
 
+    private static NpgsqlBatchCommand Save(Guid ruleId, Guid assetId, RuleState state) =>
+        Command(SaveState,
+            ("rule", ruleId), ("asset", assetId), ("breached", state.Breached),
+            ("device", (object?)state.LastEvaluated?.DeviceId ?? DBNull.Value), ("boot", (object?)state.LastEvaluated?.Boot ?? DBNull.Value),
+            ("seq", (object?)state.LastEvaluated?.SequenceNumber ?? DBNull.Value));
+
     private static NpgsqlBatchCommand Insert(Alert alert) =>
         Command(InsertAlert,
             ("id", alert.Id), ("rule", alert.AlertRuleId), ("asset", alert.AssetId),
-            ("device", alert.Reading.DeviceId), ("boot", alert.Reading.Boot), ("seq", alert.Reading.SequenceNumber),
+            ("device", (object?)alert.Reading?.DeviceId ?? DBNull.Value), ("boot", (object?)alert.Reading?.Boot ?? DBNull.Value),
+            ("seq", (object?)alert.Reading?.SequenceNumber ?? DBNull.Value),
             ("severity", alert.Severity.ToString()), ("message", alert.Message), ("status", alert.Status.ToString()),
             ("raised_at", alert.RaisedAt), ("resolved_at", (object?)alert.ResolvedAt ?? DBNull.Value),
             ("resolve_reason", (object?)alert.ResolveReason?.ToString() ?? DBNull.Value),

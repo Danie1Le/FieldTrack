@@ -5,4 +5,7 @@ public enum AlertRuleKind
 {
     /// <summary>A sensor value past a threshold, with Hysteresis before it clears.</summary>
     Threshold,
+
+    /// <summary>No Reading received from the Asset's Device for the rule's own number of seconds.</summary>
+    Offline,
 }

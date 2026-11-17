@@ -56,11 +56,11 @@ public sealed record AlertRuleResponse(
 /// <param name="Id">The Alert's id.</param>
 /// <param name="AlertRuleId">The Alert Rule that raised it.</param>
 /// <param name="AssetId">The Asset it is about.</param>
-/// <param name="Reading">The Reading that raised it.</param>
+/// <param name="Reading">The Reading that raised it; null for an Offline Alert, which silence raised.</param>
 /// <param name="Severity">How urgently it needs attention.</param>
 /// <param name="Message">What happened, for people.</param>
 /// <param name="Status">Open, Acknowledged or Resolved.</param>
-/// <param name="RaisedAt">Device time of the Reading that raised it.</param>
+/// <param name="RaisedAt">Device time of the Reading that raised it; for an Offline Alert, the time the platform noticed the silence.</param>
 /// <param name="ResolvedAt">When it was Resolved, or null while Active.</param>
 /// <param name="ResolveReason">Why it was Resolved, or null while Active.</param>
 /// <param name="AcknowledgedBy">Display name of the user who Acknowledged it, or null. Never an email: only Admins see those.</param>
@@ -78,7 +78,7 @@ public sealed record AlertResponse(
     Guid Id,
     Guid AlertRuleId,
     Guid AssetId,
-    ReadingId Reading,
+    ReadingId? Reading,
     Severity Severity,
     string Message,
     AlertStatus Status,

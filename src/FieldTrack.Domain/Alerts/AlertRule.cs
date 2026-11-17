@@ -30,6 +30,12 @@ public sealed class AlertRule
     /// <summary>Threshold rules: what the rule watches and where it breaches and clears; null for other kinds.</summary>
     public ThresholdSettings? ThresholdSettings { get; set; }
 
+    /// <summary>
+    /// Offline rules: how many seconds the Asset's Device may send nothing before the rule raises, so critical
+    /// equipment can alert sooner than the global Offline Asset Status (spec #21 story 31); null for other kinds.
+    /// </summary>
+    public int? OfflineSeconds { get; set; }
+
     /// <summary>Whether the rule covers the Asset <paramref name="assetId"/>, which is in Asset Group <paramref name="assetGroupId"/> (or none).</summary>
     public bool Targets(Guid assetId, Guid? assetGroupId) =>
         AssetId == assetId || (AssetGroupId is not null && AssetGroupId == assetGroupId);

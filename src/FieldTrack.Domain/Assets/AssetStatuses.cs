@@ -22,10 +22,21 @@ public static class AssetStatuses
             (_, true) => AssetStatus.Alerting,
             // Story 26: silence counts from the later of the last Reading and the attach, so a newly attached or
             // re-fitted Device gets its full 120 s before it shows Offline.
-            ({ } attached, _) when now - SilentSince(attached, lastReceivedAt) >= OfflineAfter => AssetStatus.Offline,
+            ({ } attached, _) when now >= OfflineFrom(attached, lastReceivedAt) => AssetStatus.Offline,
             _ => AssetStatus.Normal,
         };
 
-    private static DateTimeOffset SilentSince(DateTimeOffset attachedAt, DateTimeOffset? lastReceivedAt) =>
+    /// <summary>
+    /// When an Asset whose Device was attached at <paramref name="attachedAt"/> and last received a Reading at
+    /// <paramref name="lastReceivedAt"/> (null if never) shows Offline, unless a Reading arrives first.
+    /// </summary>
+    public static DateTimeOffset OfflineFrom(DateTimeOffset attachedAt, DateTimeOffset? lastReceivedAt) =>
+        SilentSince(attachedAt, lastReceivedAt) + OfflineAfter;
+
+    /// <summary>
+    /// When an attached Device's silence began: its last Received time, or its attach when that is later, so a newly
+    /// attached or re-fitted Device gets its full time. Offline Alert Rules count from here too.
+    /// </summary>
+    public static DateTimeOffset SilentSince(DateTimeOffset attachedAt, DateTimeOffset? lastReceivedAt) =>
         lastReceivedAt > attachedAt ? lastReceivedAt.Value : attachedAt;
 }

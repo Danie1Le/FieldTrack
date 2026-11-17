@@ -118,6 +118,59 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Theory]
+    [InlineData("'Offline'", "NULL")]
+    [InlineData("'Offline'", "0")]
+    [InlineData("'Threshold'", "60")]
+    public async Task Database_refuses_an_Offline_rule_without_positive_seconds_and_seconds_on_another_kind(string kind, string offlineSeconds)
+    {
+        await InsertAssetAndAssetGroupAsync();
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(InsertRule(("kind", kind), ("offline_seconds", offlineSeconds))));
+
+        failure.ConstraintName.ShouldBe("ck_alert_rules_offline");
+    }
+
+    [Fact]
+    public async Task Database_keeps_an_Offline_rule_and_its_Alert_and_rule_state_without_a_Reading()
+    {
+        await InsertAssetAndAssetGroupAsync();
+        await ExecuteAsync(InsertRule(("kind", "'Offline'"), ("offline_seconds", "60"),
+            ("sensor", "NULL"), ("operator", "NULL"), ("threshold", "NULL"), ("hysteresis", "NULL")));
+
+        await ExecuteAsync(InsertAlert(("reading_device_id", "NULL"), ("reading_boot", "NULL"), ("reading_sequence_number", "NULL")));
+        await ExecuteAsync(InsertState("NULL", "NULL", "NULL"));
+
+        await using var connection = await OpenDatabaseAsync();
+        (await SqlAsync(connection, "SELECT (SELECT count(*) FROM alerts) + (SELECT count(*) FROM alert_rule_states)")).ShouldBe(2L);
+    }
+
+    [Theory]
+    [InlineData("reading_device_id")]
+    [InlineData("reading_boot")]
+    [InlineData("reading_sequence_number")]
+    public async Task Database_refuses_an_Alert_with_part_of_a_Reading(string column)
+    {
+        await InsertRuleAsync();
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(InsertAlert((column, "NULL"))));
+
+        failure.ConstraintName.ShouldBe("ck_alerts_reading");
+    }
+
+    [Theory]
+    [InlineData("NULL", "1", "0")]
+    [InlineData("gen_random_uuid()", "NULL", "0")]
+    [InlineData("gen_random_uuid()", "1", "NULL")]
+    public async Task Database_refuses_rule_state_with_part_of_its_last_evaluated_Reading(string device, string boot, string sequenceNumber)
+    {
+        await InsertRuleAsync();
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(InsertState(device, boot, sequenceNumber)));
+
+        failure.ConstraintName.ShouldBe("ck_alert_rule_states_last_evaluated");
+    }
+
+    [Theory]
     [InlineData("alert_rules", "kind", "ck_alert_rules_kind")]
     [InlineData("alert_rules", "severity", "ck_alert_rules_severity")]
     [InlineData("alert_rules", "sensor", "ck_alert_rules_sensor")]
@@ -279,10 +332,7 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     public async Task Deleting_an_Asset_without_Alerts_deletes_its_Alert_Rules_and_rule_state()
     {
         await InsertRuleAsync();
-        await ExecuteAsync($"""
-            INSERT INTO alert_rule_states (alert_rule_id, asset_id, breached, last_device_id, last_boot, last_sequence_number)
-            VALUES ('{AlertRuleId}', '{AssetId}', false, gen_random_uuid(), 1, 0)
-            """);
+        await ExecuteAsync(InsertState("gen_random_uuid()", "1", "0"));
 
         await ExecuteAsync("DELETE FROM assets");
 
@@ -333,6 +383,11 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
         ["created_at"] = "now()",
         ["from_backlog"] = "false",
     }, overrides);
+
+    private static string InsertState(string lastDeviceId, string lastBoot, string lastSequenceNumber) => $"""
+        INSERT INTO alert_rule_states (alert_rule_id, asset_id, breached, last_device_id, last_boot, last_sequence_number)
+        VALUES ('{AlertRuleId}', '{AssetId}', true, {lastDeviceId}, {lastBoot}, {lastSequenceNumber})
+        """;
 
     private static string Resolved(params (string Column, string Value)[] overrides) =>
         InsertAlert([("status", "'Resolved'"), ("resolved_at", "now()"), ("resolve_reason", "'Cleared'"), .. overrides]);

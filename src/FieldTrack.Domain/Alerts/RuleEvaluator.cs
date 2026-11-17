@@ -1,4 +1,5 @@
 using System.Globalization;
+using FieldTrack.Domain.Assets;
 using FieldTrack.Domain.Telemetry;
 
 namespace FieldTrack.Domain.Alerts;
@@ -7,7 +8,8 @@ namespace FieldTrack.Domain.Alerts;
 /// The rules engine (ADR 0005): given an Alert Rule, one Asset's rule state and that Asset's newly stored
 /// Readings, works out the new rule state and the Alerts to raise and resolve. No I/O, so ingest can run it
 /// inside the batch transaction and tests can drive it directly. It takes a whole batch rather than one Reading so
-/// that a backlog's breach can be raised and resolved together; every rule kind goes through this one entry point.
+/// that a backlog's breach can be raised and resolved together; every rule kind goes through this one entry point,
+/// and Offline rules also through <see cref="Sweep"/>, since silence has no Reading to evaluate.
 /// </summary>
 public static class RuleEvaluator
 {
@@ -22,11 +24,20 @@ public static class RuleEvaluator
     /// <param name="time">The platform clock, for <see cref="Alert.CreatedAt"/>.</param>
     public static RuleEvaluation Evaluate(AlertRule rule, Guid assetId, RuleState? state, IEnumerable<StoredReading> readings, TimeProvider time)
     {
+        if (rule.Kind == AlertRuleKind.Offline)
+        {
+            // Spec #21: any stored Reading ends the silence, a straggler or late backlog included, so Offline rules
+            // keep no order. Resolved at platform time, like the sweep that raised it; a Device time could predate it.
+            return state is { Breached: true } && readings.Any()
+                ? new RuleEvaluation(state with { Breached = false }, time.GetUtcNow(), [])
+                : new RuleEvaluation(state, null, []);
+        }
+
         DateTimeOffset? resolveActiveAlertAt = null;
         var raised = new List<Alert>();
         // ADR 0005: each Device's Readings in (Boot, Sequence number) order, never Device time. The Device evaluated
         // last goes first, so its stragglers are judged against its own last Reading; any other Device counts as newer.
-        var lastDevice = state?.LastEvaluated.DeviceId;
+        var lastDevice = state?.LastEvaluated?.DeviceId;
         var ordered = readings
             .GroupBy(stored => stored.DeviceId)
             .OrderBy(device => device.Key != lastDevice)
@@ -68,6 +79,47 @@ public static class RuleEvaluator
         }
 
         return new RuleEvaluation(state, resolveActiveAlertAt, raised);
+    }
+
+    /// <summary>
+    /// One sweep tick for <paramref name="rule"/> and the Asset <paramref name="assetId"/>: raises an Offline Alert, at
+    /// the sweep time, once the Asset's Device has sent nothing for the rule's seconds. Other kinds change nothing.
+    /// </summary>
+    /// <param name="rule">An enabled rule that targets the Asset.</param>
+    /// <param name="assetId">An Asset with a Device attached.</param>
+    /// <param name="state">The rule state for this rule and Asset, or null before its first evaluation.</param>
+    /// <param name="tick">The Asset's Device and how long the worker has been caught up.</param>
+    /// <param name="time">The platform clock: the sweep time.</param>
+    public static RuleEvaluation Sweep(AlertRule rule, Guid assetId, RuleState? state, SweepTick tick, TimeProvider time)
+    {
+        var now = time.GetUtcNow();
+        // A breached rule already raised, or was latched by a manual resolve, and waits for a Reading to clear it.
+        // ADR 0005 restart grace: nothing is raised while ingest is still draining the broker backlog.
+        if (rule is not { Kind: AlertRuleKind.Offline, OfflineSeconds: { } seconds } || state is { Breached: true } || tick.CaughtUpAt is not { } caughtUpAt)
+        {
+            return new RuleEvaluation(state, null, []);
+        }
+
+        // Silence counts as for Asset Status, and exactly the rule's seconds is Offline (>=), so the two agree; but never
+        // from before ingest caught up, so a restart gives every Device the rule's seconds to report again.
+        var silentSince = AssetStatuses.SilentSince(tick.AttachedAt, tick.LastReceivedAt);
+        if (now - (caughtUpAt > silentSince ? caughtUpAt : silentSince) < TimeSpan.FromSeconds(seconds))
+        {
+            return new RuleEvaluation(state, null, []);
+        }
+
+        var alert = new Alert
+        {
+            Id = Guid.CreateVersion7(now),
+            AlertRuleId = rule.Id,
+            AssetId = assetId,
+            Severity = rule.Severity,
+            Message = string.Create(CultureInfo.InvariantCulture, $"No Reading received for {seconds} s"),
+            Status = AlertStatus.Open,
+            RaisedAt = now,
+            CreatedAt = now,
+        };
+        return new RuleEvaluation(new RuleState(true, state?.LastEvaluated), null, [alert]);
     }
 
     /// <summary>
