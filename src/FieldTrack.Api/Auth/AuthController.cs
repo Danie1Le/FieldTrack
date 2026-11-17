@@ -99,6 +99,17 @@ public sealed class AuthController(
     }
 
     /// <summary>
+    /// The Demo Operator's email and password, which the login page shows in demo mode so visitors
+    /// can sign in without an account. The password is public by design: it is reset on every deploy
+    /// and cannot be changed (ADR 0002).
+    /// </summary>
+    /// <response code="404">Demo mode is off.</response>
+    [HttpGet("demo-operator")]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<DemoOperatorResponse> DemoOperator() =>
+        demoOperator.Value is { Enabled: true } demo ? new DemoOperatorResponse(demo.Email!, demo.Password!) : NotFound();
+
+    /// <summary>
     /// The user with this email and password, or null. Failures count towards lockout, and an
     /// unknown email, a wrong password and a lockout look the same so none reveals which accounts exist.
     /// </summary>

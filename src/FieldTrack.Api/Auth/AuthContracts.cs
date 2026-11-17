@@ -44,3 +44,12 @@ public sealed record TokenResponse(string AccessToken, DateTimeOffset AccessToke
     /// <inheritdoc />
     public override string ToString() => $"{nameof(TokenResponse)} {{ {nameof(AccessTokenExpiresAt)} = {AccessTokenExpiresAt:O} }}";
 }
+
+/// <summary>The Demo Operator's credentials, shown on the login page in demo mode.</summary>
+/// <param name="Email">The Demo Operator's email.</param>
+/// <param name="Password">The Demo Operator's password, public in demo mode.</param>
+public sealed record DemoOperatorResponse(string Email, string Password)
+{
+    /// <inheritdoc />
+    public override string ToString() => $"{nameof(DemoOperatorResponse)} {{ {nameof(Email)} = {Email} }}";
+}
