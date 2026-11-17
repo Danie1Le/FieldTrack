@@ -1,11 +1,15 @@
-import { Component, DestroyRef, ElementRef, afterRenderEffect, inject, input } from '@angular/core';
+import { Component, DestroyRef, ElementRef, afterRenderEffect, computed, inject, input } from '@angular/core';
 import * as L from 'leaflet';
 import { Reading } from '../control-room/live';
+import { thin } from './replay';
 
 /** A palette colour (styles.css); read from the root, since this host is not on the page yet when the layers are made. */
 const colour = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 const at = (reading: Reading) => L.latLng(reading.latitude, reading.longitude);
+
+/** The most vertices the route or the trail is drawn with (a screen cannot show more). */
+const maxDrawn = 3000;
 
 /**
  * The replay map: the whole route faint, the trail driven so far solid, and a dot at the Reading the replay is at.
@@ -40,6 +44,8 @@ export class ReplayMap {
     fillOpacity: 1,
     interactive: false,
   });
+  /** Made once per range, not per replay tick. */
+  private readonly points = computed(() => this.readings().map(at));
   private fitted = false;
 
   constructor() {
@@ -63,15 +69,15 @@ export class ReplayMap {
     });
 
     afterRenderEffect(() => {
-      this.route.setLatLngs(this.readings().map(at));
+      this.route.setLatLngs(thin(this.points(), maxDrawn));
       this.fitted = false;
       this.fitOnce();
     });
     afterRenderEffect(() => {
-      const shown = this.readings().slice(0, this.position() + 1);
-      this.trail.setLatLngs(shown.map(at));
-      if (shown.length > 0) {
-        this.dot.setLatLng(at(shown[shown.length - 1]));
+      const [points, position] = [this.points(), this.position()];
+      this.trail.setLatLngs(thin(points, maxDrawn, position));
+      if (position >= 0) {
+        this.dot.setLatLng(points[position]);
       }
     });
   }
