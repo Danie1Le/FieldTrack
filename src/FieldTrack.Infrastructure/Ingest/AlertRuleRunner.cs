@@ -14,8 +14,9 @@ public sealed class AlertRuleRunner
     /// <summary>
     /// Reads the Alert Rule version; <see cref="ReadingWriter"/> runs it in each batch before storing and hands it to
     /// <see cref="ReloadCommands"/>. The share lock makes a change to rules or rule state (which raises the version
-    /// first) wait for the batch to commit, and the batch wait for a change that got there first, so a change never
-    /// interleaves with a batch: it sees the batch's Alerts, or the batch sees the change (ADR 0005).
+    /// before touching Alerts or rule state) wait for the batch to commit, and the batch wait for a change that got
+    /// there first, so a change never interleaves with a batch: it sees the batch's Alerts, or the batch sees the
+    /// change (ADR 0005).
     /// </summary>
     public const string ReadVersion = "SELECT version FROM alert_rule_version FOR SHARE";
 
