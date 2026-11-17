@@ -21,8 +21,9 @@ public sealed class FieldTrackFixture : IAsyncLifetime
     private const ushort MqttPort = 1883;
     private const string Schema = "public";
 
-    // PostGIS keeps its coordinate system catalogue in spatial_ref_sys; it is not test data.
-    private static readonly string[] IgnoredTables = ["__EFMigrationsHistory", "spatial_ref_sys"];
+    // PostGIS keeps its coordinate system catalogue in spatial_ref_sys; it is not test data. The migration creates the
+    // one alert_rule_version row (ADR 0005), and ingest needs it.
+    private static readonly string[] IgnoredTables = ["__EFMigrationsHistory", "spatial_ref_sys", "alert_rule_version"];
 
     /// <summary>What a reset deletes: every table in the public schema except the ignored ones.</summary>
     internal static readonly RespawnerOptions RespawnerOptions = new()
