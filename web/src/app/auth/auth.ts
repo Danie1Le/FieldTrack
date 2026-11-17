@@ -13,6 +13,9 @@ interface TokenResponse {
 /** What a sign-in attempt came to; anything else is an unexpected error and throws. */
 export type SignInOutcome = 'signedIn' | 'passwordChangeRequired' | 'refused' | 'tooManyAttempts';
 
+/** What a password change came to: `invalid` carries the API's validation messages; anything else throws. */
+export type ChangePasswordOutcome = 'changed' | { invalid: string[] } | 'refused' | 'tooManyAttempts';
+
 /** Where this tab keeps its refresh token, so a reload stays signed in but a new tab signs in again. */
 export const refreshTokenKey = 'fieldtrack.refreshToken';
 
@@ -35,6 +38,8 @@ export class AuthService {
   private readonly router = inject(Router);
   private readonly access = signal<{ token: string; expiresAt: number } | null>(null);
   private refreshing: Promise<boolean> | null = null;
+  /** Bumped by sign out, so a refresh already in flight cannot bring the ended session back. */
+  private generation = 0;
   private silentRefresh?: ReturnType<typeof setTimeout>;
 
   /** True while this tab holds an access token. */
@@ -60,13 +65,32 @@ export class AuthService {
     }
   }
 
-  /** Replaces the password and signs in; this is how a first sign-in with a temporary password completes. Throws the API's error. */
-  async changePassword(email: string, currentPassword: string, newPassword: string): Promise<void> {
-    this.keep(
-      await firstValueFrom(
-        this.http.post<TokenResponse>('/api/auth/change-password', { email, currentPassword, newPassword }),
-      ),
-    );
+  /** Replaces the password and signs in; this is how a first sign-in with a temporary password completes. */
+  async changePassword(email: string, currentPassword: string, newPassword: string): Promise<ChangePasswordOutcome> {
+    try {
+      this.keep(
+        await firstValueFrom(
+          this.http.post<TokenResponse>('/api/auth/change-password', { email, currentPassword, newPassword }),
+        ),
+      );
+      return 'changed';
+    } catch (error) {
+      if (!(error instanceof HttpErrorResponse)) {
+        throw error;
+      }
+
+      switch (error.status) {
+        case 400:
+          // A validation problem: { errors: { NewPassword: ["Passwords must have at least one digit ('0'-'9')."] } }.
+          return { invalid: Object.values<string[]>(error.error?.errors ?? {}).flat() };
+        case 401:
+          return 'refused';
+        case 429:
+          return 'tooManyAttempts';
+        default:
+          throw error;
+      }
+    }
   }
 
   /** The access token to send, refreshed first when there is none or it has expired; null once the session has ended. */
@@ -85,13 +109,24 @@ export class AuthService {
    * so spending the same one twice would be refused as a replay (ADR 0002).
    */
   refresh(): Promise<boolean> {
-    this.refreshing ??= this.spendRefreshToken().finally(() => (this.refreshing = null));
+    if (!this.refreshing) {
+      // Clears only its own slot: sign out may have dropped it, and a newer refresh may hold it by now.
+      const refreshing = this.spendRefreshToken().finally(() => {
+        if (this.refreshing === refreshing) {
+          this.refreshing = null;
+        }
+      });
+      this.refreshing = refreshing;
+    }
+
     return this.refreshing;
   }
 
   /** Forgets both tokens and, when a session was open, goes to the sign-in page. */
   signOut(): void {
     const wasSignedIn = this.signedIn();
+    this.generation++;
+    this.refreshing = null;
     clearTimeout(this.silentRefresh);
     this.access.set(null);
     sessionStorage.removeItem(refreshTokenKey);
@@ -106,10 +141,20 @@ export class AuthService {
       return false;
     }
 
+    const generation = this.generation;
     try {
-      this.keep(await firstValueFrom(this.http.post<TokenResponse>('/api/auth/refresh', { refreshToken })));
+      const tokens = await firstValueFrom(this.http.post<TokenResponse>('/api/auth/refresh', { refreshToken }));
+      if (generation !== this.generation) {
+        return false; // Signed out while this was in flight: drop the tokens.
+      }
+
+      this.keep(tokens);
       return true;
     } catch (error) {
+      if (generation !== this.generation) {
+        return false;
+      }
+
       if (error instanceof HttpErrorResponse && error.status === 401) {
         this.signOut();
         return false;
