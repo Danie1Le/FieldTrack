@@ -1,5 +1,6 @@
 import { DecimalPipe } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { AuthService } from '../auth/auth';
 import { breachedSensors, groupByStatus, lastSeen, onMap } from './asset-status';
 import { FleetMap } from './fleet-map';
@@ -12,7 +13,7 @@ const narrow = '(max-width: 1000px)';
 /** The Control room: Assets grouped by Asset Status, the live map and the Alert feed (Dashboard UX prototype, variant B). */
 @Component({
   selector: 'app-control-room',
-  imports: [DecimalPipe, FleetMap],
+  imports: [DecimalPipe, FleetMap, RouterLink],
   providers: [LiveFleet],
   templateUrl: './control-room.html',
   styleUrl: './control-room.css',
