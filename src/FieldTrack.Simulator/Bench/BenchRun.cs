@@ -38,7 +38,8 @@ internal static class BenchRun
     /// if it fails, the publishing stops at once (there is nothing left to measure) and the failure is in <see cref="MeasuredRun.SideTaskFailure"/>.
     /// </summary>
     public static async Task<MeasuredRun> RunAsync(
-        FleetFile fleet, BenchTarget target, string bench, double? rate, TimeSpan duration, Func<CancellationToken, Task>? during, TextWriter log, CancellationToken cancellationToken)
+        FleetFile fleet, BenchTarget target, string bench, double? rate, TimeSpan duration, Func<CancellationToken, Task>? during, TextWriter log, CancellationToken cancellationToken,
+        Scenario? scenario = null)
     {
         await using var counters = await BrokerCounters.ConnectAsync(target.BrokerHost, target.BrokerPort, cancellationToken);
         await BrokerCounters.SettleAsync(cancellationToken);
@@ -54,6 +55,7 @@ internal static class BenchRun
         var tickToPuback = new List<double>();
         var options = new RunOptions(
             target.BrokerHost, target.BrokerPort, rate, duration, target.StatePath, target.PathFor("manifest-", bench, DateTimeOffset.UtcNow),
+            scenario,
             Acknowledged: wait =>
             {
                 lock (tickToPuback)

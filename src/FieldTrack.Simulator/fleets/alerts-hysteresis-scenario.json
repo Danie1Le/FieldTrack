@@ -1,0 +1,14 @@
+{
+  "injections": [
+    { "device": "ALR-001", "kind": "overheat", "atSeconds": 30, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-002", "kind": "overheat", "atSeconds": 60, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-003", "kind": "overheat", "atSeconds": 90, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-004", "kind": "overheat", "atSeconds": 120, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-005", "kind": "overheat", "atSeconds": 150, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-006", "kind": "overheat", "atSeconds": 180, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-007", "kind": "overheat", "atSeconds": 210, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-008", "kind": "overheat", "atSeconds": 40, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-009", "kind": "overheat", "atSeconds": 100, "durationSeconds": 60, "amount": 100 },
+    { "device": "ALR-010", "kind": "overheat", "atSeconds": 160, "durationSeconds": 60, "amount": 100 }
+  ]
+}

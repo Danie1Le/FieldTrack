@@ -58,6 +58,17 @@ internal static class SimulatorCli
               of 10 warm runs. `geofence` and `history` restart the compose postgres container before every cold run (the OS page cache is
               not flushed).
 
+        bench alert-latency|offline|hysteresis --fleet <file> --compose-project <name> [--scenario <file>] [--rate 10 --duration 300]
+              The alert benchmarks (#45), on a stack whose ingest is running; they seed the fleet (fleets/alerts.json) and create their own Alert
+              Rules. `alert-latency` publishes --alerts (default 200) Readings that breach a Threshold rule, over the first --devices (default 10)
+              Devices, and listens on SignalR as a new Operator: publish-to-receive p95 must be under 500 ms, split at CreatedAt into server and
+              push time. `offline` runs --scenario (default fleets/alerts-offline-scenario.json: long and short Power offs and Coverage gaps)
+              against an Offline rule of --offline-seconds (default 20): every long dropout needs an Alert created within the last Received time
+              plus those seconds plus 2 s, and any Alert without a long dropout is a false alarm. `hysteresis` runs --scenario (default
+              fleets/alerts-hysteresis-scenario.json, noisy engine temperature) against two Threshold rules (above --threshold, default 90) with
+              Hysteresis 0 and --hysteresis (default 8) at once, so both see the same Readings; a false Alert is one outside every Fault window
+              of the Manifest. Use a stack not shared with another benchmark: Alerts from earlier runs and rules stay in the database.
+
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
         FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password.
         """;
