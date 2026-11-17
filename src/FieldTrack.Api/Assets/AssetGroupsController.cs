@@ -54,7 +54,16 @@ public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBa
         }
 
         group.Name = request.Name;
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The group was deleted after it was read: the UPDATE matched no row.
+            return NotFound();
+        }
+
         return ToResponse(group);
     }
 

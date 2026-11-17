@@ -109,6 +109,24 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
+    public async Task Renaming_an_Asset_Group_while_it_is_deleted_finds_no_group()
+    {
+        using var admin = await AdminClientAsync();
+        var group = await CreateAsync(admin, "/asset-groups", new { name = "Depot" });
+        await using var other = await OpenDatabaseAsync();
+        await using var deleting = await other.BeginTransactionAsync(CancellationToken);
+        await SqlAsync(other, "DELETE FROM asset_groups WHERE id = @p0", Guid.Parse(group));
+
+        var rename = admin.PutAsJsonAsync($"/asset-groups/{group}", new { name = "Main depot" }, CancellationToken);
+        await LockWaitsAsync(1);
+        await deleting.CommitAsync(CancellationToken);
+
+        using var renamed = await rename;
+        renamed.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await ListAsync(admin, "/asset-groups")).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Admin_edits_an_Asset_and_moves_it_between_Asset_Groups()
     {
         using var admin = await AdminClientAsync();
