@@ -33,7 +33,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
     public DbSet<Attachment> Attachments => Set<Attachment>();
 
-    /// <summary>Telemetry messages ingest refused, with their reasons. Ingest writes them with hand-written SQL (ADR 0004).</summary>
+    /// <summary>Telemetry messages ingest refused, with their reasons.</summary>
     public DbSet<RejectedMessage> RejectedMessages => Set<RejectedMessage>();
 
     /// <summary>
@@ -104,8 +104,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // Stored by name so hand-written SQL and exports read it without a lookup. The check keeps
             // hand-written SQL to the same names; renaming an AssetType member needs a data migration.
             asset.Property(a => a.Type).HasConversion<string>();
-            asset.ToTable(table => table.HasCheckConstraint(
-                "ck_assets_type", $"type IN ({string.Join(", ", Enum.GetNames<AssetType>().Select(name => $"'{name}'"))})"));
+            asset.ToTable(table => table.HasCheckConstraint("ck_assets_type", NamesCheck<AssetType>("type")));
             // An Asset Group that still has Assets cannot be deleted (#24).
             asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -138,10 +137,19 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
         builder.Entity<RejectedMessage>(rejected =>
         {
-            // By name, like Asset Type, and checked so ingest's hand-written SQL keeps to the same names.
+            // By name, like Asset Type, and checked so hand-written SQL keeps to the same names.
             rejected.Property(r => r.Reason).HasConversion<string>();
-            rejected.ToTable(table => table.HasCheckConstraint(
-                "ck_rejected_messages_reason", $"reason IN ({string.Join(", ", Enum.GetNames<RejectReason>().Select(name => $"'{name}'"))})"));
+            rejected.ToTable(table => table.HasCheckConstraint("ck_rejected_messages_reason", NamesCheck<RejectReason>("reason")));
+            // Anyone who can publish can add rows, so each row is bounded: the payload by the broker's
+            // message_size_limit, the topic here.
+            rejected.Property(r => r.Topic).HasMaxLength(RejectedMessage.MaxTopicLength);
+            // The retention purge deletes by Received time; the second index finds a topic's recent Rejected messages.
+            rejected.HasIndex(r => r.ReceivedTime);
+            rejected.HasIndex(r => new { r.Topic, r.ReceivedTime });
         });
     }
+
+    /// <summary>A CHECK that <paramref name="column"/> holds the name of a <typeparamref name="TEnum"/> member.</summary>
+    private static string NamesCheck<TEnum>(string column) where TEnum : struct, Enum =>
+        $"{column} IN ({string.Join(", ", Enum.GetNames<TEnum>().Select(name => $"'{name}'"))})";
 }
