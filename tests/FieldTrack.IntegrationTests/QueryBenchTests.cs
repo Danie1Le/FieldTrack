@@ -76,6 +76,45 @@ public sealed class QueryBenchTests(FieldTrackFixture fixture) : IntegrationTest
         again.Message.ShouldContain("not empty");
     }
 
+    [Fact]
+    public async Task The_geofence_bench_counts_the_Readings_in_an_area_of_about_one_percent_with_and_without_index_scans()
+    {
+        await SeedHistoryAsync();
+
+        var outcome = await GeofenceBench.RunAsync(Target, fraction: 0.01, warmRuns: 10, TextWriter.Null, CancellationToken);
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("readings").GetInt64().ShouldBe(Readings);
+        results.GetProperty("inside").GetInt64().ShouldBeInRange(1, 20);
+        results.GetProperty("fractionInside").GetDouble().ShouldBeInRange(0.001, 0.025);
+        results.GetProperty("withIndex").GetProperty("warmMs").GetArrayLength().ShouldBe(10);
+        results.GetProperty("withIndex").GetProperty("cold").GetProperty("executionMs").GetDouble().ShouldBeGreaterThan(0);
+        var withoutIndex = results.GetProperty("withoutIndex").GetProperty("cold").GetProperty("nodeTypes").EnumerateArray().Select(node => node.GetString()).ToList();
+        withoutIndex.ShouldContain("Seq Scan");
+        withoutIndex.ShouldNotContain(node => node!.Contains("Index", StringComparison.Ordinal), "the run without the GiST index must not use one");
+        outcome.Pass.ShouldBeTrue("a few hundred Readings are far inside the 50 ms bar");
+    }
+
+    [Fact]
+    public async Task The_history_bench_reads_one_Assets_24_hours_from_both_tables_and_the_partitioned_plan_prunes_to_the_days_it_spans()
+    {
+        await SeedHistoryAsync();
+
+        var outcome = await HistoryBench.RunAsync(Target, warmRuns: 10, TextWriter.Null, CancellationToken);
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("rows").GetInt64().ShouldBe(96, "24 hours of one Reading per 15 minutes");
+        var partitioned = results.GetProperty("partitioned");
+        var unpartitioned = results.GetProperty("unpartitioned");
+        partitioned.GetProperty("cold").GetProperty("rowsReturned").GetInt64().ShouldBe(96);
+        unpartitioned.GetProperty("cold").GetProperty("rowsReturned").GetInt64().ShouldBe(96);
+        partitioned.GetProperty("cold").GetProperty("relationsScanned").GetInt32().ShouldBeInRange(1, 2, "a 24 h window touches at most two daily partitions of the four");
+        unpartitioned.GetProperty("cold").GetProperty("relationsScanned").GetInt32().ShouldBe(1);
+        partitioned.GetProperty("warmMs").GetArrayLength().ShouldBe(10);
+        results.GetProperty("partitionedFasterPercent").ValueKind.ShouldBe(JsonValueKind.Number);
+        outcome.Pass.ShouldBeTrue();
+    }
+
     public void Dispose()
     {
         // The shared database outlives this class: take back the old partitions and the copy so another test class does not meet them.
