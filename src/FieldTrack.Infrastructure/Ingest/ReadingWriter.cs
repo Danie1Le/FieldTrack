@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Telemetry;
 using Npgsql;
@@ -299,12 +300,14 @@ public sealed class ReadingWriter : IAsyncDisposable
             rules = await AlertRuleRunner.ReadRulesAsync(reader, cancellationToken);
         }
 
+        var evaluationStarted = Stopwatch.GetTimestamp();
         var outcome = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
+        var evaluation = Stopwatch.GetElapsedTime(evaluationStarted);
         _crashes?.Reached(IngestCrashPoint.AfterEvaluation);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(outcome.States);
         return new WrittenBatch(
-            reasons, identical, conflicting, [.. stored.Select(reading => reading.AssetId).Distinct()], outcome.Raised, outcome.Resolved);
+            reasons, identical, conflicting, [.. stored.Select(reading => reading.AssetId).Distinct()], outcome.Raised, outcome.Resolved, evaluation);
     }
 
     /// <inheritdoc />
