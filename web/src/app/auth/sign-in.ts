@@ -1,13 +1,12 @@
-import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { AuthService } from './auth';
+import { AuthService, DemoOperator } from './auth';
 
 const tooManyAttempts = 'Too many attempts. Wait a minute and try again.';
 
 /**
- * The sign-in page. A temporary password (the seeded first Admin's, #61) gets a second step that replaces it, which
- * is how that first sign-in completes. In demo mode it shows the Demo Operator's credentials (spec #21 story 78).
+ * The sign-in page. A temporary password (the seeded first Admin's, or one an Admin set when creating the user, #61)
+ * gets a second step that replaces it, which is how a first sign-in completes. In demo mode it shows the Demo Operator's credentials (spec #21 story 78).
  */
 @Component({
   selector: 'app-sign-in',
@@ -19,7 +18,7 @@ export class SignIn {
   private readonly router = inject(Router);
 
   /** The Demo Operator's credentials in demo mode, else null. Public by design: reset on every deploy (ADR 0002). */
-  protected readonly demo = signal<{ email: string; password: string } | null>(null);
+  protected readonly demo = signal<DemoOperator | null>(null);
   protected readonly step = signal<'signIn' | 'changePassword'>('signIn');
   protected readonly busy = signal(false);
   /** Messages to show; they may come from the API, so the template renders them as text. */
@@ -28,10 +27,7 @@ export class SignIn {
   private password = '';
 
   constructor() {
-    // 404 outside demo mode; any failure just leaves the Demo Operator off the page.
-    inject(HttpClient)
-      .get<{ email: string; password: string }>('/api/auth/demo-operator')
-      .subscribe({ next: (demo) => this.demo.set(demo), error: () => undefined });
+    void this.auth.demoOperator().then((demo) => this.demo.set(demo));
   }
 
   protected async signIn(email: string, password: string): Promise<void> {
