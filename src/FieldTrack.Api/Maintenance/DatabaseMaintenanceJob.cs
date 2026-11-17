@@ -7,13 +7,19 @@ namespace FieldTrack.Api.Maintenance;
 
 /// <summary>
 /// Housekeeping the database needs on a clock, run at startup and then hourly: daily Reading partitions
-/// for every day ingest may write to (ADR 0003), and the purge of old refresh tokens (ADR 0002).
+/// for every day ingest may write to (ADR 0003), and the purge of old refresh tokens (ADR 0002) and old Rejected messages.
 /// </summary>
 public sealed partial class DatabaseMaintenanceJob(IServiceScopeFactory scopes, TimeProvider time, ILogger<DatabaseMaintenanceJob> logger)
     : BackgroundService
 {
     /// <summary>How many days ahead partitions exist (spec #21).</summary>
     public const int PartitionDaysAhead = 7;
+
+    /// <summary>
+    /// How long Rejected messages are kept. Anyone who can publish can add them, so they cannot be kept forever;
+    /// a month is long enough to see why a Device's Readings went missing.
+    /// </summary>
+    public static readonly TimeSpan RejectedMessageRetention = TimeSpan.FromDays(30);
 
     private static readonly TimeSpan _interval = TimeSpan.FromHours(1);
 
@@ -52,6 +58,9 @@ public sealed partial class DatabaseMaintenanceJob(IServiceScopeFactory scopes, 
         await db.RefreshTokens
             .Where(token => token.ExpiresAt < spentCutoff || (token.RevokedAt == null && token.ExpiresAt < now))
             .ExecuteDeleteAsync(cancellationToken);
+
+        var rejectedCutoff = now - RejectedMessageRetention;
+        await db.RejectedMessages.Where(message => message.ReceivedTime < rejectedCutoff).ExecuteDeleteAsync(cancellationToken);
     }
 
     [LoggerMessage(LogLevel.Error, "Database maintenance failed; retrying in an hour.")]
