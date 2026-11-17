@@ -13,7 +13,8 @@ internal sealed class SimulatedDevice
 
     private readonly FleetDevice _spec;
     private readonly IMotion _motion;
-    private byte[]? _pending;
+    private readonly Queue<byte[]> _outbox = new();
+    private long _captured;
 
     /// <summary>A Device with the traits of <paramref name="spec"/> that is in <paramref name="boot"/> and moves as <paramref name="motion"/> says.</summary>
     public SimulatedDevice(FleetDevice spec, int boot, IMotion motion)
@@ -45,21 +46,26 @@ internal sealed class SimulatedDevice
     /// <summary>The Boot this Device is in.</summary>
     public int Boot { get; }
 
-    /// <summary>The Sequence number of the next Reading; also how many Readings were published in this Boot.</summary>
-    public long NextSequence { get; private set; }
+    /// <summary>How many Readings the broker acknowledged in this Boot; they are Sequence numbers 0 to one less.</summary>
+    public long PublishedCount { get; private set; }
+
+    /// <summary>What the broker acknowledged, one range per Boot; a Boot that published nothing has none.</summary>
+    public IReadOnlyList<PublishedRange> Ranges => PublishedCount == 0 ? [] : [new PublishedRange(Boot, 0, PublishedCount - 1)];
+
+    /// <summary>The Device takes a Reading at <paramref name="now"/>, <paramref name="elapsed"/> into the run.</summary>
+    public void Step(DateTimeOffset now, TimeSpan elapsed) => _outbox.Enqueue(Build(now, elapsed));
 
     /// <summary>
-    /// The payload of the next Reading, built at <paramref name="now"/>, <paramref name="elapsed"/> into the run. Until
-    /// <see cref="Published"/> every call returns the same bytes, whatever times it is given, so a retry sends the Reading
-    /// again and ingest sees an identical duplicate, not a conflicting one (ADR 0001, ADR 0003).
+    /// The payload to send next, or null when nothing waits. Until <see cref="Published"/> every call returns the same bytes,
+    /// so a retry sends the Reading again and ingest sees an identical duplicate, not a conflicting one (ADR 0001, ADR 0003).
     /// </summary>
-    public byte[] NextPayload(DateTimeOffset now, TimeSpan elapsed) => _pending ??= Build(now, elapsed);
+    public byte[]? NextToSend => _outbox.TryPeek(out var payload) ? payload : null;
 
-    /// <summary>Records that the broker acknowledged the Reading <see cref="NextPayload"/> built.</summary>
+    /// <summary>Records that the broker acknowledged the Reading <see cref="NextToSend"/> returned.</summary>
     public void Published()
     {
-        _pending = null;
-        NextSequence++;
+        _outbox.Dequeue();
+        PublishedCount++;
     }
 
     // Seeded from the serial, so a Device wanders the same way every run; string.GetHashCode is randomised per process.
@@ -72,7 +78,7 @@ internal sealed class SimulatedDevice
     {
         var motion = _motion.At(elapsed);
         var message = new Message(
-            Boot, NextSequence, now.ToUnixTimeMilliseconds(), Math.Round(motion.Position.Lat, 6), Math.Round(motion.Position.Lon, 6),
+            Boot, _captured++, now.ToUnixTimeMilliseconds(), Math.Round(motion.Position.Lat, 6), Math.Round(motion.Position.Lon, 6),
             Value(Sensor.SpeedKph, motion.SpeedKph),
             Value(Sensor.EngineTempC, 85),
             Value(Sensor.FuelPct, FuelPct(elapsed)),

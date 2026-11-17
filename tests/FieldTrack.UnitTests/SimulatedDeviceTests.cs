@@ -17,7 +17,7 @@ public sealed class SimulatedDeviceTests
     {
         var device = Truck(boot: 3, [.. Enum.GetValues<Sensor>()]);
 
-        var payload = device.NextPayload(Now, TimeSpan.FromMinutes(10));
+        var payload = Take(device, TimeSpan.FromMinutes(10));
 
         TelemetryPayload.TryParse(payload, Now, out var reading, out _).ShouldBeTrue();
         reading.Boot.ShouldBe(3);
@@ -37,7 +37,7 @@ public sealed class SimulatedDeviceTests
     {
         var device = Truck(sensors: [Sensor.FuelPct, Sensor.BatteryV]);
 
-        using var document = JsonDocument.Parse(device.NextPayload(Now, TimeSpan.Zero));
+        using var document = JsonDocument.Parse(Take(device, TimeSpan.Zero));
 
         document.RootElement.EnumerateObject().Select(property => property.Name)
             .Order().ShouldBe(["batteryV", "boot", "fuelPct", "lat", "lon", "seq", "ts"]);
@@ -48,13 +48,13 @@ public sealed class SimulatedDeviceTests
     {
         var device = Truck();
 
-        var first = device.NextPayload(Now, TimeSpan.Zero);
-        device.Published();
-        var next = device.NextPayload(Now.AddSeconds(1), TimeSpan.FromSeconds(1));
+        var first = Take(device, TimeSpan.Zero);
+        var next = Take(device, TimeSpan.FromSeconds(1));
 
         Sequence(first).ShouldBe(0);
         Sequence(next).ShouldBe(1);
-        device.NextSequence.ShouldBe(1);
+        device.PublishedCount.ShouldBe(2);
+        device.Ranges.ShouldBe([new PublishedRange(3, 0, 1)]);
     }
 
     [Fact]
@@ -64,11 +64,13 @@ public sealed class SimulatedDeviceTests
         var spec = new FleetDevice("TRK-001", "Haul truck 1", AssetType.Truck, null, null, 36, [Sensor.FuelPct]);
         var device = new SimulatedDevice(spec, 1, new RandomWalkMotion(RandomWalkMotion.DefaultCentre, 36, 1500, new Random(1)));
 
-        var first = device.NextPayload(Now, TimeSpan.FromSeconds(1));
-        var retried = device.NextPayload(Now.AddSeconds(30), TimeSpan.FromSeconds(31));
+        device.Step(Now, TimeSpan.FromSeconds(1));
+        var first = device.NextToSend;
+        var retried = device.NextToSend;
         device.Published();
-        var next = device.NextPayload(Now.AddSeconds(31), TimeSpan.FromSeconds(32));
+        var next = Take(device, TimeSpan.FromSeconds(32));
 
+        first.ShouldNotBeNull();
         retried.ShouldBe(first);
         next.ShouldNotBe(first);
         Sequence(next).ShouldBe(1);
@@ -79,7 +81,7 @@ public sealed class SimulatedDeviceTests
     {
         var device = Truck(sensors: [Sensor.FuelPct]);
 
-        var fuel = Enumerable.Range(0, 400).Select(minute => Fuel(PublishNext(device, TimeSpan.FromMinutes(minute)))).ToArray();
+        var fuel = Enumerable.Range(0, 400).Select(minute => Fuel(Take(device, TimeSpan.FromMinutes(minute)))).ToArray();
 
         fuel[0].ShouldBeGreaterThan(fuel[60]);
         fuel.Min().ShouldBeGreaterThanOrEqualTo(10);
@@ -119,13 +121,15 @@ public sealed class SimulatedDeviceTests
 
     private static Position PositionOf(SimulatedDevice device, TimeSpan elapsed)
     {
-        var root = JsonDocument.Parse(device.NextPayload(Now, elapsed)).RootElement;
+        var root = JsonDocument.Parse(Take(device, elapsed)).RootElement;
         return new Position(root.GetProperty("lat").GetDouble(), root.GetProperty("lon").GetDouble());
     }
 
-    private static byte[] PublishNext(SimulatedDevice device, TimeSpan elapsed)
+    // One tick of a healthy Device with a working broker: it takes a Reading and the broker acknowledges it.
+    private static byte[] Take(SimulatedDevice device, TimeSpan elapsed)
     {
-        var payload = device.NextPayload(Now, elapsed);
+        device.Step(Now, elapsed);
+        var payload = device.NextToSend!;
         device.Published();
         return payload;
     }
