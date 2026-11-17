@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="MQTTnet" />
+    <PackageReference Include="Npgsql" />
   </ItemGroup>
 
   <!-- Internal types stay internal; the test projects exercise them directly. -->

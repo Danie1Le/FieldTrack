@@ -1,0 +1,6 @@
+# Layer over docker-compose.yml for benchmarks (#44):
+#   docker compose -f docker-compose.yml -f bench/docker-compose.bench.yml up --build -d
+# Postgres records each transaction's commit time so `bench` can read when a batch committed (ingest latency).
+services:
+  postgres:
+    command: ["postgres", "-c", "track_commit_timestamp=on"]
