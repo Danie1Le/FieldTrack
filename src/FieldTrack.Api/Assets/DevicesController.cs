@@ -74,9 +74,7 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
         if (await readingHistory.DeviceHasReadingsAsync(id, cancellationToken))
         {
             device.Archived = true;
-            await db.Attachments
-                .Where(attachment => attachment.DeviceId == id && attachment.DetachedAt == null)
-                .ExecuteUpdateAsync(set => set.SetProperty(attachment => attachment.DetachedAt, time.GetUtcNow()), cancellationToken);
+            await db.EndOpenAttachmentsAsync(attachment => attachment.DeviceId == id, time.GetUtcNow(), cancellationToken);
         }
         else
         {

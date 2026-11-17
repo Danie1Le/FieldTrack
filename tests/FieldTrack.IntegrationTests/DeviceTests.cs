@@ -1,11 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using FieldTrack.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection;
-using static FieldTrack.IntegrationTests.FieldTrackApiFactory;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -14,7 +9,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Admin_registers_Devices_by_serial_number_and_lists_them()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
 
         using var created = await admin.PostAsJsonAsync("/devices", new { serialNumber = "TRK-007" }, CancellationToken);
         await CreateAsync(admin, "/devices", new { serialNumber = "GEN-001" });
@@ -34,7 +29,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [InlineData("TRK 007")]
     public async Task Register_refuses_a_serial_number_that_cannot_be_a_telemetry_topic_level(string serialNumber)
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
 
         using var response = await admin.PostAsJsonAsync("/devices", new { serialNumber }, CancellationToken);
 
@@ -45,7 +40,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Register_refuses_a_serial_number_already_registered()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
         await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
 
         using var response = await admin.PostAsJsonAsync("/devices", new { serialNumber = "TRK-007" }, CancellationToken);
@@ -57,7 +52,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Attach_and_detach_record_times_and_history_is_listed_per_Asset_and_per_Device()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         var truck = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
         var spare = await CreateAsync(admin, "/assets", new { name = "Haul truck 8", type = "Truck" });
@@ -83,17 +78,17 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task A_Device_is_on_at_most_one_Asset_and_an_Asset_has_at_most_one_Device()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
-        var tracker = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
-        var other = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-008" });
+        using var admin = await AdminClientAsync();
+        var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
+        var otherDevice = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-008" });
         var truck = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
         var spare = await CreateAsync(admin, "/assets", new { name = "Haul truck 8", type = "Truck" });
-        var attachment = await CreateAsync(admin, "/attachments", new { deviceId = tracker, assetId = truck });
+        var attachment = await CreateAsync(admin, "/attachments", new { deviceId = device, assetId = truck });
 
-        using var deviceTaken = await admin.PostAsJsonAsync("/attachments", new { deviceId = tracker, assetId = spare }, CancellationToken);
-        using var assetTaken = await admin.PostAsJsonAsync("/attachments", new { deviceId = other, assetId = truck }, CancellationToken);
+        using var deviceTaken = await admin.PostAsJsonAsync("/attachments", new { deviceId = device, assetId = spare }, CancellationToken);
+        using var assetTaken = await admin.PostAsJsonAsync("/attachments", new { deviceId = otherDevice, assetId = truck }, CancellationToken);
         await admin.PostAsync($"/attachments/{attachment}/detach", null, CancellationToken);
-        using var afterDetach = await admin.PostAsJsonAsync("/attachments", new { deviceId = tracker, assetId = spare }, CancellationToken);
+        using var afterDetach = await admin.PostAsJsonAsync("/attachments", new { deviceId = device, assetId = spare }, CancellationToken);
 
         deviceTaken.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         (await ProblemDetailAsync(deviceTaken)).ShouldBe("The Device is already attached to an Asset; detach it first.");
@@ -105,8 +100,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Attach_refuses_unknown_and_Archived_Devices_and_Assets()
     {
-        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EverythingHasReadings>()));
+        await using var api = ApiWhereEverythingHasReadings();
         using var admin = await AdminClientAsync(api);
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
@@ -130,7 +124,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Detach_refuses_an_ended_or_unknown_Attachment()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
         var attachment = await CreateAsync(admin, "/attachments", new { deviceId = device, assetId = asset });
@@ -146,7 +140,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Deleting_a_Device_without_Readings_removes_it_and_its_Attachments()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
         await CreateAsync(admin, "/attachments", new { deviceId = device, assetId = asset });
@@ -162,8 +156,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     public async Task Deleting_a_Device_with_Readings_Archives_it_and_ends_its_Attachment()
     {
         // Readings arrive with #26; until then the "has Readings" seam answers yes.
-        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EverythingHasReadings>()));
+        await using var api = ApiWhereEverythingHasReadings();
         using var admin = await AdminClientAsync(api);
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         await CreateAsync(admin, "/devices", new { serialNumber = "GEN-001" });
@@ -176,12 +169,16 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
         (await ListAsync(admin, "/devices")).Select(DescribeDevice).ShouldBe([("GEN-001", false)]);
         (await ListAsync(admin, "/devices?includeArchived=true")).Select(DescribeDevice).ShouldBe([("GEN-001", false), ("TRK-007", true)]);
         (await ListAsync(admin, "/attachments")).Select(DescribeAttachment).ShouldBe([(attachment, device, asset, true)]);
+        // Ending the Attachment frees the Asset for another Device.
+        var otherDevice = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-008" });
+        using var reattached = await admin.PostAsJsonAsync("/attachments", new { deviceId = otherDevice, assetId = asset }, CancellationToken);
+        reattached.StatusCode.ShouldBe(HttpStatusCode.Created);
     }
 
     [Fact]
     public async Task Deleting_an_Asset_with_Attachments_but_no_Readings_removes_it_and_its_Attachments()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
         var attachment = await CreateAsync(admin, "/attachments", new { deviceId = device, assetId = asset });
@@ -199,8 +196,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     public async Task Archiving_an_Asset_ends_its_Attachment()
     {
         // Readings arrive with #26; until then the "has Readings" seam answers yes.
-        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services => services.AddScoped<IReadingHistory, EverythingHasReadings>()));
+        await using var api = ApiWhereEverythingHasReadings();
         using var admin = await AdminClientAsync(api);
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
@@ -210,12 +206,16 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
 
         deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         (await ListAsync(admin, "/attachments")).Select(DescribeAttachment).ShouldBe([(attachment, device, asset, true)]);
+        // Ending the Attachment frees the Device for another Asset.
+        var otherAsset = await CreateAsync(admin, "/assets", new { name = "Haul truck 8", type = "Truck" });
+        using var reattached = await admin.PostAsJsonAsync("/attachments", new { deviceId = device, assetId = otherAsset }, CancellationToken);
+        reattached.StatusCode.ShouldBe(HttpStatusCode.Created);
     }
 
     [Fact]
     public async Task Deleting_an_unknown_Device_is_not_found()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
 
         using var response = await admin.DeleteAsync($"/devices/{Guid.NewGuid()}", CancellationToken);
 
@@ -225,7 +225,7 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [Fact]
     public async Task Operators_read_Devices_and_Attachments_but_cannot_change_them()
     {
-        using var admin = await AdminClientAsync(Fixture.Api);
+        using var admin = await AdminClientAsync();
         var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
         var attachment = await CreateAsync(admin, "/attachments", new { deviceId = device, assetId = asset });
@@ -259,16 +259,6 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
-    private static async Task<string> CreateAsync(HttpClient client, string path, object body)
-    {
-        using var response = await client.PostAsJsonAsync(path, body, CancellationToken);
-        response.StatusCode.ShouldBe(HttpStatusCode.Created);
-        return (await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken)).GetProperty("id").GetString()!;
-    }
-
-    private static async Task<JsonElement[]> ListAsync(HttpClient client, string path) =>
-        (await client.GetFromJsonAsync<JsonElement[]>(path, CancellationToken)).ShouldNotBeNull();
-
     private static async Task<string?> ProblemDetailAsync(HttpResponseMessage response) =>
         (await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken)).GetProperty("detail").GetString();
 
@@ -285,11 +275,4 @@ public sealed class DeviceTests(FieldTrackFixture fixture) : IntegrationTest(fix
 
     private static DateTimeOffset TimeOf(JsonElement attachment, string property) =>
         attachment.GetProperty(property).GetDateTimeOffset();
-
-    private static async Task<HttpClient> AdminClientAsync(WebApplicationFactory<Program> api)
-    {
-        var client = api.CreateClient();
-        await AuthClient.AuthorizeAsync(client, AdminEmail, AdminPassword);
-        return client;
-    }
 }

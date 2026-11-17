@@ -94,9 +94,7 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
         if (await readingHistory.AssetHasReadingsAsync(id, cancellationToken))
         {
             asset.Archived = true;
-            await db.Attachments
-                .Where(attachment => attachment.AssetId == id && attachment.DetachedAt == null)
-                .ExecuteUpdateAsync(set => set.SetProperty(attachment => attachment.DetachedAt, time.GetUtcNow()), cancellationToken);
+            await db.EndOpenAttachmentsAsync(attachment => attachment.AssetId == id, time.GetUtcNow(), cancellationToken);
         }
         else
         {

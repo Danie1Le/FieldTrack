@@ -40,10 +40,11 @@ public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider t
         var (deviceId, assetId) = (request.DeviceId!.Value, request.AssetId!.Value);
         // Lock the Device, then the Asset, so concurrent attaches of either queue up and see each
         // other's Attachment, and a concurrent delete or Archive of either finishes first. The partial
-        // unique indexes on open Attachments back this up.
+        // unique indexes on open Attachments back this up. NO KEY UPDATE blocks the same writers as
+        // FOR UPDATE but not FOR KEY SHARE, which inserts of rows with a foreign key to the Device or Asset take.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var device = await db.Devices.FromSql($"SELECT * FROM devices WHERE id = {deviceId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
-        var asset = await db.Assets.FromSql($"SELECT * FROM assets WHERE id = {assetId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        var device = await db.Devices.FromSql($"SELECT * FROM devices WHERE id = {deviceId} FOR NO KEY UPDATE").SingleOrDefaultAsync(cancellationToken);
+        var asset = await db.Assets.FromSql($"SELECT * FROM assets WHERE id = {assetId} FOR NO KEY UPDATE").SingleOrDefaultAsync(cancellationToken);
         if (device is null)
         {
             ModelState.AddModelError(nameof(AttachmentRequest.DeviceId), "No Device has this id.");
@@ -81,19 +82,23 @@ public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider t
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<AttachmentResponse>> Detach(Guid id, CancellationToken cancellationToken)
     {
-        // A conditional update, so a racing detach or Archive ends the Attachment only once.
-        var ended = await db.Attachments
-            .Where(attachment => attachment.Id == id && attachment.DetachedAt == null)
-            .ExecuteUpdateAsync(set => set.SetProperty(attachment => attachment.DetachedAt, time.GetUtcNow()), cancellationToken);
-        var attachment = await db.Attachments.AsNoTracking().SingleOrDefaultAsync(attachment => attachment.Id == id, cancellationToken);
+        // The row is locked so a racing delete or Archive waits, and the response matches what committed.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var attachment = await db.Attachments.FromSql($"SELECT * FROM attachments WHERE id = {id} FOR UPDATE").AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (attachment is null)
         {
             return NotFound();
         }
 
-        return ended == 0
-            ? Problem("The Attachment has already ended.", statusCode: StatusCodes.Status409Conflict)
-            : ToResponse(attachment);
+        if (attachment.DetachedAt is not null)
+        {
+            return Problem("The Attachment has already ended.", statusCode: StatusCodes.Status409Conflict);
+        }
+
+        var now = time.GetUtcNow();
+        await db.EndOpenAttachmentsAsync(a => a.Id == id, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return ToResponse(attachment) with { DetachedAt = now };
     }
 
     /// <summary>Why the Device cannot be attached to the Asset, or null when it can.</summary>
