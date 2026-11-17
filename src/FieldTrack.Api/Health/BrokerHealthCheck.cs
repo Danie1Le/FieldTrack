@@ -30,7 +30,14 @@ public sealed class BrokerHealthCheck(IOptions<BrokerOptions> options) : IHealth
         using var client = new MqttClientFactory().CreateMqttClient();
         try
         {
-            await client.ConnectAsync(clientOptions, cancellationToken);
+            // MQTTnet returns a refused CONNACK (bad or rotated credentials, say) instead of throwing. The broker
+            // answered, so it is reported apart from an unreachable one.
+            var connected = await client.ConnectAsync(clientOptions, cancellationToken);
+            if (connected.ResultCode != MqttClientConnectResultCode.Success)
+            {
+                return HealthCheckResult.Unhealthy($"MQTT broker at {broker.Host}:{broker.Port} refused the connection: {connected.ResultCode}.");
+            }
+
             await client.DisconnectAsync(cancellationToken: cancellationToken);
             return HealthCheckResult.Healthy();
         }
