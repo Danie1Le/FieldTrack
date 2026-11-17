@@ -100,6 +100,10 @@ _Avoid_: Close, dismiss, clear
 What holds an Alert Rule quiet after a user Resolves its Alert while the condition still holds: the rule raises nothing new for that Asset until the condition clears and breaches again.
 _Avoid_: Snooze, mute, suppression
 
+**Rule state**:
+What an Alert Rule remembers about one Asset between Readings: whether its condition holds and which Reading it evaluated last. It starts afresh when the rule's condition is edited or the Asset's Device is detached.
+_Avoid_: Rule status, alert state
+
 **Hysteresis**:
 The margin a sensor value must move back past a threshold before a threshold Alert resolves itself, so a value hovering at the threshold does not raise Alert after Alert.
 _Avoid_: Deadband, tolerance, buffer
