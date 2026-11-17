@@ -26,25 +26,6 @@ export function positionAt(readings: readonly { deviceTime: string }[], time: nu
   return high;
 }
 
-/**
- * At most `max` evenly spaced items of `items[0..upTo]`, always ending with `items[upTo]` (default the last). A screen
- * cannot show more points than that, and projecting 100,000 of them on every replay tick would cost most of a tick.
- * The spacing depends on the whole list, so a route and the trail driven along it share their vertices.
- */
-export function thin<T>(items: readonly T[], max: number, upTo = items.length - 1): T[] {
-  const stride = Math.max(1, Math.ceil(items.length / max));
-  const thinned: T[] = [];
-  for (let i = 0; i < upTo; i += stride) {
-    thinned.push(items[i]);
-  }
-
-  if (upTo >= 0) {
-    thinned.push(items[upTo]);
-  }
-
-  return thinned;
-}
-
 /** One Threshold rule drawn across a sensor chart: where it breaches, and where an Alert clears again. */
 export interface RuleLine {
   name: string;
