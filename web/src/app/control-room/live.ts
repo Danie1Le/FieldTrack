@@ -1,4 +1,4 @@
-/** Shapes the API sends to the Control room: `GET /assets/live`, the hub's `AssetsUpdated`, `GET /alert-rules`. */
+/** Shapes the API sends to the Control room: `GET /assets/live`, `GET /alerts`, `GET /alert-rules` and the hub's pushes. */
 
 /** Asset Status (GLOSSARY): No device > Alerting > Offline > Normal, computed by the API. */
 export type AssetStatus = 'NoDevice' | 'Alerting' | 'Offline' | 'Normal';
@@ -40,6 +40,39 @@ export interface LiveAsset {
 export interface AssetGroup {
   id: string;
   name: string;
+}
+
+/** Open and Acknowledged Alerts are Active; Resolved is final. */
+export type AlertStatus = 'Open' | 'Acknowledged' | 'Resolved';
+
+export type ResolveReason = 'Cleared' | 'Manual' | 'RuleChanged' | 'RuleDisabled' | 'AssetArchived' | 'DeviceDetached';
+
+/** An Alert (`AlertResponse`), from `GET /alerts`, the Alert actions and the hub's `AlertRaised` / `AlertUpdated`. */
+export interface Alert {
+  id: string;
+  alertRuleId: string;
+  assetId: string;
+  severity: 'Warning' | 'Critical';
+  /** What happened, for people. */
+  message: string;
+  status: AlertStatus;
+  /** Device time of the Reading that raised it. */
+  raisedAt: string;
+  resolvedAt: string | null;
+  resolveReason: ResolveReason | null;
+  /** Display names, never emails. */
+  acknowledgedBy: string | null;
+  acknowledgedAt: string | null;
+  /** Null when the platform Resolved it. */
+  resolvedBy: string | null;
+  note: string | null;
+  /**
+   * The Latch. Active: the condition still holds, so Resolving by hand latches the rule. Resolved: a user Resolved it
+   * while the condition held.
+   */
+  latched: boolean;
+  /** Raised and Resolved in one ingest batch, so it was never Active. */
+  fromBacklog: boolean;
 }
 
 /** An Alert Rule (`AlertRuleResponse`); the Control room reads Threshold rules to highlight out-of-range values. */

@@ -3,11 +3,12 @@ import { DestroyRef, Injectable, InjectionToken, inject, signal } from '@angular
 import { HubConnectionBuilder } from '@microsoft/signalr';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../auth/auth';
-import { AlertRule, AssetGroup, LiveAsset } from './live';
+import { Alert, AlertRule, AlertStatus, AssetGroup, LiveAsset } from './live';
 
 /** The part of SignalR's HubConnection the Control room uses; tests fake it at this boundary. */
 export interface LiveHubConnection {
   on(event: 'AssetsUpdated', handler: (assets: LiveAsset[]) => void): void;
+  on(event: 'AlertRaised' | 'AlertUpdated', handler: (alert: Alert) => void): void;
   onreconnecting(handler: () => void): void;
   onreconnected(handler: () => void): void;
   onclose(handler: (error?: Error) => void): void;
@@ -18,6 +19,9 @@ export interface LiveHubConnection {
 /** Wait before each retry after a failed connect, the last one repeating. */
 const retryDelays = [1_000, 2_000, 5_000, 10_000, 30_000];
 const retryDelay = (attempt: number) => retryDelays[Math.min(attempt, retryDelays.length - 1)];
+
+/** An Alert's status only moves forward (a Resolved Alert never reopens), so a copy behind the one held is stale. */
+const progress: Record<AlertStatus, number> = { Open: 0, Acknowledged: 1, Resolved: 2 };
 
 /** Builds the connection to the API's live hub; the token factory runs on every connect and reconnect. */
 export const LIVE_HUB = new InjectionToken<(accessToken: () => Promise<string>) => LiveHubConnection>('LIVE_HUB', {
@@ -51,9 +55,11 @@ export class LiveFleet {
   private failedConnects = 0;
   private retry?: ReturnType<typeof setTimeout>;
   /** One buffer per running load(): pushes that arrive meanwhile, replayed over its snapshot, which may be older than them. */
-  private readonly pushedDuringLoads = new Set<LiveAsset[][]>();
+  private readonly pushedDuringLoads = new Set<(() => void)[]>();
 
   readonly assets = signal<LiveAsset[]>([]);
+  /** Active and Resolved Alerts, unordered; the Alert feed sorts them. */
+  readonly alerts = signal<Alert[]>([]);
   readonly groups = signal<AssetGroup[]>([]);
   readonly rules = signal<AlertRule[]>([]);
   readonly connection = signal<'connecting' | 'live' | 'reconnecting'>('connecting');
@@ -64,12 +70,9 @@ export class LiveFleet {
       clearTimeout(this.retry);
       void this.hub.stop();
     });
-    this.hub.on('AssetsUpdated', (changed) => {
-      if (this.pushedDuringLoads.size === 0) {
-        this.merge(changed);
-      }
-      this.pushedDuringLoads.forEach((pushed) => pushed.push(changed));
-    });
+    this.hub.on('AssetsUpdated', (changed) => this.pushed(() => this.merge(changed)));
+    this.hub.on('AlertRaised', (alert) => this.pushed(() => this.mergeAlerts([alert])));
+    this.hub.on('AlertUpdated', (alert) => this.pushed(() => this.mergeAlerts([alert])));
     this.hub.onreconnecting(() => this.connection.set('reconnecting'));
     this.hub.onreconnected(() => void this.load());
     this.hub.onclose(() => {
@@ -81,6 +84,16 @@ export class LiveFleet {
   /** Connects and loads the fleet; retries until the page closes. */
   start(): void {
     void this.connect();
+  }
+
+  /** Acknowledges an Open Alert as the signed-in user; rejects with the API's error. */
+  async acknowledge(alertId: string): Promise<void> {
+    this.answered(await firstValueFrom(this.http.post<Alert>(`/api/alerts/${encodeURIComponent(alertId)}/acknowledge`, null)));
+  }
+
+  /** Resolves an Active Alert by hand with an optional note; rejects with the API's error. */
+  async resolve(alertId: string, note: string): Promise<void> {
+    this.answered(await firstValueFrom(this.http.post<Alert>(`/api/alerts/${encodeURIComponent(alertId)}/resolve`, { note })));
   }
 
   private async connect(): Promise<void> {
@@ -106,16 +119,20 @@ export class LiveFleet {
 
   /** Reads the fleet over REST; on failure drops the connection, so the reconnect path loads again. */
   private async load(): Promise<void> {
-    const pushed: LiveAsset[][] = [];
+    const pushed: (() => void)[] = [];
     this.pushedDuringLoads.add(pushed);
     try {
-      const [assets, groups, rules] = await Promise.all([
+      const [assets, groups, rules, active, resolved] = await Promise.all([
         firstValueFrom(this.http.get<LiveAsset[]>('/api/assets/live')),
         firstValueFrom(this.http.get<AssetGroup[]>('/api/asset-groups')),
         firstValueFrom(this.http.get<AlertRule[]>('/api/alert-rules')),
+        // Two reads, so a long History cannot crowd Active Alerts out of the API's newest-first limit.
+        firstValueFrom(this.http.get<Alert[]>('/api/alerts?active=true')),
+        firstValueFrom(this.http.get<Alert[]>('/api/alerts?active=false')),
       ]);
       this.assets.set(assets);
-      pushed.forEach((changed) => this.merge(changed));
+      this.alerts.set([...active, ...resolved]);
+      pushed.forEach((apply) => apply());
       this.groups.set(groups);
       this.rules.set(rules);
       this.failedConnects = 0;
@@ -125,6 +142,33 @@ export class LiveFleet {
     } finally {
       this.pushedDuringLoads.delete(pushed);
     }
+  }
+
+  /** Applies a push now, and again over the snapshot of every load running meanwhile. */
+  private pushed(apply: () => void): void {
+    if (this.pushedDuringLoads.size === 0) {
+      apply();
+    }
+    this.pushedDuringLoads.forEach((pushed) => pushed.push(apply));
+  }
+
+  /** An action's answer: shown now, and replayed over the snapshot of every load running meanwhile (it may predate the action). */
+  private answered(alert: Alert): void {
+    const apply = () => this.mergeAlerts([alert]);
+    apply();
+    this.pushedDuringLoads.forEach((pushed) => pushed.push(apply));
+  }
+
+  /** Applies Alerts from a push or an Alert action: each replaces its older copy by id, new ones are added. */
+  private mergeAlerts(changed: Alert[]): void {
+    const byId = new Map(this.alerts().map((a) => [a.id, a]));
+    for (const alert of changed) {
+      const held = byId.get(alert.id);
+      if (!held || progress[alert.status] >= progress[held.status]) {
+        byId.set(alert.id, alert);
+      }
+    }
+    this.alerts.set([...byId.values()]);
   }
 
   /** Applies an AssetsUpdated push: changed Assets replace theirs by id, new ones are added. */
