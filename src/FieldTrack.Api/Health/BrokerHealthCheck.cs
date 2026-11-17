@@ -1,9 +1,9 @@
+using FieldTrack.Api.Messaging;
 using FieldTrack.Infrastructure.Messaging;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Exceptions;
-using MQTTnet.Formatter;
 
 namespace FieldTrack.Api.Health;
 
@@ -21,8 +21,7 @@ public sealed class BrokerHealthCheck(IOptions<BrokerOptions> options) : IHealth
     {
         var broker = options.Value;
         var clientOptions = new MqttClientOptionsBuilder()
-            .WithTcpServer(broker.Host, broker.Port)
-            .WithProtocolVersion(MqttProtocolVersion.V500)
+            .WithBroker(broker)
             .WithClientId($"fieldtrack-health-{Guid.NewGuid():N}")
             .WithCleanStart()
             .WithTimeout(_connectTimeout)
@@ -31,7 +30,14 @@ public sealed class BrokerHealthCheck(IOptions<BrokerOptions> options) : IHealth
         using var client = new MqttClientFactory().CreateMqttClient();
         try
         {
-            await client.ConnectAsync(clientOptions, cancellationToken);
+            // MQTTnet returns a refused CONNACK (bad or rotated credentials, say) instead of throwing. The broker
+            // answered, so it is reported apart from an unreachable one.
+            var connected = await client.ConnectAsync(clientOptions, cancellationToken);
+            if (connected.ResultCode != MqttClientConnectResultCode.Success)
+            {
+                return HealthCheckResult.Unhealthy($"MQTT broker at {broker.Host}:{broker.Port} refused the connection: {connected.ResultCode}.");
+            }
+
             await client.DisconnectAsync(cancellationToken: cancellationToken);
             return HealthCheckResult.Healthy();
         }
