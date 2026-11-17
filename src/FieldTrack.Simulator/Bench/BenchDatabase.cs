@@ -38,6 +38,27 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
         await ScalarAsync<long>("SELECT count(*) FROM readings WHERE device_time >= @from AND device_time < @to", from, to, cancellationToken);
 
     /// <summary>
+    /// Readings stored with Device time from <paramref name="from"/> up to, not including, <paramref name="to"/>, from these Devices in these
+    /// Boots only (<paramref name="bootsBySerial"/>): other traffic on the same stack does not count.
+    /// </summary>
+    public async Task<long> CountReadingsAsync(
+        IReadOnlyDictionary<string, int> bootsBySerial, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+    {
+        await using var command = Command("""
+            SELECT count(*)
+            FROM readings r
+            JOIN devices d ON d.id = r.device_id
+            JOIN unnest(@serials, @boots) AS x(serial, boot) ON x.serial = d.serial_number AND x.boot = r.boot
+            WHERE r.device_time >= @from AND r.device_time < @to
+            """);
+        command.Parameters.AddWithValue("serials", bootsBySerial.Keys.ToArray());
+        command.Parameters.AddWithValue("boots", bootsBySerial.Values.ToArray());
+        command.Parameters.AddWithValue("from", from);
+        command.Parameters.AddWithValue("to", to);
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    /// <summary>
     /// Every stored Reading. Insert cost grows with the table and its indexes, so a result says how big the database was when the run began;
     /// compare runs on an empty one (<c>docker compose down -v</c>).
     /// </summary>
