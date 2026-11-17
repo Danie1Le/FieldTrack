@@ -8,8 +8,8 @@ using Microsoft.Extensions.Options;
 namespace FieldTrack.Api.Auth;
 
 /// <summary>
-/// Sign-in, token refresh and password change: the only endpoints a signed-out client may call
-/// besides health and docs.
+/// Sign-in, token refresh, password change and, in demo mode only, the Demo Operator's credentials:
+/// the only endpoints a signed-out client may call besides health and docs.
 /// </summary>
 [ApiController]
 [Route("auth")]
