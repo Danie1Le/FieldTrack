@@ -129,6 +129,45 @@ describe('AlertFeed', () => {
     expect(items()[0].querySelector('[role=alert]')!.textContent).toContain('already Resolved');
   });
 
+  it('says why under the Alert when an Acknowledge is refused', async () => {
+    fleet.acknowledge.mockRejectedValue(new HttpErrorResponse({ status: 409, statusText: 'Conflict' }));
+    await show([alert('raced', '2026-11-17T10:00:00Z')]);
+
+    await click(button(items()[0], 'Acknowledge'));
+
+    expect(items()[0].querySelector('[role=alert]')!.textContent).toContain('no longer Open');
+    expect(button(items()[0], 'Acknowledge')!.disabled).toBe(false);
+  });
+
+  it("keeps each Alert disabled for its own request and keeps another Alert's failure message", async () => {
+    const requests = new Map<string, { resolve: () => void; reject: (error: unknown) => void }>();
+    fleet.acknowledge.mockImplementation(
+      (id: string) => new Promise<void>((resolve, reject) => requests.set(id, { resolve, reject })),
+    );
+    await show([alert('a', '2026-11-17T10:10:00Z'), alert('b', '2026-11-17T10:00:00Z')]);
+    const row = (id: string) => items().find((i) => i.dataset['alert'] === id)!;
+
+    await click(button(row('a'), 'Acknowledge'));
+    await click(button(row('b'), 'Acknowledge'));
+    expect(button(row('a'), 'Acknowledge')!.disabled).toBe(true);
+    expect(button(row('b'), 'Acknowledge')!.disabled).toBe(true);
+
+    requests.get('a')!.reject(new HttpErrorResponse({ status: 409, statusText: 'Conflict' }));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(button(row('a'), 'Acknowledge')!.disabled).toBe(false);
+    });
+    expect(button(row('b'), 'Acknowledge')!.disabled).toBe(true);
+    expect(row('a').querySelector('[role=alert]')!.textContent).toContain('no longer Open');
+
+    await click(button(row('b'), 'Resolve'));
+    expect(row('a').querySelector('[role=alert]')!.textContent).toContain('no longer Open');
+    expect(fleet.acknowledge).toHaveBeenCalledTimes(2);
+
+    requests.get('b')!.resolve();
+    await fixture.whenStable();
+  });
+
   it('lists Resolved Alerts on History with their reason, the From backlog tag and the latch note', async () => {
     await show([
       alert('active', '2026-11-17T10:00:00Z'),

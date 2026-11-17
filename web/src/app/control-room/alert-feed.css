@@ -89,7 +89,7 @@ ol {
 }
 
 .st-Open { color: var(--alert); }
-.st-Acknowledged { color: var(--ack); }
+.st-Acknowledged { color: var(--acknowledged); }
 .st-Resolved { color: var(--muted); }
 
 .meta {
@@ -113,7 +113,7 @@ ol {
 .latch {
   font-size: 12px;
   color: var(--muted);
-  border-left: 2px solid var(--ack);
+  border-left: 2px solid var(--acknowledged);
   padding-left: 8px;
 }
 

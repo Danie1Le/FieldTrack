@@ -55,20 +55,20 @@
               <label [for]="'note-' + alert.id">Note (optional)</label>
               <textarea #noteField [id]="'note-' + alert.id" rows="2" maxlength="1000" [value]="note()" (input)="note.set(noteField.value)"></textarea>
               <div class="acts">
-                <button type="submit" class="btn btn-solid" [disabled]="busy() === alert.id">Confirm</button>
-                <button type="button" class="btn" (click)="cancelResolve()">Cancel</button>
+                <button type="submit" class="btn btn-solid" [disabled]="busy().has(alert.id)">Confirm</button>
+                <button type="button" class="btn" (click)="cancelResolve(alert)">Cancel</button>
               </div>
             </form>
           } @else {
             <div class="acts">
               @if (alert.status === 'Open') {
-                <button type="button" class="btn" [disabled]="busy() === alert.id" (click)="acknowledge(alert)">Acknowledge</button>
+                <button type="button" class="btn" [disabled]="busy().has(alert.id)" (click)="acknowledge(alert)">Acknowledge</button>
               }
               <button type="button" class="btn" (click)="openResolve(alert)">Resolve</button>
             </div>
           }
-          @if (failure()?.alertId === alert.id) {
-            <p class="error" role="alert">{{ failure()!.text }}</p>
+          @if (failures().get(alert.id); as failure) {
+            <p class="error" role="alert">{{ failure }}</p>
           }
         }
       </div>

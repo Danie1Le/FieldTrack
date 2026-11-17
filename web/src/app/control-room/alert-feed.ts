@@ -47,9 +47,10 @@ export class AlertFeed {
   /** The Alert whose Resolve form is open; one at a time. */
   protected readonly resolving = signal<string | null>(null);
   protected readonly note = signal('');
-  /** The Alert with an action in flight. */
-  protected readonly busy = signal<string | null>(null);
-  protected readonly failure = signal<{ alertId: string; text: string } | null>(null);
+  /** Alerts with an action in flight (several can be at once). */
+  protected readonly busy = signal<ReadonlySet<string>>(new Set());
+  /** Why an Alert's last action failed, by Alert id. */
+  protected readonly failures = signal<ReadonlyMap<string, string>>(new Map());
   protected readonly reasonLabels = reasonLabels;
 
   private readonly assetNames = computed(() => new Map(this.fleet.assets().map((a) => [a.id, a.name])));
@@ -71,12 +72,12 @@ export class AlertFeed {
   protected openResolve(alert: Alert): void {
     this.resolving.set(alert.id);
     this.note.set('');
-    this.failure.set(null);
+    this.setFailure(alert.id, null);
   }
 
-  protected cancelResolve(): void {
+  protected cancelResolve(alert: Alert): void {
     this.resolving.set(null);
-    this.failure.set(null);
+    this.setFailure(alert.id, null);
   }
 
   protected async confirmResolve(alert: Alert): Promise<void> {
@@ -87,17 +88,29 @@ export class AlertFeed {
 
   /** Runs an Alert action; on failure shows why under the Alert and answers false. */
   private async act(alert: Alert, action: () => Promise<void>, conflict: string): Promise<boolean> {
-    this.busy.set(alert.id);
-    this.failure.set(null);
+    this.busy.update((ids) => new Set(ids).add(alert.id));
+    this.setFailure(alert.id, null);
     try {
       await action();
       return true;
     } catch (error) {
       const status = error instanceof HttpErrorResponse ? error.status : 0;
-      this.failure.set({ alertId: alert.id, text: status === 409 ? conflict : 'The Alert could not be updated. Try again.' });
+      this.setFailure(alert.id, status === 409 ? conflict : 'The Alert could not be updated. Try again.');
       return false;
     } finally {
-      this.busy.set(null);
+      this.busy.update((ids) => new Set([...ids].filter((id) => id !== alert.id)));
     }
+  }
+
+  private setFailure(alertId: string, text: string | null): void {
+    this.failures.update((held) => {
+      const next = new Map(held);
+      if (text === null) {
+        next.delete(alertId);
+      } else {
+        next.set(alertId, text);
+      }
+      return next;
+    });
   }
 }

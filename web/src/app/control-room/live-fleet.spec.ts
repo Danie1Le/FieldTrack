@@ -207,6 +207,22 @@ describe('LiveFleet', () => {
     expect(fleet.alerts().map((a) => a.status)).toEqual(['Acknowledged', 'Resolved']);
   });
 
+  it('keeps an action answer over a snapshot a running load read before the action committed', async () => {
+    fleet.start();
+    await serveSnapshot([], [overheat('Open')]);
+    hub.fire('reconnected');
+    const stale = await snapshotReads();
+
+    const acknowledged = fleet.acknowledge('alert-1');
+    api.expectOne({ method: 'POST', url: '/api/alerts/alert-1/acknowledge' }).flush(overheat('Acknowledged'));
+    await acknowledged;
+    stale.assets.flush([]);
+    stale.others.forEach((read, i) => read.flush(i === 2 ? [overheat('Open')] : []));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fleet.alerts().map((a) => a.status)).toEqual(['Acknowledged']);
+  });
+
   it('reloads the fleet over REST after an automatic reconnect, recovering missed pushes', async () => {
     fleet.start();
     await serveSnapshot([truck('Normal')]);

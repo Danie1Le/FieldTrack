@@ -88,12 +88,12 @@ export class LiveFleet {
 
   /** Acknowledges an Open Alert as the signed-in user; rejects with the API's error. */
   async acknowledge(alertId: string): Promise<void> {
-    this.mergeAlerts([await firstValueFrom(this.http.post<Alert>(`/api/alerts/${encodeURIComponent(alertId)}/acknowledge`, null))]);
+    this.answered(await firstValueFrom(this.http.post<Alert>(`/api/alerts/${encodeURIComponent(alertId)}/acknowledge`, null)));
   }
 
   /** Resolves an Active Alert by hand with an optional note; rejects with the API's error. */
   async resolve(alertId: string, note: string): Promise<void> {
-    this.mergeAlerts([await firstValueFrom(this.http.post<Alert>(`/api/alerts/${encodeURIComponent(alertId)}/resolve`, { note }))]);
+    this.answered(await firstValueFrom(this.http.post<Alert>(`/api/alerts/${encodeURIComponent(alertId)}/resolve`, { note })));
   }
 
   private async connect(): Promise<void> {
@@ -149,6 +149,13 @@ export class LiveFleet {
     if (this.pushedDuringLoads.size === 0) {
       apply();
     }
+    this.pushedDuringLoads.forEach((pushed) => pushed.push(apply));
+  }
+
+  /** An action's answer: shown now, and replayed over the snapshot of every load running meanwhile (it may predate the action). */
+  private answered(alert: Alert): void {
+    const apply = () => this.mergeAlerts([alert]);
+    apply();
     this.pushedDuringLoads.forEach((pushed) => pushed.push(apply));
   }
 
