@@ -23,10 +23,16 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     /// <summary>
     /// Creates the broker session an ingest worker with <paramref name="clientId"/> resumes, subscribed to
     /// <paramref name="topicFilter"/>, so messages published from now on wait for it however long it takes to connect.
+    /// Resuming a session a crashed worker left behind acknowledges nothing, so the next worker gets its messages.
     /// </summary>
     public static async Task CreateIngestSessionAsync(FieldTrackFixture fixture, string clientId, string topicFilter = IngestWorker.TopicFilter)
     {
         using var client = new MqttClientFactory().CreateMqttClient();
+        client.ApplicationMessageReceivedAsync += args =>
+        {
+            args.AutoAcknowledge = false;
+            return Task.CompletedTask;
+        };
         await client.ConnectAsync(IngestSessionOptions(fixture, clientId), TestContext.Current.CancellationToken);
         await client.SubscribeAsync(topicFilter, MqttQualityOfServiceLevel.AtLeastOnce, TestContext.Current.CancellationToken);
         await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);

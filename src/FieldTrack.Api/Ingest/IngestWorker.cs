@@ -27,7 +27,8 @@ public sealed partial class IngestWorker(
     NpgsqlDataSource dataSource,
     TimeProvider time,
     IMeterFactory meters,
-    ILogger<IngestWorker> logger) : BackgroundService
+    ILogger<IngestWorker> logger,
+    IIngestFaultInjector? faults = null) : BackgroundService
 {
     /// <summary>
     /// Every Device's telemetry topic, <c>fieldtrack/{version}/devices/{serialNumber}/telemetry</c>, in every
@@ -142,7 +143,7 @@ public sealed partial class IngestWorker(
             return Task.CompletedTask;
         };
 
-        await using var writer = await ReadingWriter.OpenAsync(dataSource, time, stoppingToken);
+        await using var writer = await ReadingWriter.OpenAsync(dataSource, time, stoppingToken, faults);
         var connected = await client.ConnectAsync(ClientOptions(), stoppingToken);
         // MQTTnet returns a refused CONNACK (bad credentials, say) instead of throwing.
         if (connected.ResultCode != MqttClientConnectResultCode.Success)
@@ -176,6 +177,7 @@ public sealed partial class IngestWorker(
 
                 _identicalDuplicates.Add(written.IdenticalDuplicates);
                 _conflictingDuplicates.Add(written.ConflictingDuplicates);
+                faults?.Reached(IngestFaultPoint.AfterCommit);
 
                 // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
                 // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.

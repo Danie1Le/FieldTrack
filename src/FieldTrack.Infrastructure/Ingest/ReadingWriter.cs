@@ -178,21 +178,24 @@ public sealed class ReadingWriter : IAsyncDisposable
 
     private readonly NpgsqlConnection _connection;
     private readonly AlertRuleRunner _rules;
+    private readonly IIngestFaultInjector? _faults;
 
-    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules) => (_connection, _rules) = (connection, rules);
+    private ReadingWriter(NpgsqlConnection connection, AlertRuleRunner rules, IIngestFaultInjector? faults) =>
+        (_connection, _rules, _faults) = (connection, rules, faults);
 
     /// <summary>
     /// Opens a connection from <paramref name="dataSource"/>, prepares its stage table and loads the rule state.
-    /// <paramref name="time"/> stamps the Alerts it creates.
+    /// <paramref name="time"/> stamps the Alerts it creates; <paramref name="faults"/> is the crash tests' hook.
     /// </summary>
-    public static async Task<ReadingWriter> OpenAsync(NpgsqlDataSource dataSource, TimeProvider time, CancellationToken cancellationToken)
+    public static async Task<ReadingWriter> OpenAsync(
+        NpgsqlDataSource dataSource, TimeProvider time, CancellationToken cancellationToken, IIngestFaultInjector? faults = null)
     {
         var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         try
         {
             await using var command = new NpgsqlCommand(CreateStage, connection);
             await command.ExecuteNonQueryAsync(cancellationToken);
-            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken));
+            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken), faults);
         }
         catch
         {
@@ -255,6 +258,8 @@ public sealed class ReadingWriter : IAsyncDisposable
             await import.CompleteAsync(cancellationToken);
         }
 
+        _faults?.Reached(IngestFaultPoint.AfterCopy);
+
         // Separate statements, so each sees what committed while the one before waited on a lock.
         await using (var locks = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(LockDevices), new(LockAssets) } })
         {
@@ -294,6 +299,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         }
 
         var ruleStates = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
+        _faults?.Reached(IngestFaultPoint.AfterEvaluation);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(ruleStates);
         return new WrittenBatch(reasons, identical, conflicting);

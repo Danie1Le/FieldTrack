@@ -4,6 +4,7 @@ using System.Text.Json;
 using FieldTrack.Api.Auth;
 using FieldTrack.Api.Ingest;
 using FieldTrack.Infrastructure.Identity;
+using FieldTrack.Infrastructure.Ingest;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -60,9 +61,10 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     /// <summary>
     /// Starts a host running the ingest worker on a broker session of its own, created before this returns,
     /// so every message published afterwards reaches it. <paramref name="time"/> replaces the clock; pass
-    /// <paramref name="clientId"/> to resume a session the test set up.
+    /// <paramref name="clientId"/> to resume a session the test set up, and <paramref name="faults"/> to make it crash.
     /// </summary>
-    protected async Task<WebApplicationFactory<Program>> StartIngestAsync(TimeProvider? time = null, string? clientId = null)
+    protected async Task<WebApplicationFactory<Program>> StartIngestAsync(
+        TimeProvider? time = null, string? clientId = null, IIngestFaultInjector? faults = null)
     {
         clientId ??= $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
         await TelemetryPublisher.CreateIngestSessionAsync(Fixture, clientId);
@@ -74,6 +76,11 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
                 if (time is not null)
                 {
                     services.AddSingleton(time);
+                }
+
+                if (faults is not null)
+                {
+                    services.AddSingleton(faults);
                 }
             }));
         api.StartServer();
