@@ -35,7 +35,8 @@ internal sealed record Dropout(string Serial, DateTimeOffset Start, DateTimeOffs
 
 /// <summary>
 /// How well Offline Alerts matched the dropouts (spec #21, story 39). A dropout is long when it outlasts the rule's seconds by
-/// <see cref="LongMargin"/>; only long dropouts must raise an Alert, and any Alert that matches none is a false alarm.
+/// <see cref="LongMargin"/>; only long dropouts must raise an Alert, and any Alert that matches none is a false alarm. A dropout that outlasts the
+/// rule's seconds by less than that is in between: the rule may fire for it or not, so an Alert inside it is ignored, not a false alarm.
 /// </summary>
 /// <param name="LongDropouts">Dropouts that must raise an Alert.</param>
 /// <param name="Detected">Long dropouts whose Alert was created within the last Received time plus the rule's seconds plus <see cref="Tolerance"/>.</param>
@@ -81,6 +82,12 @@ internal sealed record OfflineScore(int LongDropouts, int Detected, int Late, in
             unmatched.RemoveAt(match);
         }
 
+        // The band owes nothing and forbids nothing: an Alert inside one is the rule rightly firing before an Alert was owed.
+        foreach (var dropout in dropouts.Where(dropout => dropout.End - dropout.Start >= offlineAfter && dropout.End - dropout.Start < offlineAfter + LongMargin))
+        {
+            unmatched.RemoveAll(alert => alert.Serial == dropout.Serial && alert.CreatedAt >= dropout.Start && alert.CreatedAt <= dropout.End + Tolerance);
+        }
+
         return new(longDropouts.Count, detected, late, missed, unmatched.Count);
     }
 }
@@ -95,6 +102,20 @@ internal static class HysteresisScore
     public static int FalseAlerts(
         IEnumerable<(string Serial, DateTimeOffset RaisedAt)> alerts, IReadOnlyDictionary<string, IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)>> faults) =>
         alerts.Count(alert => !(faults.GetValueOrDefault(alert.Serial) ?? []).Any(window => alert.RaisedAt >= window.Start && alert.RaisedAt < window.End));
+
+    /// <summary>
+    /// How many Fault windows (<c>[start, end)</c>) had one of <paramref name="alerts"/> of their Device open at some point: raised before the window ended
+    /// and not resolved (<c>null</c>) before it began. An Alert raised earlier by noise and still open covers a Fault, because a Hysteresis rule does not
+    /// raise a second one. These are the real Faults the rule did not lose.
+    /// </summary>
+    public static int FaultWindowsCaught(
+        IEnumerable<(string Serial, DateTimeOffset RaisedAt, DateTimeOffset? ResolvedAt)> alerts,
+        IReadOnlyDictionary<string, IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)>> faults)
+    {
+        var all = alerts.ToList();
+        return faults.Sum(device => device.Value.Count(window =>
+            all.Any(alert => alert.Serial == device.Key && alert.RaisedAt < window.End && (alert.ResolvedAt is null || alert.ResolvedAt > window.Start))));
+    }
 
     /// <summary>The share of the <paramref name="without"/> false Alerts that <paramref name="with"/> removed, in percent; null when there were none to remove.</summary>
     public static double? ReductionPercent(int without, int with) => without == 0 ? null : 100.0 * (without - with) / without;

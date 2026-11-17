@@ -7,7 +7,8 @@ namespace FieldTrack.Simulator.Bench;
 /// <param name="AssetId">The Asset it is about.</param>
 /// <param name="RaisedAt">Device time of the Reading that raised it; the sweep time for an Offline Alert.</param>
 /// <param name="CreatedAt">Platform time it was created.</param>
-internal sealed record AlertRow(Guid RuleId, Guid AssetId, DateTimeOffset RaisedAt, DateTimeOffset CreatedAt);
+/// <param name="ResolvedAt">Device time of the Reading that cleared it; null while it is open.</param>
+internal sealed record AlertRow(Guid RuleId, Guid AssetId, DateTimeOffset RaisedAt, DateTimeOffset CreatedAt, DateTimeOffset? ResolvedAt);
 
 /// <summary>
 /// What the alert benchmarks share: the Alert Rules they create through the API for the fleet's Assets (one per Asset and kind) and the
@@ -57,13 +58,14 @@ internal static class AlertBenchSupport
     /// <summary>Every Alert the rules <paramref name="ruleIds"/> have raised.</summary>
     public static async Task<IReadOnlyList<AlertRow>> AlertsAsync(NpgsqlDataSource dataSource, IEnumerable<Guid> ruleIds, CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand("SELECT alert_rule_id, asset_id, raised_at, created_at FROM alerts WHERE alert_rule_id = ANY(@ids)");
+        await using var command = dataSource.CreateCommand("SELECT alert_rule_id, asset_id, raised_at, created_at, resolved_at FROM alerts WHERE alert_rule_id = ANY(@ids)");
         command.Parameters.AddWithValue("ids", ruleIds.ToArray());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var alerts = new List<AlertRow>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            alerts.Add(new(reader.GetGuid(0), reader.GetGuid(1), reader.GetFieldValue<DateTimeOffset>(2), reader.GetFieldValue<DateTimeOffset>(3)));
+            alerts.Add(new(reader.GetGuid(0), reader.GetGuid(1), reader.GetFieldValue<DateTimeOffset>(2), reader.GetFieldValue<DateTimeOffset>(3),
+                reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4)));
         }
 
         return alerts;

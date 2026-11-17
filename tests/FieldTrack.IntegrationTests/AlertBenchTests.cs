@@ -67,7 +67,7 @@ public sealed class AlertBenchTests(FieldTrackFixture fixture) : IntegrationTest
         // A threshold at the sensor's mean: noise crosses it constantly, so only the Hysteresis keeps the rule from raising again and again.
         var scenario = Scenario.Parse("""{ "injections": [ { "device": "ALB-001", "kind": "overheat", "atSeconds": 3, "durationSeconds": 3, "amount": 100 } ] }""", Fleet);
 
-        var outcome = await HysteresisBench.RunAsync(Fleet, Target, admin, scenario, threshold: 85, hysteresis: 8, rate: 60, TimeSpan.FromSeconds(8), TextWriter.Null, CancellationToken);
+        var outcome = await HysteresisBench.RunAsync(Fleet, Target, admin, scenario, threshold: 85, hysteresis: 8, seed: 1, rate: 60, TimeSpan.FromSeconds(8), TextWriter.Null, CancellationToken);
 
         var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
         results.GetProperty("missing").GetInt64().ShouldBe(0);
@@ -75,6 +75,11 @@ public sealed class AlertBenchTests(FieldTrackFixture fixture) : IntegrationTest
         var real = results.GetProperty("withHysteresis");
         plain.GetProperty("falseAlerts").GetInt32().ShouldBeGreaterThan(real.GetProperty("falseAlerts").GetInt32());
         results.GetProperty("falseAlertReductionPercent").GetDouble().ShouldBeGreaterThan(0);
+        real.GetProperty("faultWindowsCaught").GetInt32().ShouldBe(1);
+        // Reproducible: the result names the noise seed and the Boot each Device ran in.
+        var parameters = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("parameters");
+        parameters.GetProperty("seed").GetInt32().ShouldBe(1);
+        parameters.GetProperty("boots").GetProperty("ALB-001").EnumerateArray().Select(boot => boot.GetInt32()).ShouldBe([1]);
         outcome.Pass.ShouldBeTrue();
     }
 

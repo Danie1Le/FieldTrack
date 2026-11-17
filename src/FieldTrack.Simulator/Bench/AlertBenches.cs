@@ -9,6 +9,9 @@ internal static class AlertBenches
     /// <summary>How long the Scenario benchmarks run by default; the committed Scenarios fit in it.</summary>
     public const double DefaultDurationSeconds = 300;
 
+    /// <summary>The noise seed of the hysteresis benchmark unless <c>--seed</c> says otherwise: every default run draws the same noise.</summary>
+    public const int DefaultSeed = 1;
+
     private const string FleetDirectory = "src/FieldTrack.Simulator/fleets";
 
     /// <summary>Seeds <paramref name="fleet"/>, runs the benchmark <paramref name="kind"/> and writes its result.</summary>
@@ -40,6 +43,6 @@ internal static class AlertBenches
         return kind == "offline"
             ? await OfflineBench.RunAsync(fleet, target, admin, scenario, (int)(options.GetNumber("offline-seconds") ?? 20), rate, duration, Console.Out, cancellationToken)
             : await HysteresisBench.RunAsync(
-                fleet, target, admin, scenario, options.GetNumber("threshold") ?? 90, options.GetNumber("hysteresis") ?? 8, rate, duration, Console.Out, cancellationToken);
+                fleet, target, admin, scenario, options.GetNumber("threshold") ?? 90, options.GetNumber("hysteresis") ?? 8, (int)(options.GetNumber("seed") ?? DefaultSeed), rate, duration, Console.Out, cancellationToken);
     }
 }

@@ -55,6 +55,30 @@ public sealed class AlertBenchScoringTests
     }
 
     [Fact]
+    public void An_Alert_in_the_band_between_the_rule_seconds_and_a_long_dropout_is_neither_owed_nor_a_false_alarm()
+    {
+        // 22 s of silence against a 20 s rule: the rule rightly fires, but the dropout is under 25 s so it is not a long one.
+        var score = OfflineScore.Of([Window(100, 22, 99)], [("A", T0.AddSeconds(121))], Rule);
+
+        score.ShouldBe(new OfflineScore(0, 0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void A_Fault_window_is_caught_when_an_Alert_of_its_Device_was_open_during_it()
+    {
+        var faults = new Dictionary<string, IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)>>
+        {
+            ["A"] = [(T0.AddSeconds(10), T0.AddSeconds(20)), (T0.AddSeconds(50), T0.AddSeconds(60))],
+            ["B"] = [(T0.AddSeconds(10), T0.AddSeconds(20))],
+        };
+
+        HysteresisScore.FaultWindowsCaught(
+            [("A", T0.AddSeconds(12), T0.AddSeconds(14)), ("B", T0.AddSeconds(5), null), ("A", T0.AddSeconds(60), null), ("A", T0.AddSeconds(30), T0.AddSeconds(50))],
+            faults)
+            .ShouldBe(2, "A's first window by an Alert open inside it, B's by an Alert raised before it and still open; A's second window by none: one resolved at its start, one raised at its end");
+    }
+
+    [Fact]
     public void An_Alert_of_another_Device_does_not_match_a_dropout()
     {
         var score = OfflineScore.Of([Window(100, 60, 99)], [("B", T0.AddSeconds(121))], Rule);

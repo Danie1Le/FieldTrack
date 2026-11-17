@@ -67,7 +67,8 @@ internal static class SimulatorCli
               plus those seconds plus 2 s, and any Alert without a long dropout is a false alarm. `hysteresis` runs --scenario (default
               fleets/alerts-hysteresis-scenario.json, noisy engine temperature) against two Threshold rules (above --threshold, default 90) with
               Hysteresis 0 and --hysteresis (default 8) at once, so both see the same Readings; a false Alert is one outside every Fault window
-              of the Manifest. Use a stack not shared with another benchmark: Alerts from earlier runs and rules stay in the database.
+              of the Manifest. --seed (default 1) seeds the noise, so a re-run draws the same Readings; the result records the seed and each
+              Device's Boot. Use a stack not shared with another benchmark: Alerts from earlier runs and rules stay in the database.
 
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
         FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password.

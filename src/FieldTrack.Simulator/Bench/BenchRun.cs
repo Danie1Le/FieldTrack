@@ -39,7 +39,7 @@ internal static class BenchRun
     /// </summary>
     public static async Task<MeasuredRun> RunAsync(
         FleetFile fleet, BenchTarget target, string bench, double? rate, TimeSpan duration, Func<CancellationToken, Task>? during, TextWriter log, CancellationToken cancellationToken,
-        Scenario? scenario = null)
+        Scenario? scenario = null, int? noiseSeed = null)
     {
         await using var counters = await BrokerCounters.ConnectAsync(target.BrokerHost, target.BrokerPort, cancellationToken);
         await BrokerCounters.SettleAsync(cancellationToken);
@@ -62,7 +62,8 @@ internal static class BenchRun
                 {
                     tickToPuback.Add(wait.TotalMilliseconds);
                 }
-            });
+            },
+            NoiseSeed: noiseSeed);
         RunManifest manifest;
         try
         {
