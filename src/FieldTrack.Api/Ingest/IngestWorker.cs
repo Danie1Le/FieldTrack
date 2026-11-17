@@ -55,6 +55,13 @@ public sealed partial class IngestWorker(
     /// <summary>...or this long after its first message (ADR 0004: p95 publish-to-commit under 200 ms).</summary>
     public static readonly TimeSpan FlushAfter = TimeSpan.FromMilliseconds(25);
 
+    /// <summary>
+    /// The TCP send and receive buffer of the broker connection: room for every message the broker may have in flight
+    /// (ReceiveMaximum, 2,000 Readings of a few hundred bytes), so the TCP window never throttles a backlog (#116).
+    /// Linux caps it at <c>net.core.rmem_max</c>.
+    /// </summary>
+    public const int SocketBufferSize = 1 << 20;
+
     private static readonly TimeSpan _retryAfter = TimeSpan.FromSeconds(2);
 
     // Filters earlier versions subscribed to. A resumed session keeps them beside TopicFilter, and a message
@@ -234,8 +241,10 @@ public sealed partial class IngestWorker(
         }
     }
 
-    internal MqttClientOptions ClientOptions() =>
-        new MqttClientOptionsBuilder()
+    /// <summary>The MQTT options the worker connects with; internal so a test can check the socket buffers (#116).</summary>
+    internal MqttClientOptions ClientOptions()
+    {
+        var clientOptions = new MqttClientOptionsBuilder()
             .WithBroker(broker.Value)
             .WithClientId(options.Value.ClientId)
             .WithCleanStart(false)
@@ -243,6 +252,11 @@ public sealed partial class IngestWorker(
             // The broker sends at most this many unacknowledged messages, so a full batch never waits on its own acks.
             .WithReceiveMaximum(2 * BatchSize)
             .Build();
+        // #116: MQTTnet sets SO_RCVBUF and SO_SNDBUF to 8 KB unless told otherwise. On Linux that window holds only ~40
+        // Readings, and a backlog can drain one window per ~200 ms TCP stall (~190 Readings/s with Postgres idle).
+        ((MqttClientTcpOptions)clientOptions.ChannelOptions).BufferSize = SocketBufferSize;
+        return clientOptions;
+    }
 
     private static async Task<List<ReceivedMessage>> NextBatchAsync(ChannelReader<ReceivedMessage> reader, CancellationToken stoppingToken)
     {
