@@ -69,8 +69,8 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         await using var api = await StartIngestAsync();
         using var admin = await AdminClientAsync(api);
         var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
-        using var identical = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.IdenticalDuplicatesInstrument);
-        using var conflicting = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.ConflictingDuplicatesInstrument);
+        using var identical = new InstrumentRecorder(api.Services, IngestMetrics.MeterName, IngestMetrics.IdenticalDuplicatesInstrument);
+        using var conflicting = new InstrumentRecorder(api.Services, IngestMetrics.MeterName, IngestMetrics.ConflictingDuplicatesInstrument);
         var t = DateTimeOffset.UtcNow;
         var original = TelemetryPublisher.Payload(1, 0, t, more: ""","fuelPct":50""");
         var second = TelemetryPublisher.Payload(1, 1, t.AddSeconds(1), more: ""","fuelPct":49""");
@@ -291,7 +291,7 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         await AttachedDeviceAsync(admin, "OLD-001");
         await using var database = await OpenDatabaseAsync();
         await SqlAsync(database, "UPDATE devices SET archived = true WHERE serial_number = 'OLD-001'");
-        using var rejects = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.RejectedMessagesInstrument);
+        using var rejects = new InstrumentRecorder(api.Services, IngestMetrics.MeterName, IngestMetrics.RejectedMessagesInstrument);
         var now = DateTimeOffset.UtcNow;
         var (topic, payload) = reason switch
         {
@@ -317,7 +317,7 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         (await SqlAsync(database, "SELECT count(*) FROM readings")).ShouldBe(0L);
         var counted = await EventuallyAsync(() => Task.FromResult(rejects.Measurements), measured => measured.Count > 0);
         counted.ShouldHaveSingleItem().Value.ShouldBe(1L);
-        counted[0].Tags[IngestWorker.ReasonTag].ShouldBe(reason.ToString());
+        counted[0].Tags[IngestMetrics.ReasonTag].ShouldBe(reason.ToString());
     }
 
     [Fact]
@@ -343,7 +343,7 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         await using var api = await StartIngestAsync(clientId: clientId);
         using var admin = await AdminClientAsync(api);
         var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
-        using var rejects = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.RejectedMessagesInstrument);
+        using var rejects = new InstrumentRecorder(api.Services, IngestMetrics.MeterName, IngestMetrics.RejectedMessagesInstrument);
         await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
         await using var blocker = await OpenDatabaseAsync();
 

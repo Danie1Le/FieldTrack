@@ -58,6 +58,7 @@ builder.Services.AddControllers()
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR()
     .AddJsonProtocol(options => options.PayloadSerializerOptions.Converters.Add(new EnumNameConverter()));
+builder.Services.AddSingleton<IngestMetrics>();
 builder.Services.AddSingleton<LivePush>();
 
 var app = builder.Build();

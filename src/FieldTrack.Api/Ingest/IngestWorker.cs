@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using FieldTrack.Api.Live;
 using FieldTrack.Api.Messaging;
@@ -30,7 +29,7 @@ public sealed partial class IngestWorker(
     IOptions<IngestOptions> options,
     NpgsqlDataSource dataSource,
     TimeProvider time,
-    IMeterFactory meters,
+    IngestMetrics metrics,
     LivePush live,
     ILogger<IngestWorker> logger,
     IIngestCrashPoints? crashes = null) : BackgroundService
@@ -41,44 +40,8 @@ public sealed partial class IngestWorker(
     /// </summary>
     public const string TopicFilter = "fieldtrack/+/devices/+/telemetry";
 
-    /// <summary>The tag on <see cref="RejectedMessagesInstrument"/> holding the <see cref="RejectReason"/> name.</summary>
-    public const string ReasonTag = "reason";
-
     /// <summary>The one version of the telemetry contract ingest reads (spec #21).</summary>
     public const string ContractVersion = "v1";
-
-    /// <summary>The meter ingest reports on.</summary>
-    public const string MeterName = "FieldTrack.Ingest";
-
-    /// <summary>The counter of Rejected messages stored, tagged with their <c>reason</c>.</summary>
-    public const string RejectedMessagesInstrument = "fieldtrack.ingest.rejected_messages";
-
-    /// <summary>The counter of Readings dropped as identical duplicates: the same key and content hash as the stored copy (ADR 0003).</summary>
-    public const string IdenticalDuplicatesInstrument = "fieldtrack.ingest.identical_duplicates";
-
-    /// <summary>
-    /// The counter of Readings dropped as conflicting duplicates: the same key as the stored copy but a different content
-    /// hash, which a correct Device never sends, so it points at a Device bug (ADR 0001).
-    /// </summary>
-    public const string ConflictingDuplicatesInstrument = "fieldtrack.ingest.conflicting_duplicates";
-
-    /// <summary>The counter of telemetry messages ingest has processed, stored or rejected: the ingest rate.</summary>
-    public const string MessagesInstrument = "fieldtrack.ingest.messages";
-
-    /// <summary>The histogram of how many messages each batch held.</summary>
-    public const string BatchSizeInstrument = "fieldtrack.ingest.batch_size";
-
-    /// <summary>The histogram of how long a batch took to store, evaluate the Alert Rules and commit.</summary>
-    public const string BatchCommitDurationInstrument = "fieldtrack.ingest.batch_commit_duration";
-
-    /// <summary>The histogram of each message's time from the broker handing it over to its batch committing (ADR 0004: p95 under 200 ms).</summary>
-    public const string ReceiveToCommitDurationInstrument = "fieldtrack.ingest.receive_to_commit_duration";
-
-    /// <summary>The histogram of how long evaluating the Alert Rules took within each batch's transaction.</summary>
-    public const string RuleEvaluationDurationInstrument = "fieldtrack.ingest.rule_evaluation_duration";
-
-    /// <summary>The counter of Alerts raised by ingest.</summary>
-    public const string AlertsRaisedInstrument = "fieldtrack.ingest.alerts_raised";
 
     /// <summary>The source of the trace spans ingest starts.</summary>
     public const string ActivitySourceName = "FieldTrack.Ingest";
@@ -98,42 +61,7 @@ public sealed partial class IngestWorker(
     // matching both would be delivered, and so rejected, twice.
     private static readonly string[] _retiredTopicFilters = ["fieldtrack/v1/devices/+/telemetry"];
 
-    // Seconds from 1 ms to 10 s, around ADR 0004's 200 ms target; the default boundaries would put every batch in the first bucket.
-    private static readonly InstrumentAdvice<double> _durationBuckets = new()
-    {
-        HistogramBucketBoundaries = [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1, 2.5, 5, 10],
-    };
-
     private static readonly ActivitySource _activities = new(ActivitySourceName);
-
-    // IMeterFactory hands out one Meter per name, so each instrument below shares it.
-    private readonly Counter<long> _messages = meters.Create(MeterName).CreateCounter<long>(
-        MessagesInstrument, "{message}", "Telemetry messages processed, stored or rejected.");
-
-    private readonly Histogram<long> _batchSize = meters.Create(MeterName).CreateHistogram<long>(
-        BatchSizeInstrument, "{message}", "Messages per ingest batch.",
-        advice: new InstrumentAdvice<long> { HistogramBucketBoundaries = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000] });
-
-    private readonly Histogram<double> _batchCommitDuration = meters.Create(MeterName).CreateHistogram(
-        BatchCommitDurationInstrument, "s", "Time to store a batch, evaluate the Alert Rules and commit.", advice: _durationBuckets);
-
-    private readonly Histogram<double> _receiveToCommitDuration = meters.Create(MeterName).CreateHistogram(
-        ReceiveToCommitDurationInstrument, "s", "Time from a message's receipt to its batch's commit.", advice: _durationBuckets);
-
-    private readonly Histogram<double> _ruleEvaluationDuration = meters.Create(MeterName).CreateHistogram(
-        RuleEvaluationDurationInstrument, "s", "Time to evaluate the Alert Rules within a batch's transaction.", advice: _durationBuckets);
-
-    private readonly Counter<long> _alertsRaised = meters.Create(MeterName).CreateCounter<long>(
-        AlertsRaisedInstrument, "{alert}", "Alerts raised by ingest.");
-
-    private readonly Counter<long> _rejectedMessages = meters.Create(MeterName).CreateCounter<long>(
-        RejectedMessagesInstrument, "{message}", "Telemetry messages stored as Rejected messages, by reason.");
-
-    private readonly Counter<long> _identicalDuplicates = meters.Create(MeterName).CreateCounter<long>(
-        IdenticalDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with the same content hash.");
-
-    private readonly Counter<long> _conflictingDuplicates = meters.Create(MeterName).CreateCounter<long>(
-        ConflictingDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with a different content hash.");
 
     /// <summary>How many committed batches may wait for the push loop before the oldest is dropped.</summary>
     public const int PushBacklog = 64;
@@ -233,30 +161,26 @@ public sealed partial class IngestWorker(
             while (true)
             {
                 var batch = await NextBatchAsync(received.Reader, stoppingToken);
-                // The span covers the batch's own work, not the wait for its first message; Npgsql's spans nest in it.
+                // The span runs to the end of the iteration, acknowledgements and push enqueue included, not the wait
+                // for the batch's first message; Npgsql's spans nest in it.
                 using var activity = _activities.StartActivity("ingest batch");
-                var started = Stopwatch.GetTimestamp();
                 var (readings, rejected) = Parse(batch);
-                var written = await writer.WriteAsync(readings, rejected, stoppingToken);
-                var committed = time.GetUtcNow();
+                var started = Stopwatch.GetTimestamp();
+                WrittenBatch written;
+                try
+                {
+                    written = await writer.WriteAsync(readings, rejected, stoppingToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // Otherwise a failed batch looks like a successful one in the trace.
+                    activity?.AddException(exception);
+                    activity?.SetStatus(ActivityStatusCode.Error);
+                    throw;
+                }
+
                 activity?.SetTag("fieldtrack.ingest.batch_size", batch.Count);
-                _messages.Add(batch.Count);
-                _batchSize.Record(batch.Count);
-                _batchCommitDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds);
-                _ruleEvaluationDuration.Record(written.RuleEvaluation.TotalSeconds);
-                foreach (var message in batch)
-                {
-                    _receiveToCommitDuration.Record(Math.Max(0, (committed - message.ReceivedTime).TotalSeconds));
-                }
-
-                _alertsRaised.Add(written.RaisedAlertIds.Count);
-                foreach (var reason in written.Rejected)
-                {
-                    _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
-                }
-
-                _identicalDuplicates.Add(written.IdenticalDuplicates);
-                _conflictingDuplicates.Add(written.ConflictingDuplicates);
+                metrics.RecordBatch([.. batch.Select(message => message.ReceivedTime)], time.GetUtcNow(), Stopwatch.GetElapsedTime(started), written);
                 crashes?.Reached(IngestCrashPoint.AfterCommit);
 
                 // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
