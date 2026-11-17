@@ -4,6 +4,7 @@ using FieldTrack.Api.Health;
 using FieldTrack.Api.Ingest;
 using FieldTrack.Api.Live;
 using FieldTrack.Api.Maintenance;
+using FieldTrack.Api.Observability;
 using FieldTrack.Infrastructure.Messaging;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -12,6 +13,8 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddFieldTrackObservability();
 
 builder.Services.AddFieldTrackDatabase(builder.Configuration);
 builder.Services.AddOptions<BrokerOptions>()
@@ -55,6 +58,7 @@ builder.Services.AddControllers()
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR()
     .AddJsonProtocol(options => options.PayloadSerializerOptions.Converters.Add(new EnumNameConverter()));
+builder.Services.AddSingleton<IngestMetrics>();
 builder.Services.AddSingleton<LivePush>();
 
 var app = builder.Build();
