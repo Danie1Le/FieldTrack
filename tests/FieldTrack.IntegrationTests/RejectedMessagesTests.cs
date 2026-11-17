@@ -5,7 +5,7 @@ namespace FieldTrack.IntegrationTests;
 
 public sealed class RejectedMessagesTests(FieldTrackFixture fixture) : IntegrationTest(fixture)
 {
-    private const string Insert = "INSERT INTO rejected_messages (topic, payload, reason, received_time) VALUES (@p0, @p1, @p2, @p3)";
+    private const string Insert = "INSERT INTO rejected_messages (topic, topic_clipped, payload, reason, received_time) VALUES (@p0, false, @p1, @p2, @p3)";
 
     [Fact]
     public async Task Admins_list_Rejected_messages_newest_first_with_the_payload_exactly_as_received()
@@ -22,6 +22,7 @@ public sealed class RejectedMessagesTests(FieldTrackFixture fixture) : Integrati
         listed.Select(message => message.GetProperty("reason").GetString()).ShouldBe(["BadJson", "UnknownSerialNumber"]);
         listed[0].GetProperty("payload").GetBytesFromBase64().ShouldBe([0xff, 0x00, 0x7b]);
         listed[0].GetProperty("topic").GetString().ShouldBe("fieldtrack/v1/devices/TRK-007/telemetry");
+        listed[0].GetProperty("topicClipped").GetBoolean().ShouldBeFalse();
         listed[1].GetProperty("payload").GetBytesFromBase64().ShouldBe("{\"boot\":1}"u8.ToArray());
         listed[1].GetProperty("receivedTime").GetDateTimeOffset().ShouldBe(received);
     }
@@ -32,8 +33,8 @@ public sealed class RejectedMessagesTests(FieldTrackFixture fixture) : Integrati
         using var admin = await AdminClientAsync();
         await using var database = await OpenDatabaseAsync();
         await SqlAsync(database, """
-            INSERT INTO rejected_messages (topic, payload, reason, received_time)
-            SELECT 'fieldtrack/v1/devices/TRK-007/telemetry', '\x7b7d', 'BadJson', now() FROM generate_series(0, @p0)
+            INSERT INTO rejected_messages (topic, topic_clipped, payload, reason, received_time)
+            SELECT 'fieldtrack/v1/devices/TRK-007/telemetry', false, '\x7b7d', 'BadJson', now() FROM generate_series(0, @p0)
             """, RejectedMessagesController.PageSize);
 
         var first = await ListAsync(admin, "/rejected-messages");
