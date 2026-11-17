@@ -21,7 +21,8 @@ internal sealed record MeasuredRun(RunManifest Manifest, IReadOnlyList<double> B
 /// </summary>
 internal static class BenchRun
 {
-    private static readonly TimeSpan _drainTimeout = TimeSpan.FromMinutes(5);
+    // Ingest may owe a long backlog; it is given up on only when it stops storing for this long.
+    private static readonly TimeSpan _stallTimeout = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// Publishes <paramref name="rate"/> Readings per second (flat out when null) for <paramref name="duration"/> and waits for them to be stored.
@@ -84,11 +85,18 @@ internal static class BenchRun
     {
         var published = manifest.Devices.Sum(device => device.Ranges.Sum(range => range.LastSequence - range.FirstSequence + 1));
         var started = DateTimeOffset.UtcNow;
-        while (DateTimeOffset.UtcNow - started < _drainTimeout)
+        var (stored, progressedAt) = (-1L, started);
+        while (DateTimeOffset.UtcNow - progressedAt < _stallTimeout)
         {
-            if (await database.CountReadingsAsync(manifest.StartedAt - BenchDatabase.Padding, manifest.EndedAt + BenchDatabase.Padding, cancellationToken) >= published)
+            var now = await database.CountReadingsAsync(manifest.StartedAt - BenchDatabase.Padding, manifest.EndedAt + BenchDatabase.Padding, cancellationToken);
+            if (now >= published)
             {
                 return (DateTimeOffset.UtcNow - started).TotalSeconds;
+            }
+
+            if (now > stored)
+            {
+                (stored, progressedAt) = (now, DateTimeOffset.UtcNow);
             }
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);

@@ -1,5 +1,6 @@
 # Layer over docker-compose.yml for benchmarks (#44):
 #   docker compose -f docker-compose.yml -f bench/docker-compose.bench.yml up --build -d
+# Start from an empty database (`docker compose down -v`): insert cost grows with the table, and every result says how many Readings it began with.
 services:
   postgres:
     command:
@@ -7,8 +8,8 @@ services:
       # `bench` reads each batch's commit time from Postgres (ingest latency).
       - -c
       - track_commit_timestamp=on
-      # Sized for 2,000 Readings/s: the defaults (128 MB buffers, 1 GB max_wal_size) kept ingest p95 at 3.4 s because
-      # backends wrote dirty pages themselves and WAL-triggered checkpoints stalled commits. Every result records these settings.
+      # Sized for 2,000 Readings/s: room to cache the hot partition and the Reading key index, and no WAL-forced checkpoint every few
+      # minutes. It does not remove commit stalls on Docker Desktop (#44 results). Every result records these settings.
       - -c
       - shared_buffers=1GB
       - -c
