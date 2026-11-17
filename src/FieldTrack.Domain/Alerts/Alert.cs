@@ -6,6 +6,9 @@ namespace FieldTrack.Domain.Alerts;
 /// </summary>
 public sealed class Alert
 {
+    /// <summary>The longest note a user may leave when Resolving by hand.</summary>
+    public const int MaxNoteLength = 1000;
+
     /// <summary>Surrogate key.</summary>
     public Guid Id { get; set; }
 
@@ -35,6 +38,24 @@ public sealed class Alert
 
     /// <summary>Why it was Resolved; null while Active.</summary>
     public ResolveReason? ResolveReason { get; set; }
+
+    /// <summary>The user who Acknowledged it; null until someone does.</summary>
+    public Guid? AcknowledgedBy { get; set; }
+
+    /// <summary>When it was Acknowledged; null until then.</summary>
+    public DateTimeOffset? AcknowledgedAt { get; set; }
+
+    /// <summary>The user who Resolved it by hand; null while Active and when the platform Resolved it (#10).</summary>
+    public Guid? ResolvedBy { get; set; }
+
+    /// <summary>What the user who Resolved it by hand wrote, if anything.</summary>
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// True when a user Resolved it while its condition still held, which latches its rule: the rule raises nothing
+    /// new for the Asset until the condition clears and breaches again (#10, ADR 0005).
+    /// </summary>
+    public bool Latched { get; set; }
 
     /// <summary>When the platform created it, for measuring alert latency against <see cref="RaisedAt"/>.</summary>
     public DateTimeOffset CreatedAt { get; set; }

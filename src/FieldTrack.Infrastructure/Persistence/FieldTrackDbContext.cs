@@ -88,6 +88,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
         builder.Entity<FieldTrackUser>(user =>
         {
             user.ToTable("users");
+            user.Property(u => u.DisplayName).HasMaxLength(FieldTrackUser.MaxDisplayNameLength);
             user.HasIndex(u => u.NormalizedEmail).HasDatabaseName("ix_users_normalized_email");
             user.HasIndex(u => u.NormalizedUserName).HasDatabaseName("ix_users_normalized_user_name");
         });
@@ -196,7 +197,20 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                     $"(status = '{nameof(AlertStatus.Resolved)}') = (resolved_at IS NOT NULL)"
                     + " AND (resolved_at IS NULL) = (resolve_reason IS NULL)"
                     + $" AND (NOT from_backlog OR resolve_reason IS NOT DISTINCT FROM '{nameof(ResolveReason.Cleared)}')");
+                // Acknowledge records who and when together; an Open Alert has neither, an Acknowledged one both.
+                table.HasCheckConstraint("ck_alerts_status_acknowledged",
+                    "(acknowledged_by IS NULL) = (acknowledged_at IS NULL)"
+                    + $" AND (status <> '{nameof(AlertStatus.Open)}' OR acknowledged_at IS NULL)"
+                    + $" AND (status <> '{nameof(AlertStatus.Acknowledged)}' OR acknowledged_at IS NOT NULL)");
+                // Only a user Resolving by hand leaves their id, a note or a latch; the platform leaves none (#10).
+                table.HasCheckConstraint("ck_alerts_resolved_by",
+                    $"(resolved_by IS NOT NULL) = (resolve_reason IS NOT DISTINCT FROM '{nameof(ResolveReason.Manual)}')"
+                    + " AND (resolved_by IS NOT NULL OR (note IS NULL AND NOT latched))");
             });
+            alert.Property(a => a.Note).HasMaxLength(Alert.MaxNoteLength);
+            // Users are never deleted, so the audit trail always names someone.
+            alert.HasOne<FieldTrackUser>().WithMany().HasForeignKey(a => a.AcknowledgedBy).OnDelete(DeleteBehavior.Restrict);
+            alert.HasOne<FieldTrackUser>().WithMany().HasForeignKey(a => a.ResolvedBy).OnDelete(DeleteBehavior.Restrict);
             // Alerts are history: their rule and Asset are kept (disabled, Archived), never deleted under them.
             alert.HasOne<AlertRule>().WithMany().HasForeignKey(a => a.AlertRuleId).OnDelete(DeleteBehavior.Restrict);
             alert.HasOne<Asset>().WithMany().HasForeignKey(a => a.AssetId).OnDelete(DeleteBehavior.Restrict);

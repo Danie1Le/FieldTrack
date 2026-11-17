@@ -27,16 +27,17 @@ internal static class AuthClient
     public static Task<HttpResponseMessage> PostChangePasswordAsync(HttpClient client, string email, string currentPassword, string newPassword) =>
         client.PostAsJsonAsync("/auth/change-password", new { email, currentPassword, newPassword }, TestContext.Current.CancellationToken);
 
-    public static Task<HttpResponseMessage> PostUserAsync(HttpClient adminClient, string email, string role, string temporaryPassword) =>
-        adminClient.PostAsJsonAsync("/users", new { email, role, temporaryPassword }, TestContext.Current.CancellationToken);
+    public static Task<HttpResponseMessage> PostUserAsync(
+        HttpClient adminClient, string email, string role, string temporaryPassword, string displayName = "Test User") =>
+        adminClient.PostAsJsonAsync("/users", new { email, displayName, role, temporaryPassword }, TestContext.Current.CancellationToken);
 
     /// <summary>
     /// Has the Admin behind <paramref name="adminClient"/> create a user, then replaces the temporary
     /// password with <paramref name="password"/> as the user's first sign-in requires.
     /// </summary>
-    public static async Task CreateUserAsync(HttpClient adminClient, string email, string role, string password)
+    public static async Task CreateUserAsync(HttpClient adminClient, string email, string role, string password, string displayName = "Test User")
     {
-        using var created = await PostUserAsync(adminClient, email, role, TemporaryPassword);
+        using var created = await PostUserAsync(adminClient, email, role, TemporaryPassword, displayName);
         created.EnsureSuccessStatusCode();
         using var changed = await PostChangePasswordAsync(adminClient, email, TemporaryPassword, password);
         changed.EnsureSuccessStatusCode();

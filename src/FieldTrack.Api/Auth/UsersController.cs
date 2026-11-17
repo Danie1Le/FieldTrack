@@ -24,7 +24,7 @@ public sealed class UsersController(FieldTrackDbContext db, UserManager<FieldTra
             join userRole in db.UserRoles on user.Id equals userRole.UserId
             join role in db.Roles on userRole.RoleId equals role.Id
             orderby user.Email
-            select new UserResponse(user.Id, user.Email!, role.Name!, user.MustChangePassword))
+            select new UserResponse(user.Id, user.Email!, user.DisplayName, role.Name!, user.MustChangePassword))
         .ToListAsync(cancellationToken);
 
     /// <summary>Creates an Admin or Operator who must change the temporary password at first sign-in.</summary>
@@ -34,7 +34,7 @@ public sealed class UsersController(FieldTrackDbContext db, UserManager<FieldTra
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UserResponse>> Create(CreateUserRequest request, CancellationToken cancellationToken)
     {
-        var user = new FieldTrackUser { UserName = request.Email, Email = request.Email, MustChangePassword = true };
+        var user = new FieldTrackUser { UserName = request.Email, Email = request.Email, DisplayName = request.DisplayName, MustChangePassword = true };
         // One transaction, so a user is never left without a role.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var result = await users.CreateAsync(user, request.TemporaryPassword);
@@ -49,7 +49,7 @@ public sealed class UsersController(FieldTrackDbContext db, UserManager<FieldTra
         }
 
         await transaction.CommitAsync(cancellationToken);
-        return StatusCode(StatusCodes.Status201Created, new UserResponse(user.Id, user.Email, request.Role, user.MustChangePassword));
+        return StatusCode(StatusCodes.Status201Created, new UserResponse(user.Id, user.Email, user.DisplayName, request.Role, user.MustChangePassword));
     }
 
     /// <summary>

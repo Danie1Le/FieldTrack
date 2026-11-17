@@ -20,7 +20,8 @@ public sealed class AuthController(
     TokenService tokens,
     IOptions<DemoOperatorOptions> demoOperator) : ControllerBase
 {
-    private static readonly string DummyPasswordHash = new PasswordHasher<FieldTrackUser>().HashPassword(new FieldTrackUser(), "unused");
+    private static readonly FieldTrackUser DummyUser = new() { DisplayName = "unused" };
+    private static readonly string DummyPasswordHash = new PasswordHasher<FieldTrackUser>().HashPassword(DummyUser, "unused");
 
     /// <summary>Signs in with email and password.</summary>
     /// <response code="401">Wrong email or password, or the account is locked out after repeated failures.</response>
@@ -109,7 +110,7 @@ public sealed class AuthController(
         {
             // Unknown emails and locked-out accounts skip the real hash check; hash anyway so the
             // response time does not tell them apart from a wrong password.
-            users.PasswordHasher.VerifyHashedPassword(new FieldTrackUser(), DummyPasswordHash, password);
+            users.PasswordHasher.VerifyHashedPassword(DummyUser, DummyPasswordHash, password);
         }
 
         return result is { Succeeded: true } ? user : null;
