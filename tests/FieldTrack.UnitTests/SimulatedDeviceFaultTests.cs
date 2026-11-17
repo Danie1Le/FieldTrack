@@ -57,6 +57,30 @@ public sealed class SimulatedDeviceFaultTests
         device.Ranges.ShouldBe([new PublishedRange(1, 0, 0), new PublishedRange(2, 0, 0)]);
     }
 
+    [Fact]
+    public void While_powered_off_the_Device_lists_its_ended_Boot_once()
+    {
+        var device = Device([Window(InjectionKind.PowerOff, 100, 200)], Sensor.FuelPct);
+        Tick(device, 80);
+
+        device.Step(Now.AddSeconds(120), TimeSpan.FromSeconds(120));
+
+        device.Ranges.ShouldBe([new PublishedRange(1, 0, 0)]);
+    }
+
+    [Fact]
+    public void A_run_that_ends_during_a_Power_off_lists_each_Boot_once_in_the_Manifest()
+    {
+        var device = Device([new Injection(InjectionKind.PowerOff, TimeSpan.FromSeconds(100), TimeSpan.MaxValue, 0)], Sensor.FuelPct);
+        Tick(device, 0);
+        Tick(device, 50);
+        device.Step(Now.AddSeconds(150), TimeSpan.FromSeconds(150));
+
+        var manifest = RunManifest.Of(Now, Now.AddSeconds(160), 1, [device]);
+
+        manifest.Devices.ShouldHaveSingleItem().Ranges.ShouldBe([new PublishedRange(1, 0, 1)]);
+    }
+
     [Theory]
     [InlineData("ClockOffset", 99, 0)]
     [InlineData("ClockOffset", 100, -30)]
@@ -184,6 +208,18 @@ public sealed class SimulatedDeviceFaultTests
     {
         // 600 s window: 40% ramp, 30% hold, 30% cool.
         var device = Device([Window(InjectionKind.Overheat, 60, 660, amount: 120)], Sensor.EngineTempC, Sensor.FuelPct);
+
+        Tick(device, seconds).GetProperty("engineTempC").GetDouble().ShouldBe(expected, tolerance: 0.01);
+    }
+
+    [Theory]
+    [InlineData(60, 85)]
+    [InlineData(180, 102.5)]
+    [InlineData(300, 120)]
+    [InlineData(36_000, 120)]
+    public void An_overheat_Fault_that_lasts_to_the_end_of_the_run_ramps_as_a_10_minute_one_and_holds_its_peak(double seconds, double expected)
+    {
+        var device = Device([new Injection(InjectionKind.Overheat, TimeSpan.FromSeconds(60), TimeSpan.MaxValue, 120)], Sensor.EngineTempC);
 
         Tick(device, seconds).GetProperty("engineTempC").GetDouble().ShouldBe(expected, tolerance: 0.01);
     }
