@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
+using FieldTrack.Api.Live;
 using FieldTrack.Api.Messaging;
 using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Ingest;
@@ -27,6 +28,7 @@ public sealed partial class IngestWorker(
     NpgsqlDataSource dataSource,
     TimeProvider time,
     IMeterFactory meters,
+    LivePush live,
     ILogger<IngestWorker> logger) : BackgroundService
 {
     /// <summary>
@@ -152,7 +154,8 @@ public sealed partial class IngestWorker(
             {
                 var batch = await NextBatchAsync(received.Reader, stoppingToken);
                 var (readings, rejected) = Parse(batch);
-                foreach (var reason in await writer.WriteAsync(readings, rejected, stoppingToken))
+                var written = await writer.WriteAsync(readings, rejected, stoppingToken);
+                foreach (var reason in written.Rejected)
                 {
                     _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
                 }
@@ -163,6 +166,8 @@ public sealed partial class IngestWorker(
                 {
                     await message.Args.AcknowledgeAsync(CancellationToken.None);
                 }
+
+                await PushAsync(written, stoppingToken);
             }
         }
         finally
@@ -173,6 +178,23 @@ public sealed partial class IngestWorker(
             {
                 await client.DisconnectAsync(cancellationToken: CancellationToken.None);
             }
+        }
+    }
+
+    /// <summary>
+    /// Pushes a committed batch's changes to the dashboards (ADR 0005: push after commit, after the PUBACKs so they
+    /// never wait on it). A lost push only delays a dashboard, which reloads over REST, so a failure is logged and
+    /// ingest carries on.
+    /// </summary>
+    private async Task PushAsync(WrittenBatch written, CancellationToken stoppingToken)
+    {
+        try
+        {
+            await live.PushAsync(written.AssetIds, written.RaisedAlertIds, written.ResolvedAlertIds, stoppingToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogPushFailed(exception);
         }
     }
 
@@ -262,6 +284,9 @@ public sealed partial class IngestWorker(
 
     [LoggerMessage(LogLevel.Error, "Ingest session failed; reconnecting in {RetryAfter}.")]
     private partial void LogSessionFailed(Exception exception, TimeSpan retryAfter);
+
+    [LoggerMessage(LogLevel.Warning, "Live push of a committed batch failed; dashboards catch up when they reload.")]
+    private partial void LogPushFailed(Exception exception);
 
     private sealed record ReceivedMessage(MqttApplicationMessageReceivedEventArgs Args, DateTimeOffset ReceivedTime);
 }

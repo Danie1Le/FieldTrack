@@ -85,6 +85,36 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
         }
     }
 
+    [Fact]
+    public async Task A_breach_published_over_MQTT_is_pushed_after_commit_with_the_Asset_and_its_clear_as_an_Alert_update()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        await using var live = await LiveClient.ConnectAsync(api, Token(admin));
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        var t = DateTimeOffset.UtcNow.AddSeconds(1);
+
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, t, lat: 51.6, more: ",\"engineTempC\":110"));
+        var raised = await live.NextAsync(LiveHub.AlertRaised);
+        var breached = (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem();
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 1, t.AddSeconds(1), more: ",\"engineTempC\":90"));
+        var resolved = await live.NextAsync(LiveHub.AlertUpdated);
+        var cleared = (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem();
+
+        raised.GetProperty("assetId").GetString().ShouldBe(asset);
+        raised.GetProperty("status").GetString().ShouldBe("Open");
+        breached.GetProperty("id").GetString().ShouldBe(asset);
+        breached.GetProperty("status").GetString().ShouldBe("Alerting");
+        breached.GetProperty("latest").GetProperty("latitude").GetDouble().ShouldBe(51.6, tolerance: 1e-9);
+        resolved.GetProperty("id").GetString().ShouldBe(raised.GetProperty("id").GetString());
+        resolved.GetProperty("status").GetString().ShouldBe("Resolved");
+        resolved.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
+        cleared.GetProperty("status").GetString().ShouldBe("Normal");
+        cleared.GetProperty("latest").GetProperty("sequenceNumber").GetInt64().ShouldBe(1);
+    }
+
     private static string Token(HttpClient client) => client.DefaultRequestHeaders.Authorization!.Parameter!;
 
     private async Task WriteAsync(params ReceivedReading[] readings)

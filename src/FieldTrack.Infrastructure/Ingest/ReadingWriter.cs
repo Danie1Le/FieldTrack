@@ -196,9 +196,9 @@ public sealed class ReadingWriter : IAsyncDisposable
     /// stamps each Reading with its Asset; Readings already stored are skipped, Readings from unknown or Archived
     /// Devices become Rejected messages, and redelivered Rejected messages already stored are skipped. The Alert Rules
     /// are evaluated against the newly stored Readings, and their Alerts and rule state commit with them. Returns once
-    /// committed, with the reason of every Rejected message stored.
+    /// committed, with what the batch changed.
     /// </summary>
-    public async Task<IReadOnlyList<RejectReason>> WriteAsync(
+    public async Task<WrittenBatch> WriteAsync(
         IReadOnlyList<ReceivedReading> readings, IReadOnlyList<ReceivedRejectedMessage> rejected, CancellationToken cancellationToken)
     {
         await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
@@ -274,10 +274,10 @@ public sealed class ReadingWriter : IAsyncDisposable
             rules = await AlertRuleRunner.ReadRulesAsync(reader, cancellationToken);
         }
 
-        var ruleStates = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
+        var (ruleStates, raised, resolved) = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(ruleStates);
-        return reasons;
+        return new WrittenBatch(reasons, [.. stored.Select(reading => reading.AssetId).Distinct()], raised, resolved);
     }
 
     /// <inheritdoc />

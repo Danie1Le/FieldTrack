@@ -37,11 +37,11 @@ public sealed class ReadingWriterTests(FieldTrackFixture fixture) : IntegrationT
             TelemetryPublisher.TopicOf("GHOST-1"), "GHOST-1", new Reading(1, 0, now, 51.5, -0.12, null, null, null, null, null), now, [0x7d], false);
         await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
 
-        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Count.ShouldBe(2);
+        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Rejected.Count.ShouldBe(2);
         // The broker's redelivery (DUP) of both, after the batch committed.
-        (await writer.WriteAsync([unknown with { Redelivered = true }], [badJson with { Redelivered = true }], CancellationToken)).ShouldBeEmpty();
+        (await writer.WriteAsync([unknown with { Redelivered = true }], [badJson with { Redelivered = true }], CancellationToken)).Rejected.ShouldBeEmpty();
         // Published again by the Device: a new message, so a new Rejected message.
-        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Count.ShouldBe(2);
+        (await writer.WriteAsync([unknown], [badJson], CancellationToken)).Rejected.Count.ShouldBe(2);
 
         await using var database = await OpenDatabaseAsync();
         (await SqlAsync(database, "SELECT count(*) FROM rejected_messages")).ShouldBe(4L);
