@@ -1,0 +1,97 @@
+<header class="bar">
+  <h1>FieldTrack</h1>
+  <span class="muted">Users</span>
+  <nav class="links">
+    <a class="btn" routerLink="/">Control room</a>
+    <button type="button" class="btn" (click)="auth.signOut()">Sign out</button>
+  </nav>
+</header>
+
+<div class="columns">
+  <section class="panel" aria-label="Users">
+    <header><strong>Users</strong></header>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Email</th>
+            <th scope="col">Role</th>
+            <th scope="col">Password</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (user of users(); track user.id) {
+            <tr [attr.data-user]="user.id">
+              <td class="name">{{ user.displayName }}</td>
+              <td class="mono">{{ user.email }}</td>
+              <td>{{ user.role }}</td>
+              <td class="muted">{{ user.mustChangePassword ? 'Temporary password' : '' }}</td>
+              <td>
+                <button type="button" class="btn" [disabled]="busy()" (click)="revoke(user)">Revoke sessions</button>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="5" class="muted">{{ users() ? 'No users yet.' : problems().length ? '' : 'Loading…' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="New user">
+    <form #form (submit)="$event.preventDefault(); create(form)">
+      <h2>New user</h2>
+      <label for="user-email">Email</label>
+      <input
+        id="user-email"
+        name="email"
+        type="email"
+        required
+        autocomplete="off"
+      />
+      <label for="user-display-name">Display name</label>
+      <input
+        id="user-display-name"
+        name="displayName"
+        required
+        maxlength="100"
+        autocomplete="off"
+      />
+      <fieldset>
+        <legend>Role</legend>
+        <label>
+          <input type="radio" name="role" value="Operator" checked />
+          Operator: watches the map, Acknowledges and Resolves Alerts
+        </label>
+        <label>
+          <input type="radio" name="role" value="Admin" />
+          Admin: also manages Assets, Devices, Geofences, Alert Rules and users
+        </label>
+      </fieldset>
+      <label for="user-temporary-password">Temporary password</label>
+      <input
+        id="user-temporary-password"
+        name="temporaryPassword"
+        required
+        autocomplete="off"
+        spellcheck="false"
+        class="mono"
+      />
+      <p class="muted hint">Give it to them yourself. They must replace it at first sign-in.</p>
+      <button type="submit" class="btn btn-solid" [disabled]="busy()">Create user</button>
+    </form>
+  </section>
+</div>
+
+@if (problems().length) {
+  <ul class="problems" role="alert">
+    @for (problem of problems(); track $index) {
+      <li>{{ problem }}</li>
+    }
+  </ul>
+}
+<p class="done" role="status">{{ done() }}</p>

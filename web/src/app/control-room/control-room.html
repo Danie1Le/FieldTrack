@@ -12,6 +12,7 @@
   }
   @if (auth.isAdmin()) {
     <a class="btn" routerLink="/geofences">Geofences</a>
+    <a class="btn" routerLink="/users">Users</a>
   }
   <button type="button" class="btn" (click)="auth.signOut()">Sign out</button>
 </header>
