@@ -123,6 +123,19 @@ public sealed class SimulatedDeviceFaultTests
     }
 
     [Fact]
+    public void A_Device_lets_random_injection_draw_at_every_tick()
+    {
+        var schedule = new InjectionSchedule(new RandomInjections(new RandomRates(0, PowerOffsPerHour: 3600, 0), [], new Random(1)));
+        var device = new SimulatedDevice(
+            new FleetDevice("TRK-001", "Haul truck 1", AssetType.Truck, null, null, 30, []), 1, new FixedMotion(new Position(1, 2)), schedule);
+
+        device.Step(Now.AddSeconds(1), TimeSpan.FromSeconds(1));
+
+        device.NextToSend.ShouldBeNull("the drawn Power off starts at this tick");
+        schedule.All.ShouldHaveSingleItem().Kind.ShouldBe(InjectionKind.PowerOff);
+    }
+
+    [Fact]
     public void A_Power_off_between_two_ticks_still_starts_a_new_Boot_taken_from_the_Boot_counter()
     {
         var schedule = new InjectionSchedule();

@@ -80,6 +80,7 @@ internal sealed class SimulatedDevice
     /// </summary>
     public void Step(DateTimeOffset now, TimeSpan elapsed)
     {
+        _injections.Advance(elapsed);
         var off = _injections.Active(InjectionLane.Connection, elapsed) is { Kind: InjectionKind.PowerOff };
         if (off || _injections.All.Any(injection => injection.Kind == InjectionKind.PowerOff && injection.OverlapWith(_lastStep, elapsed) > TimeSpan.Zero))
         {
