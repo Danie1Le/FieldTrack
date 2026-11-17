@@ -7,8 +7,8 @@ using MQTTnet;
 namespace FieldTrack.IntegrationTests;
 
 /// <summary>
-/// Guards ingest's throughput once the broker holds a backlog (#116): on Linux, MQTTnet's default 8 KB socket buffers let
-/// only about 40 Readings through per ~230 ms TCP stall, so a flood drained at ~190 Readings a second with Postgres idle.
+/// Guards ingest's throughput once the broker holds a backlog: the broker connection's TCP buffers hold every message in
+/// flight, and a flood's backlog is stored within seconds (#116).
 /// </summary>
 public sealed class IngestThroughputTests(FieldTrackFixture fixture) : IntegrationTest(fixture), IDisposable
 {
@@ -34,9 +34,10 @@ public sealed class IngestThroughputTests(FieldTrackFixture fixture) : Integrati
         await using var api = await StartIngestAsync();
         var worker = api.Services.GetServices<IHostedService>().OfType<IngestWorker>().Single();
 
-        var tcp = worker.ClientOptions().ChannelOptions.ShouldBeOfType<MqttClientTcpOptions>();
+        var clientOptions = worker.ClientOptions();
+        var tcp = clientOptions.ChannelOptions.ShouldBeOfType<MqttClientTcpOptions>();
 
-        tcp.BufferSize.ShouldBeGreaterThanOrEqualTo(2 * IngestWorker.BatchSize * ReadingMessageBytes);
+        tcp.BufferSize.ShouldBeGreaterThanOrEqualTo(clientOptions.ReceiveMaximum * ReadingMessageBytes);
     }
 
     [Fact]
@@ -53,8 +54,8 @@ public sealed class IngestThroughputTests(FieldTrackFixture fixture) : Integrati
 
         var published = manifest.Devices.Sum(device => device.Ranges.Sum(range => range.LastSequence - range.FirstSequence + 1));
         await using var database = await OpenDatabaseAsync();
-        // Healthy ingest stores a flood's leftover backlog in about a second; at the #116 rate (~190 a second) even the
-        // smallest CI flood (~20,000 Readings) needs over a minute.
+        // Healthy ingest stores a flood's leftover backlog in about a second; with an 8 KB window even the smallest CI
+        // flood (~20,000 Readings) would need over a minute.
         var stored = await EventuallyAsync(
             async () => (long)(await SqlAsync(database, "SELECT count(*) FROM readings"))!,
             count => count >= published,

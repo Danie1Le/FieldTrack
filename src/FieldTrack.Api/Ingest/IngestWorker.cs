@@ -65,7 +65,8 @@ public sealed partial class IngestWorker(
     /// <summary>
     /// The TCP send and receive buffer of the broker connection: room for every message the broker may have in flight
     /// (ReceiveMaximum, 2,000 Readings of a few hundred bytes), so the TCP window never throttles a backlog (#116).
-    /// Linux caps it at <c>net.core.rmem_max</c>.
+    /// MQTTnet's default is 8 KB; on Linux that window holds ~40 Readings, and a backlog drains one window per ~200 ms
+    /// TCP stall. Linux caps the buffer at <c>net.core.rmem_max</c>.
     /// </summary>
     public const int SocketBufferSize = 1 << 20;
 
@@ -335,21 +336,15 @@ public sealed partial class IngestWorker(
     }
 
     /// <summary>The MQTT options the worker connects with; internal so a test can check the socket buffers (#116).</summary>
-    internal MqttClientOptions ClientOptions()
-    {
-        var clientOptions = new MqttClientOptionsBuilder()
-            .WithBroker(broker.Value)
-            .WithClientId(options.Value.ClientId)
-            .WithCleanStart(false)
-            .WithSessionExpiryInterval(SessionExpirySeconds)
-            // The broker sends at most this many unacknowledged messages, so a full batch never waits on its own acks.
-            .WithReceiveMaximum(2 * BatchSize)
-            .Build();
-        // #116: MQTTnet sets SO_RCVBUF and SO_SNDBUF to 8 KB unless told otherwise. On Linux that window holds only ~40
-        // Readings, and a backlog can drain one window per ~200 ms TCP stall (~190 Readings/s with Postgres idle).
-        ((MqttClientTcpOptions)clientOptions.ChannelOptions).BufferSize = SocketBufferSize;
-        return clientOptions;
-    }
+    internal MqttClientOptions ClientOptions() => new MqttClientOptionsBuilder()
+        .WithBroker(broker.Value)
+        .WithClientId(options.Value.ClientId)
+        .WithCleanStart(false)
+        .WithSessionExpiryInterval(SessionExpirySeconds)
+        // The broker sends at most this many unacknowledged messages, so a full batch never waits on its own acks.
+        .WithReceiveMaximum(2 * BatchSize)
+        .WithTcpServer(tcp => tcp.BufferSize = SocketBufferSize)
+        .Build();
 
     /// <summary>
     /// The next batch, or an empty one once <paramref name="sweepIn"/> passes with no message, so the loop can sweep.
