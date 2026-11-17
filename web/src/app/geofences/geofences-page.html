@@ -1,0 +1,82 @@
+<header class="bar">
+  <h1>FieldTrack</h1>
+  <span class="muted">Geofences</span>
+  <nav class="links">
+    <a class="btn" routerLink="/">Control room</a>
+    <button type="button" class="btn" (click)="auth.signOut()">Sign out</button>
+  </nav>
+</header>
+
+<div class="columns">
+  <section class="panel side" aria-label="Geofences">
+    <header>
+      <strong>Geofences</strong>
+      <span class="muted">Draw a new one with the toolbar on the map.</span>
+    </header>
+
+    <ul class="list">
+      @for (geofence of geofences(); track geofence.id) {
+        <li [attr.data-geofence]="geofence.id">
+          <button type="button" [attr.aria-current]="draft()?.id === geofence.id ? 'true' : null" (click)="edit(geofence)">
+            <strong class="name">{{ geofence.name }}</strong>
+            <span class="kind">{{ geofence.kind }}</span>
+            <span class="rules muted">{{ rulesOf(geofence) }}</span>
+          </button>
+        </li>
+      } @empty {
+        <li class="muted empty">{{ geofences() ? 'No Geofences yet.' : 'Loading…' }}</li>
+      }
+    </ul>
+
+    @if (problems().length) {
+      <ul class="problems" role="alert">
+        @for (problem of problems(); track $index) {
+          <li>{{ problem }}</li>
+        }
+      </ul>
+    }
+
+    @if (draft(); as draft) {
+      <form (submit)="$event.preventDefault(); save()">
+        <h2>{{ draft.id ? 'Edit Geofence' : 'New Geofence' }}</h2>
+        <label for="geofence-name">Name</label>
+        <input
+          id="geofence-name"
+          name="name"
+          required
+          maxlength="200"
+          [value]="name()"
+          (input)="name.set($any($event.target).value)"
+        />
+        <fieldset>
+          <legend>Kind</legend>
+          <label>
+            <input type="radio" name="kind" value="Inclusion" [checked]="kind() === 'Inclusion'" (change)="kind.set('Inclusion')" />
+            Inclusion, solid: Assets stay inside
+          </label>
+          <label>
+            <input type="radio" name="kind" value="Exclusion" [checked]="kind() === 'Exclusion'" (change)="kind.set('Exclusion')" />
+            Exclusion, dashed: Assets stay out
+          </label>
+        </fieldset>
+        <p class="muted hint">Drag the corners on the map to change the area.</p>
+        <div class="actions">
+          <button type="submit" class="btn btn-solid" [disabled]="busy()">Save</button>
+          <button type="button" class="btn" (click)="cancel()">Cancel</button>
+          @if (draft.id) {
+            <button type="button" class="btn danger" [disabled]="busy()" (click)="remove()">Delete</button>
+          }
+        </div>
+      </form>
+    }
+  </section>
+
+  <app-geofence-editor
+    class="map"
+    [geofences]="geofences() ?? []"
+    [draft]="draft()"
+    [kind]="kind()"
+    (drawn)="drawn($event)"
+    (changed)="changed($event)"
+  />
+</div>

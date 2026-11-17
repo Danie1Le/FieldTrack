@@ -1,7 +1,6 @@
 import { Component, DestroyRef, ElementRef, afterRenderEffect, computed, inject, input } from '@angular/core';
 import * as L from 'leaflet';
 import { Reading } from '../control-room/live';
-import { maxDrawn, thin } from './replay';
 
 /** A palette colour (styles.css); read from the root, since this host is not on the page yet when the layers are made. */
 const colour = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -66,13 +65,13 @@ export class ReplayMap {
     });
 
     afterRenderEffect(() => {
-      this.route.setLatLngs(thin(this.points(), maxDrawn));
+      this.route.setLatLngs(this.points());
       this.fitted = false;
       this.fitOnce();
     });
     afterRenderEffect(() => {
       const [points, position] = [this.points(), this.position()];
-      this.trail.setLatLngs(thin(points, maxDrawn, position));
+      this.trail.setLatLngs(points.slice(0, position + 1));
       if (position >= 0) {
         this.dot.setLatLng(points[position]);
       }

@@ -23,6 +23,12 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
     public const int MaxReadings = 100_000;
 
     /// <summary>
+    /// The most points <c>thinTo</c> may ask for. Each point costs an index probe and a PostGIS conversion, and a
+    /// screen draws a few thousand: 100,000 cost about 1.3 s, six times the most expensive unthinned read.
+    /// </summary>
+    public const int MaxThinTo = 5_000;
+
+    /// <summary>
     /// Lists the Readings stamped with the Asset whose Device time is in [<paramref name="from"/>, <paramref name="to"/>),
     /// ordered by Device time. Archived Assets keep their history, so they are listed too.
     /// </summary>
@@ -32,7 +38,7 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
     /// and is never refused for size. A screen draws no more than a few thousand points, and 24 h at demo rate hold
     /// over 300,000 Readings: thinning here keeps the replay's response small and cheap under load (#126).
     /// </remarks>
-    /// <response code="400">A missing bound, <paramref name="to"/> not after <paramref name="from"/>, a range over 31 days, <c>thinTo</c> below 2 or above <see cref="MaxReadings"/>, or an unthinned range holding more than <see cref="MaxReadings"/> Readings.</response>
+    /// <response code="400">A missing bound, <paramref name="to"/> not after <paramref name="from"/>, a range over 31 days, <c>thinTo</c> below 2 or above <see cref="MaxThinTo"/>, or an unthinned range holding more than <see cref="MaxReadings"/> Readings.</response>
     /// <response code="404">No Asset has this id.</response>
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<ReadingResponse>>(StatusCodes.Status200OK)]
@@ -42,7 +48,7 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
         Guid assetId,
         [Required] DateTimeOffset? from,
         [Required] DateTimeOffset? to,
-        [Range(2, MaxReadings)] int? thinTo,
+        [Range(2, MaxThinTo)] int? thinTo,
         CancellationToken cancellationToken)
     {
         // Npgsql writes timestamptz from UTC values only.
@@ -98,23 +104,37 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
         Guid assetId, DateTimeOffset start, DateTimeOffset end, int points, CancellationToken cancellationToken)
     {
         var slices = points - 1;
+        // Offsets are built from seconds: an interval's days part would be added as calendar days in the session
+        // TimeZone, which moves a slice bound by an hour across a DST change.
         return await db.Database.SqlQuery<ReadingResponse>($"""
             WITH span AS (
                 SELECT min(device_time) AS first, max(device_time) AS last FROM readings
-                WHERE asset_id = {assetId} AND device_time >= {start} AND device_time < {end})
-            SELECT d.serial_number AS device_serial_number, r.boot, r.seq AS sequence_number, r.device_time, r.received_time,
-                   ST_Y(r.location::geometry) AS latitude, ST_X(r.location::geometry) AS longitude,
-                   r.speed_kph, r.engine_temp_c, r.fuel_pct, r.vibration_mm_s, r.battery_v
-            FROM span, generate_series(0, {slices}) slice
-            CROSS JOIN LATERAL (
-                SELECT * FROM readings r
-                WHERE r.asset_id = {assetId}
-                  AND r.device_time >= span.first + (span.last - span.first) * slice / {slices}
-                  AND r.device_time < CASE WHEN slice = {slices} THEN {end} ELSE span.first + (span.last - span.first) * (slice + 1) / {slices} END
-                ORDER BY r.device_time
-                LIMIT 1) r
-            JOIN devices d ON d.id = r.device_id
-            ORDER BY slice
+                WHERE asset_id = {assetId} AND device_time >= {start} AND device_time < {end}),
+            picked AS (
+                SELECT slice, r.device_id, r.boot, r.seq, r.device_time, r.received_time, r.location,
+                       r.speed_kph, r.engine_temp_c, r.fuel_pct, r.vibration_mm_s, r.battery_v
+                FROM span, generate_series(0, {slices - 1}) slice
+                CROSS JOIN LATERAL (
+                    SELECT * FROM readings r
+                    WHERE r.asset_id = {assetId}
+                      AND r.device_time >= span.first + make_interval(secs => (extract(epoch FROM span.last - span.first) * slice / {slices})::float8)
+                      AND r.device_time < span.first + make_interval(secs => (extract(epoch FROM span.last - span.first) * (slice + 1) / {slices})::float8)
+                    ORDER BY r.device_time, r.device_id, r.boot, r.seq
+                    LIMIT 1) r
+                UNION ALL
+                SELECT {slices}, r.device_id, r.boot, r.seq, r.device_time, r.received_time, r.location,
+                       r.speed_kph, r.engine_temp_c, r.fuel_pct, r.vibration_mm_s, r.battery_v
+                FROM (
+                    SELECT * FROM readings
+                    WHERE asset_id = {assetId} AND device_time >= {start} AND device_time < {end}
+                    ORDER BY device_time DESC, device_id DESC, boot DESC, seq DESC
+                    LIMIT 1) r)
+            SELECT d.serial_number AS device_serial_number, p.boot, p.seq AS sequence_number, p.device_time, p.received_time,
+                   ST_Y(p.location::geometry) AS latitude, ST_X(p.location::geometry) AS longitude,
+                   p.speed_kph, p.engine_temp_c, p.fuel_pct, p.vibration_mm_s, p.battery_v
+            FROM picked p
+            JOIN devices d ON d.id = p.device_id
+            ORDER BY p.slice
             """).ToListAsync(cancellationToken);
     }
 }

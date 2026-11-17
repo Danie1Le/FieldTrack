@@ -1,0 +1,24 @@
+{
+  "injections": [
+    { "device": "ALR-001", "kind": "powerOff", "atSeconds": 30, "durationSeconds": 60 },
+    { "device": "ALR-001", "kind": "coverageGap", "atSeconds": 150, "durationSeconds": 10 },
+    { "device": "ALR-002", "kind": "coverageGap", "atSeconds": 40, "durationSeconds": 60 },
+    { "device": "ALR-002", "kind": "powerOff", "atSeconds": 160, "durationSeconds": 12 },
+    { "device": "ALR-003", "kind": "powerOff", "atSeconds": 50, "durationSeconds": 45 },
+    { "device": "ALR-003", "kind": "coverageGap", "atSeconds": 170, "durationSeconds": 8 },
+    { "device": "ALR-004", "kind": "coverageGap", "atSeconds": 60, "durationSeconds": 90 },
+    { "device": "ALR-004", "kind": "powerOff", "atSeconds": 200, "durationSeconds": 15 },
+    { "device": "ALR-005", "kind": "powerOff", "atSeconds": 70, "durationSeconds": 60 },
+    { "device": "ALR-005", "kind": "coverageGap", "atSeconds": 180, "durationSeconds": 5 },
+    { "device": "ALR-006", "kind": "coverageGap", "atSeconds": 80, "durationSeconds": 50 },
+    { "device": "ALR-006", "kind": "powerOff", "atSeconds": 210, "durationSeconds": 10 },
+    { "device": "ALR-007", "kind": "powerOff", "atSeconds": 90, "durationSeconds": 70 },
+    { "device": "ALR-007", "kind": "coverageGap", "atSeconds": 220, "durationSeconds": 14 },
+    { "device": "ALR-008", "kind": "coverageGap", "atSeconds": 100, "durationSeconds": 60 },
+    { "device": "ALR-008", "kind": "powerOff", "atSeconds": 230, "durationSeconds": 9 },
+    { "device": "ALR-009", "kind": "powerOff", "atSeconds": 110, "durationSeconds": 55 },
+    { "device": "ALR-009", "kind": "coverageGap", "atSeconds": 240, "durationSeconds": 12 },
+    { "device": "ALR-010", "kind": "coverageGap", "atSeconds": 120, "durationSeconds": 80 },
+    { "device": "ALR-010", "kind": "powerOff", "atSeconds": 250, "durationSeconds": 10 }
+  ]
+}

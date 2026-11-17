@@ -13,6 +13,9 @@ internal sealed record ApiAsset(Guid Id, string Name, AssetType Type);
 /// <summary>A Device as the API returns it.</summary>
 internal sealed record ApiDevice(Guid Id, string SerialNumber, bool Archived);
 
+/// <summary>An Alert Rule as the API returns it.</summary>
+internal sealed record ApiAlertRule(Guid Id);
+
 /// <summary>An Attachment as the API returns it.</summary>
 internal sealed record ApiAttachment(Guid Id, Guid DeviceId, Guid AssetId, DateTimeOffset? DetachedAt);
 
@@ -69,6 +72,25 @@ internal sealed class FieldTrackApi
     /// <summary>Attaches a Device to an Asset from now on.</summary>
     public Task<ApiAttachment> AttachAsync(Guid deviceId, Guid assetId, CancellationToken cancellationToken) =>
         PostAsync<ApiAttachment>("/attachments", new { deviceId, assetId }, cancellationToken);
+
+    /// <summary>Creates an Alert Rule from <paramref name="request"/>, the JSON of <c>POST /alert-rules</c>.</summary>
+    public Task<ApiAlertRule> CreateAlertRuleAsync(object request, CancellationToken cancellationToken) =>
+        PostAsync<ApiAlertRule>("/alert-rules", request, cancellationToken);
+
+    /// <summary>
+    /// Creates an Operator (the role of a dashboard user) with a random password and returns its access token, so a benchmark can listen
+    /// as one. The user stays behind; <paramref name="anonymous"/> must not carry the Admin's token.
+    /// </summary>
+    public async Task<string> CreateOperatorTokenAsync(HttpClient anonymous, CancellationToken cancellationToken)
+    {
+        var email = $"bench-{Guid.NewGuid():N}@bench.example";
+        var temporary = $"Tmp-{Guid.NewGuid():N}-aA1!";
+        var password = $"Pw-{Guid.NewGuid():N}-aA1!";
+        await PostAsync<JsonElement>("/users", new { email, displayName = "Bench Operator", role = "Operator", temporaryPassword = temporary }, cancellationToken);
+        using var response = await anonymous.PostAsJsonAsync("/auth/change-password", new { email, currentPassword = temporary, newPassword = password }, cancellationToken);
+        await EnsureSuccessAsync(response, "Change password");
+        return (await response.Content.ReadFromJsonAsync<TokenResponse>(_json, cancellationToken))!.AccessToken;
+    }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, string what)
     {

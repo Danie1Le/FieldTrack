@@ -1,5 +1,5 @@
 import { AlertRule } from '../control-room/live';
-import { positionAt, ruleLines, thin } from './replay';
+import { positionAt, ruleLines } from './replay';
 
 const at = (...times: string[]) => times.map((deviceTime) => ({ deviceTime }));
 
@@ -31,6 +31,7 @@ describe('ruleLines', () => {
     operator: 'GreaterThan',
     threshold: 105,
     hysteresis: 5,
+    geofenceId: null,
     ...changes,
   });
   const truck = { id: 'truck', assetGroupId: 'depot' };
@@ -54,32 +55,5 @@ describe('ruleLines', () => {
       { name: 'Engine overheat', operator: 'GreaterThan', threshold: 105, clear: 100 },
       { name: 'Cold engine', operator: 'LessThan', threshold: 40, clear: 42 },
     ]);
-  });
-});
-
-describe('thin', () => {
-  const points = Array.from({ length: 100_000 }, (_, i) => i);
-
-  it('keeps a short list as it is', () => {
-    expect(thin([0, 1, 2], 3000)).toEqual([0, 1, 2]);
-    expect(thin([], 3000)).toEqual([]);
-  });
-
-  it('draws at most the maximum plus the last point of a long list, evenly spaced from the first', () => {
-    const route = thin(points, 3000);
-
-    expect(route.length).toBeLessThanOrEqual(3001);
-    expect(route[0]).toBe(0);
-    expect(route.at(-1)).toBe(99_999);
-    expect(route[1] - route[0]).toBe(34);
-  });
-
-  it('ends a trail at the current Reading with the same spacing as the route, whatever the position', () => {
-    const trail = thin(points, 3000, 50_001);
-
-    expect(trail.at(-1)).toBe(50_001);
-    expect(trail.slice(0, -1).every((p) => p % 34 === 0 && p < 50_001)).toBe(true);
-    expect(thin(points, 3000, 0)).toEqual([0]);
-    expect(thin(points, 3000, -1)).toEqual([]);
   });
 });

@@ -36,25 +36,27 @@ internal sealed class SimulatedDevice
     /// <summary>
     /// A Device with the traits of <paramref name="spec"/> that is in <paramref name="boot"/>, moves as <paramref name="motion"/> says
     /// and suffers what <paramref name="injections"/> schedules (nothing when null). After a Power off it asks
-    /// <paramref name="raiseBoot"/> for its new Boot (the next number when null).
+    /// <paramref name="raiseBoot"/> for its new Boot (the next number when null). Its noise is drawn from the Boot, or from
+    /// <paramref name="noiseSeed"/> when given, so a run can be repeated whatever Boot it lands on.
     /// </summary>
-    public SimulatedDevice(FleetDevice spec, int boot, IMotion motion, InjectionSchedule? injections = null, Func<int>? raiseBoot = null)
+    public SimulatedDevice(FleetDevice spec, int boot, IMotion motion, InjectionSchedule? injections = null, Func<int>? raiseBoot = null, int? noiseSeed = null)
     {
         _spec = spec;
         Boot = boot;
         _motion = motion;
         _injections = injections ?? new InjectionSchedule();
         _raiseBoot = raiseBoot ?? (() => Boot + 1);
-        _random = new Random(SeedFor($"{spec.Serial}/noise/{boot}"));
+        _random = new Random(SeedFor($"{spec.Serial}/noise/{noiseSeed ?? boot}"));
     }
 
     /// <summary>
     /// Starts <paramref name="spec"/> in <paramref name="boot"/>, moving as its fleet entry says: along its route, fixed at its
     /// position, or as a random walk when it has neither. It suffers what <paramref name="scenario"/> scripts for it plus what
-    /// <paramref name="rates"/> draws at random, and asks <paramref name="raiseBoot"/> for each new Boot after a Power off.
+    /// <paramref name="rates"/> draws at random, and asks <paramref name="raiseBoot"/> for each new Boot after a Power off. A
+    /// <paramref name="noiseSeed"/> replaces the Boot as the seed of the sensor noise.
     /// </summary>
     /// <exception cref="SimulatorException">The Device's route file cannot be read.</exception>
-    public static SimulatedDevice Start(FleetDevice spec, int boot, Scenario? scenario = null, RandomRates? rates = null, Func<int>? raiseBoot = null)
+    public static SimulatedDevice Start(FleetDevice spec, int boot, Scenario? scenario = null, RandomRates? rates = null, Func<int>? raiseBoot = null, int? noiseSeed = null)
     {
         IMotion motion = spec switch
         {
@@ -65,7 +67,7 @@ internal sealed class SimulatedDevice
         };
         // Seeded from the Boot too, so each run (which raises the Boot) draws differently while a replay of the same state file draws the same.
         var random = rates is { Any: true } ? new RandomInjections(rates, spec.Sensors, new Random(SeedFor($"{spec.Serial}/injections/{boot}"))) : null;
-        return new SimulatedDevice(spec, boot, motion, new InjectionSchedule(random, scenario?.InjectionsFor(spec.Serial)), raiseBoot);
+        return new SimulatedDevice(spec, boot, motion, new InjectionSchedule(random, scenario?.InjectionsFor(spec.Serial)), raiseBoot, noiseSeed);
     }
 
     /// <summary>The Device's serial number.</summary>

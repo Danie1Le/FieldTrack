@@ -16,6 +16,12 @@ export type SignInOutcome = 'signedIn' | 'passwordChangeRequired' | 'refused' | 
 /** What a password change came to: `invalid` carries the API's validation messages; anything else throws. */
 export type ChangePasswordOutcome = 'changed' | { invalid: string[] } | 'refused' | 'tooManyAttempts';
 
+/** The Demo Operator's public credentials, served in demo mode only (ADR 0002). */
+export interface DemoOperator {
+  email: string;
+  password: string;
+}
+
 /** Where this tab keeps its refresh token, so a reload stays signed in but a new tab signs in again. */
 export const refreshTokenKey = 'fieldtrack.refreshToken';
 
@@ -45,6 +51,24 @@ export class AuthService {
   /** True while this tab holds an access token. */
   readonly signedIn = computed(() => this.access() !== null);
 
+  /**
+   * True when the access token's `role` claim names Admin. It only decides what the dashboard offers: the API checks
+   * the role on every change (ADR 0002).
+   */
+  readonly isAdmin = computed(() => {
+    const payload = this.access()?.token.split('.')[1];
+    if (!payload) {
+      return false;
+    }
+
+    try {
+      const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+      return ([] as unknown[]).concat(claims.role).includes('Admin');
+    } catch {
+      return false;
+    }
+  });
+
   /** Signs in with email and password. */
   async signIn(email: string, password: string): Promise<SignInOutcome> {
     try {
@@ -62,6 +86,15 @@ export class AuthService {
         default:
           throw error;
       }
+    }
+  }
+
+  /** The Demo Operator's credentials, or null outside demo mode (404) or when they cannot be fetched. */
+  async demoOperator(): Promise<DemoOperator | null> {
+    try {
+      return await firstValueFrom(this.http.get<DemoOperator>('/api/auth/demo-operator'));
+    } catch {
+      return null;
     }
   }
 

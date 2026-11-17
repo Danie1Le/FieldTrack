@@ -55,6 +55,8 @@ internal sealed class LiveClient : IAsyncDisposable
             connection.On<JsonElement>(name, payload => client._received.Writer.TryWrite((name, payload)));
         }
 
+        connection.On(LiveHub.GeofencesChanged, () => client._received.Writer.TryWrite((LiveHub.GeofencesChanged, default)));
+
         connection.Closed += _ =>
         {
             client._closed.TrySetResult();
@@ -93,6 +95,21 @@ internal sealed class LiveClient : IAsyncDisposable
     {
         using var timeout = FifteenSeconds();
         return await _received.Reader.ReadAsync(timeout.Token);
+    }
+
+    /// <summary>Returns the first message that arrives within <paramref name="wait"/>, or null when none does.</summary>
+    public async Task<(string Name, JsonElement Payload)?> AnyWithinAsync(TimeSpan wait)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(wait);
+        try
+        {
+            return await _received.Reader.ReadAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     private static CancellationTokenSource FifteenSeconds()
