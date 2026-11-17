@@ -81,10 +81,25 @@ internal static class BenchCli
             throw new SimulatorException("No GPX routes found: point --routes at a directory of .gpx files.");
         }
 
+        // Before SeedAsync creates anything through the API.
+        var (span, interval) = HistoryWindow(options.GetNumber("days"), options.GetNumber("interval"));
         await SeedAsync(fleet, options, cancellationToken);
         return await HistorySeeder.SeedAsync(
-            fleet, [.. routeFiles.Select(GpxRoute.Load)], target, DateTimeOffset.UtcNow, TimeSpan.FromDays(options.GetNumber("days") ?? 30),
-            TimeSpan.FromSeconds(options.GetNumber("interval") ?? 480), Console.Out, cancellationToken);
+            fleet, [.. routeFiles.Select(GpxRoute.Load)], target, DateTimeOffset.UtcNow, span, interval, Console.Out, cancellationToken);
+    }
+
+    /// <summary>The history's length and spacing from <c>--days</c> and <c>--interval</c> (seconds), defaulting to 30 days and 480 s.</summary>
+    /// <exception cref="SimulatorException">A value is not finite, <paramref name="days"/> is not positive, or <paramref name="intervalSeconds"/> is under one second.</exception>
+    internal static (TimeSpan Span, TimeSpan Interval) HistoryWindow(double? days, double? intervalSeconds)
+    {
+        var (d, s) = (days ?? 30, intervalSeconds ?? 480);
+        // Zero, negative, NaN or sub-tick intervals never reach the end of the window: the COPY would stream rows until the disk is full.
+        if (!double.IsFinite(d) || d <= 0 || !double.IsFinite(s) || s < 1)
+        {
+            throw new SimulatorException($"--days must be a positive number and --interval at least 1 (seconds), got {d} and {s}.");
+        }
+
+        return (TimeSpan.FromDays(d), TimeSpan.FromSeconds(s));
     }
 
     private static bool Report(BenchOutcome outcome)
@@ -130,8 +145,12 @@ internal static class BenchCli
                 ? DevelopmentPassword
                 : throw new SimulatorException("Set FIELDTRACK_DB_PASSWORD: the development password only applies to a database on localhost."));
         // Npgsql applies the command timeout to every write of a COPY stream, and a busy server stops reading it while it maintains indexes
-        // (seed-history); the individual bench queries set the same bound.
-        builder.CommandTimeout = 600;
+        // (seed-history). A timeout the user put in --db is their choice and kept.
+        if (!builder.ConnectionString.Contains("Command Timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.CommandTimeout = BenchDatabase.CommandTimeoutSeconds;
+        }
+
         return builder.ConnectionString;
     }
 

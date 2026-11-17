@@ -168,13 +168,13 @@ internal static class HistorySeeder
 
     private static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 3600 };
+        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = BenchDatabase.MaintenanceTimeoutSeconds };
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<T> ScalarAsync<T>(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 3600 };
+        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = BenchDatabase.MaintenanceTimeoutSeconds };
         return (T)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 }

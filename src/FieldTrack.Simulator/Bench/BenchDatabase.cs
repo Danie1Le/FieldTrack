@@ -33,6 +33,12 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
     /// <summary>The connections behind this view, for the query benchmarks (#46) that seed and time their own SQL.</summary>
     public NpgsqlDataSource DataSource => dataSource;
 
+    /// <summary>Seconds a bench query, or a write of the seeder's COPY stream, may take: Npgsql's 30 s default is too short on a busy server.</summary>
+    public const int CommandTimeoutSeconds = 600;
+
+    /// <summary>Seconds one of the seeder's index builds, partition creations or <c>VACUUM</c> over a million Readings may take.</summary>
+    public const int MaintenanceTimeoutSeconds = 3600;
+
     /// <summary>How far either side of a run Device time may fall and still count as the run's.</summary>
     public static readonly TimeSpan Padding = TimeSpan.FromSeconds(1);
 
@@ -189,7 +195,7 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
     private NpgsqlCommand Command(string sql)
     {
         var command = dataSource.CreateCommand(sql);
-        command.CommandTimeout = 600;
+        command.CommandTimeout = CommandTimeoutSeconds;
         return command;
     }
 

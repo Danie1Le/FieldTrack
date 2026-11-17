@@ -80,6 +80,19 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
     }
 
     [Fact]
+    public async Task A_Reading_timed_at_its_Attachments_instant_is_stamped_to_the_Asset()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var attachedAt = (await ListAsync(admin, $"/attachments?assetId={asset}")).Single().GetProperty("attachedAt").GetDateTimeOffset();
+
+        await WriteAsync([Received(0, attachedAt, 112)]);
+
+        (await ListAsync(admin, "/alerts?active=true")).ShouldHaveSingleItem();
+    }
+
+    [Fact]
     public async Task Archiving_an_Asset_disables_its_own_rules_and_resolves_the_Alerts_of_its_Asset_Group_rules_too()
     {
         using var admin = await AdminClientAsync();
