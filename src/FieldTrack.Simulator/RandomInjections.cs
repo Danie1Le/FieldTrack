@@ -8,6 +8,9 @@ internal sealed record RandomRates(double FaultsPerHour, double PowerOffsPerHour
 {
     /// <summary>No random injection at all: only a Scenario injects.</summary>
     public static RandomRates None { get; } = new(0, 0, 0);
+
+    /// <summary>Whether any kind has a rate above zero.</summary>
+    public bool Any => FaultsPerHour > 0 || PowerOffsPerHour > 0 || CoverageGapsPerHour > 0;
 }
 
 /// <summary>

@@ -1,9 +1,12 @@
 namespace FieldTrack.Simulator;
 
-/// <summary>Every <see cref="Injection"/> of one Device in one run: the ones a Scenario scripted and the ones random injection drew.</summary>
-internal sealed class InjectionSchedule(RandomInjections? random = null)
+/// <summary>
+/// Every <see cref="Injection"/> of one Device in one run: the ones a Scenario scripted (which must not clash, as
+/// <see cref="Scenario"/> checks) and the ones <paramref name="random"/> draws as the run goes on.
+/// </summary>
+internal sealed class InjectionSchedule(RandomInjections? random = null, IEnumerable<Injection>? scripted = null)
 {
-    private readonly List<Injection> _injections = [];
+    private readonly List<Injection> _injections = [.. scripted ?? []];
     private TimeSpan _drawnUntil;
 
     /// <summary>The Injections in the order they were added.</summary>

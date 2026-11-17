@@ -32,6 +32,16 @@ public sealed class BootStateTests : IDisposable
     }
 
     [Fact]
+    public async Task Devices_of_one_run_that_power_cycle_together_each_get_their_own_Boot()
+    {
+        BootState.Raise(StatePath, ["TRK-001"]);
+
+        var boots = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => BootState.Raise(StatePath, ["TRK-001"])["TRK-001"], TestContext.Current.CancellationToken)));
+
+        boots.Order().ShouldBe(Enumerable.Range(2, 16));
+    }
+
+    [Fact]
     public void Raising_leaves_no_temporary_file_behind()
     {
         BootState.Raise(StatePath, ["TRK-001"]);
