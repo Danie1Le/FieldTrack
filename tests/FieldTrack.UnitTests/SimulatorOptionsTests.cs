@@ -24,6 +24,56 @@ public sealed class SimulatorOptionsTests
         Should.Throw<SimulatorException>(() => Options.Parse(args)).Message.ShouldContain(reason);
     }
 
+    private static readonly FleetFile Fleet = FleetFile.Parse(
+        """{ "devices": [ { "serial": "TRK-001", "assetType": "Truck", "sensors": ["fuelPct"] } ] }""", AppContext.BaseDirectory);
+
+    [Fact]
+    public void A_run_takes_a_rate_or_max_and_the_random_injection_rates()
+    {
+        var paced = SimulatorCli.RunOptionsFrom(
+            Options.Parse(["--rate", "25", "--fault-rate", "2", "--power-off-rate", "0.5", "--coverage-gap-rate", "1", "--duration", "60"]), Fleet);
+        var flood = SimulatorCli.RunOptionsFrom(Options.Parse(["--rate", "max"]), Fleet);
+
+        paced.RatePerSecond.ShouldBe(25);
+        paced.RandomInjection.ShouldBe(new RandomRates(2, 0.5, 1));
+        paced.Duration.ShouldBe(TimeSpan.FromMinutes(1));
+        paced.Scenario.ShouldBeNull();
+        flood.RatePerSecond.ShouldBeNull();
+        flood.RandomInjection.ShouldBe(RandomRates.None);
+    }
+
+    [Fact]
+    public void A_Scenario_file_is_loaded_against_the_fleet()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, """{ "injections": [ { "device": "TRK-001", "kind": "powerOff", "atSeconds": 5, "durationSeconds": 10 } ] }""");
+
+            var run = SimulatorCli.RunOptionsFrom(Options.Parse(["--rate", "10", "--scenario", path]), Fleet);
+
+            run.Scenario!.InjectionsFor("TRK-001").ShouldHaveSingleItem().Kind.ShouldBe(InjectionKind.PowerOff);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("--rate", "fast", "--rate must be a number")]
+    [InlineData("--fault-rate", "-1", "--fault-rate must be")]
+    [InlineData("--power-off-rate", "NaN", "--power-off-rate must be")]
+    [InlineData("--coverage-gap-rate", "Infinity", "--coverage-gap-rate must be")]
+    [InlineData("--mqtt-port", "70000", "--mqtt-port")]
+    [InlineData("--duration", "-5", "--duration")]
+    public void A_run_option_out_of_range_is_refused(string name, string value, string reason)
+    {
+        string[] args = name == "--rate" ? [name, value] : ["--rate", "10", name, value];
+
+        Should.Throw<SimulatorException>(() => SimulatorCli.RunOptionsFrom(Options.Parse(args), Fleet)).Message.ShouldContain(reason);
+    }
+
     [Theory]
     [InlineData("http://localhost:8080")]
     [InlineData("http://127.0.0.1:8080")]

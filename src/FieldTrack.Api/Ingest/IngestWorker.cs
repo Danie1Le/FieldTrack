@@ -31,7 +31,8 @@ public sealed partial class IngestWorker(
     TimeProvider time,
     IMeterFactory meters,
     LivePush live,
-    ILogger<IngestWorker> logger) : BackgroundService
+    ILogger<IngestWorker> logger,
+    IIngestCrashPoints? crashes = null) : BackgroundService
 {
     /// <summary>
     /// Every Device's telemetry topic, <c>fieldtrack/{version}/devices/{serialNumber}/telemetry</c>, in every
@@ -51,6 +52,15 @@ public sealed partial class IngestWorker(
     /// <summary>The counter of Rejected messages stored, tagged with their <c>reason</c>.</summary>
     public const string RejectedMessagesInstrument = "fieldtrack.ingest.rejected_messages";
 
+    /// <summary>The counter of Readings dropped as identical duplicates: the same key and content hash as the stored copy (ADR 0003).</summary>
+    public const string IdenticalDuplicatesInstrument = "fieldtrack.ingest.identical_duplicates";
+
+    /// <summary>
+    /// The counter of Readings dropped as conflicting duplicates: the same key as the stored copy but a different content
+    /// hash, which a correct Device never sends, so it points at a Device bug (ADR 0001).
+    /// </summary>
+    public const string ConflictingDuplicatesInstrument = "fieldtrack.ingest.conflicting_duplicates";
+
     /// <summary>How long the broker keeps the session, and its queued messages, while the worker is away.</summary>
     public const uint SessionExpirySeconds = 3_600;
 
@@ -66,8 +76,15 @@ public sealed partial class IngestWorker(
     // matching both would be delivered, and so rejected, twice.
     private static readonly string[] _retiredTopicFilters = ["fieldtrack/v1/devices/+/telemetry"];
 
+    // IMeterFactory hands out one Meter per name, so each counter below shares it.
     private readonly Counter<long> _rejectedMessages = meters.Create(MeterName).CreateCounter<long>(
         RejectedMessagesInstrument, "{message}", "Telemetry messages stored as Rejected messages, by reason.");
+
+    private readonly Counter<long> _identicalDuplicates = meters.Create(MeterName).CreateCounter<long>(
+        IdenticalDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with the same content hash.");
+
+    private readonly Counter<long> _conflictingDuplicates = meters.Create(MeterName).CreateCounter<long>(
+        ConflictingDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with a different content hash.");
 
     /// <summary>How many committed batches may wait for the push loop before the oldest is dropped.</summary>
     public const int PushBacklog = 64;
@@ -142,7 +159,7 @@ public sealed partial class IngestWorker(
             return Task.CompletedTask;
         };
 
-        await using var writer = await ReadingWriter.OpenAsync(dataSource, time, stoppingToken);
+        await using var writer = await ReadingWriter.OpenAsync(dataSource, time, stoppingToken, crashes);
         var connected = await client.ConnectAsync(ClientOptions(), stoppingToken);
         // MQTTnet returns a refused CONNACK (bad credentials, say) instead of throwing.
         if (connected.ResultCode != MqttClientConnectResultCode.Success)
@@ -173,6 +190,10 @@ public sealed partial class IngestWorker(
                 {
                     _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
                 }
+
+                _identicalDuplicates.Add(written.IdenticalDuplicates);
+                _conflictingDuplicates.Add(written.ConflictingDuplicates);
+                crashes?.Reached(IngestCrashPoint.AfterCommit);
 
                 // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
                 // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.

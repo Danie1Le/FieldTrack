@@ -1,0 +1,9 @@
+{
+  "injections": [
+    { "device": "TRK-001", "kind": "overheat", "atSeconds": 60, "durationSeconds": 600 },
+    { "device": "GEN-001", "kind": "fuelLeak", "atSeconds": 120, "durationSeconds": 600 },
+    { "device": "EXC-001", "kind": "powerOff", "atSeconds": 180, "durationSeconds": 60 },
+    { "device": "TRK-002", "kind": "coverageGap", "atSeconds": 240, "durationSeconds": 120 },
+    { "device": "SUB-001", "kind": "clockOffset", "atSeconds": 0, "amount": -30 }
+  ]
+}
