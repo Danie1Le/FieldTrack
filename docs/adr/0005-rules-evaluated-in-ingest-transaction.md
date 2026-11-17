@@ -35,3 +35,4 @@ Readings drive rules per Asset in (Boot, Sequence number) order, and only when t
 - The ingest worker must run as a single instance. In-memory caches and transition-based raising assume one evaluator.
 - Rule evaluation time adds to every batch's commit time, and so to the 200 ms ingest and 500 ms alert latency budgets.
 - A Reading that arrives after a newer one from the same Device never raises or resolves an Alert.
+- Only the last evaluated Reading is kept, so after a Device swap an old Device's Coverage-gap backlog that arrives later counts as newer and is evaluated. Within one batch the Device evaluated last goes first, so its own stragglers are still skipped before another Device's Readings move the state on.
