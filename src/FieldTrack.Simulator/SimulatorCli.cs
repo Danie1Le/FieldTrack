@@ -30,14 +30,15 @@ internal static class SimulatorCli
               runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP without credentials: point it only at a local or
               trusted-network broker.
 
-          bench throughput|flood|crash --fleet <file> [--rate <readings per second>] [--duration <seconds>]
+          bench throughput|flood|crash|duplicates --fleet <file> [--rate <readings per second>] [--duration <seconds>]
               Seeds the fleet, then measures telemetry ingest against the running compose stack and writes JSON (metrics plus git SHA,
               CPU, RAM, OS, Docker limits, Postgres settings and image tags) to --out (bench/results). `throughput` holds --rate
               (default 2000) for --duration (default 600) and passes when ingest latency p95 < 200 ms, the broker backlog stays flat and
               nothing is lost; `flood` publishes flat out for --duration (default 60) and reports the rate ingest absorbed; `crash`
               publishes --rate (default 500) for --duration (default 600) while `docker kill` hits the ingest (api) container --kills
               times (default 10) at random moments, and passes with 0 missing and 0 duplicate Readings against the Manifest and the
-              broker's received count.
+              broker's received count; `duplicates` publishes --count (default 10000) Readings, republishes the identical bytes, and
+              passes when that many are stored and the Reading key table refused every copy.
               Also: [--db <connection string>] [--compose-project fieldtrack] [--mqtt-host --mqtt-port --api --email --state --out]
               Start the stack with bench/docker-compose.bench.yml. Exit code 3 means the run finished but missed its bar.
 

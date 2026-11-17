@@ -95,6 +95,22 @@ public sealed class BenchTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
+    public async Task Republishing_identical_bytes_stores_each_Reading_once_and_the_key_table_refuses_every_copy()
+    {
+        await SeedAsync();
+        await using var ingest = await StartIngestAsync();
+
+        var outcome = await DuplicateBench.RunAsync(Fleet, Target, count: 300, TextWriter.Null, CancellationToken);
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("published").GetInt64().ShouldBe(300);
+        results.GetProperty("stored").GetInt64().ShouldBe(300);
+        results.GetProperty("keyConflicts").GetInt64().ShouldBe(300);
+        results.GetProperty("rejected").GetInt64().ShouldBe(0);
+        outcome.Pass.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Scoring_counts_a_listed_Reading_that_was_never_stored_as_missing()
     {
         await SeedAsync();
