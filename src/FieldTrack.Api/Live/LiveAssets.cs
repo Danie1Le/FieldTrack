@@ -27,9 +27,10 @@ public static class LiveAssets
         var resolved = nameof(AlertStatus.Resolved);
         var recentFrom = now - _recentReadings;
         // Readings are outside the EF model (ADR 0003). The latest one per Asset comes from the index on
-        // (asset_id, device_time): first among the recent partitions only, and only an Asset with no recent Reading
-        // falls back to all of them (the older scan's condition on recent.x is checked once per Asset, so it is
-        // skipped for the rest). Exact either way: a recent Reading is always later than any older one.
+        // (asset_id, device_time): first among the recent partitions only, and only for an Asset with no recent
+        // Reading among all of them (COALESCE evaluates its second subquery only when the first is null). Exact
+        // either way: a recent Reading is always later than any older one. OFFSET 0 keeps the planner from copying
+        // the subqueries into every column of r.
         var rows = await db.Database.SqlQuery<Row>($"""
             SELECT a.id, a.name, a.type, a.asset_group_id, t.attached_at, d.last_received_at,
                    EXISTS (SELECT FROM alerts al WHERE al.asset_id = a.id AND al.status <> {resolved}) AS has_active_alert,
@@ -39,17 +40,18 @@ public static class LiveAssets
             FROM assets a
             LEFT JOIN attachments t ON t.asset_id = a.id AND t.detached_at IS NULL
             LEFT JOIN devices d ON d.id = t.device_id
-            LEFT JOIN LATERAL (
-                SELECT x FROM readings x
-                WHERE x.asset_id = a.id AND x.device_time >= {recentFrom}
-                ORDER BY x.device_time DESC, x.device_id DESC, x.boot DESC, x.seq DESC
-                LIMIT 1) recent ON true
-            LEFT JOIN LATERAL (
-                SELECT x FROM readings x
-                WHERE recent.x IS NULL AND x.asset_id = a.id
-                ORDER BY x.device_time DESC, x.device_id DESC, x.boot DESC, x.seq DESC
-                LIMIT 1) older ON true
-            LEFT JOIN LATERAL (SELECT (COALESCE(recent.x, older.x)).*) r ON true
+            CROSS JOIN LATERAL (
+                SELECT COALESCE(
+                    (SELECT x FROM readings x
+                     WHERE x.asset_id = a.id AND x.device_time >= {recentFrom}
+                     ORDER BY x.device_time DESC, x.device_id DESC, x.boot DESC, x.seq DESC
+                     LIMIT 1),
+                    (SELECT x FROM readings x
+                     WHERE x.asset_id = a.id
+                     ORDER BY x.device_time DESC, x.device_id DESC, x.boot DESC, x.seq DESC
+                     LIMIT 1)) AS reading
+                OFFSET 0) latest
+            CROSS JOIN LATERAL (SELECT (latest.reading).*) r
             LEFT JOIN devices rd ON rd.id = r.device_id
             WHERE NOT a.archived AND ({all} OR a.id = ANY({only}))
             ORDER BY a.name, a.id

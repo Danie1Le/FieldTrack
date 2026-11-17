@@ -60,21 +60,24 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
     /// <summary>
     /// Starts a host running the ingest worker on a broker session of its own, created before this returns,
     /// so every message published afterwards reaches it. <paramref name="time"/> replaces the clock; pass
-    /// <paramref name="clientId"/> to resume a session the test set up.
+    /// <paramref name="clientId"/> to resume a session the test set up; <paramref name="services"/> replaces more.
     /// </summary>
-    protected async Task<WebApplicationFactory<Program>> StartIngestAsync(TimeProvider? time = null, string? clientId = null)
+    protected async Task<WebApplicationFactory<Program>> StartIngestAsync(
+        TimeProvider? time = null, string? clientId = null, Action<IServiceCollection>? services = null)
     {
         clientId ??= $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
         await TelemetryPublisher.CreateIngestSessionAsync(Fixture, clientId);
         var api = Fixture.Api.WithWebHostBuilder(builder => builder
             .UseSetting($"{IngestOptions.SectionName}:{nameof(IngestOptions.ClientId)}", clientId)
-            .ConfigureTestServices(services =>
+            .ConfigureTestServices(collection =>
             {
-                services.AddHostedService<IngestWorker>();
+                collection.AddHostedService<IngestWorker>();
                 if (time is not null)
                 {
-                    services.AddSingleton(time);
+                    collection.AddSingleton(time);
                 }
+
+                services?.Invoke(collection);
             }));
         api.StartServer();
         return api;
