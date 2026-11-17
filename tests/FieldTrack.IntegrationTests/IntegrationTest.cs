@@ -113,6 +113,16 @@ public abstract class IntegrationTest(FieldTrackFixture fixture) : IAsyncLifetim
         }
     }
 
+    /// <summary>Waits until <paramref name="count"/> sessions on the database are waiting for a lock.</summary>
+    protected async Task LockWaitsAsync(int count)
+    {
+        await using var database = await OpenDatabaseAsync();
+        var waiting = await EventuallyAsync(
+            async () => (long)(await SqlAsync(database, "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"))!,
+            waiting => waiting >= count);
+        waiting.ShouldBe(count);
+    }
+
     /// <summary>A connection of the test's own to the API's database, for SQL the API does not expose.</summary>
     protected async Task<NpgsqlConnection> OpenDatabaseAsync()
     {

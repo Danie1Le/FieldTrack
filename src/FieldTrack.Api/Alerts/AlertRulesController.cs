@@ -42,9 +42,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AlertRuleResponse>> Create(AlertRuleRequest request, CancellationToken cancellationToken)
     {
-        // First, so an Archive of the rule's Asset that got there first has committed before the check below.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await db.RaiseAlertRuleVersionAsync(cancellationToken);
         if (await RefusalAsync(request, currentAssetId: null, cancellationToken) is { } refusal)
         {
             return refusal;
@@ -53,7 +51,9 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
         var rule = new AlertRule { Name = request.Name };
         Apply(request, rule);
         db.AlertRules.Add(rule);
+        // The insert's foreign key check locks the Asset, so the version comes after it.
         await db.SaveChangesAsync(cancellationToken);
+        await db.RaiseAlertRuleVersionAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ToResponse(rule));
     }
@@ -76,7 +76,6 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
     public async Task<ActionResult<AlertRuleResponse>> Update(Guid id, AlertRuleRequest request, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await db.RaiseAlertRuleVersionAsync(cancellationToken);
         if (await db.AlertRules.FindAsync([id], cancellationToken) is not { } rule)
         {
             return NotFound();
@@ -88,7 +87,9 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
         }
 
         Apply(request, rule);
+        // As in Create, the version comes after the foreign key check, and before the rule's Alerts and state.
         await db.SaveChangesAsync(cancellationToken);
+        await db.RaiseAlertRuleVersionAsync(cancellationToken);
         var reason = rule.Enabled ? ResolveReason.RuleChanged : ResolveReason.RuleDisabled;
         var resolved = await db.ResolveActiveAlertsAsync(alert => alert.AlertRuleId == id, reason, time.GetUtcNow(), cancellationToken);
         await db.AlertRuleStates.Where(state => state.AlertRuleId == id).ExecuteDeleteAsync(cancellationToken);

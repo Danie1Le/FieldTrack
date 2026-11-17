@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FieldTrack.Api.Live;
@@ -101,6 +102,25 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
             await change();
             ((long)(await SqlAsync(database, "SELECT version FROM alert_rule_version"))!).ShouldBeGreaterThan(before, name);
         }
+    }
+
+    [Fact]
+    public async Task A_rule_created_while_its_Asset_is_being_Archived_waits_for_the_Archive_instead_of_deadlocking()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        await using var archiver = await OpenDatabaseAsync();
+        await using var archive = await archiver.BeginTransactionAsync(CancellationToken);
+        // What Asset delete does: lock the Asset, then raise the Alert Rule version.
+        await SqlAsync(archiver, "SELECT FROM assets WHERE id = @p0 FOR UPDATE", Guid.Parse(asset));
+
+        var create = admin.PostAsJsonAsync("/alert-rules", Overheat(asset), CancellationToken);
+        await LockWaitsAsync(1);
+        await SqlAsync(archiver, "UPDATE alert_rule_version SET version = version + 1");
+        await archive.CommitAsync(CancellationToken);
+
+        using var created = await create;
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
     }
 
     // An Engine overheat rule on an Asset fitted with TRK-007, and the Open Alert its first Reading raised.

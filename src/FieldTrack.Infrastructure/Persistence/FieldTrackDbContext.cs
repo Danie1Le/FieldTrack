@@ -48,9 +48,11 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
     /// <summary>
     /// Raises the Alert Rule version (ADR 0005) in the caller's transaction, so the ingest worker reloads its rules and
-    /// rule state before its next batch. Call it first in any transaction that changes what ingest evaluates: its row
-    /// lock waits for a running ingest batch and holds the next one until this commits, so the change and a batch never
-    /// interleave, and the Alerts the change resolves include any the last batch raised.
+    /// rule state before its next batch. Call it in any transaction that changes what ingest evaluates: its row lock
+    /// waits for a running ingest batch and holds the next one until this commits, so the change and a batch never
+    /// interleave. Ingest locks Devices and Assets before the version, so call it after any Device or Asset lock the
+    /// transaction takes (a foreign key check on saving a rule takes one too), and before resolving Alerts or changing
+    /// rule state, so those see every Alert the last batch raised.
     /// </summary>
     public Task RaiseAlertRuleVersionAsync(CancellationToken cancellationToken) =>
         Database.ExecuteSqlRawAsync("UPDATE alert_rule_version SET version = version + 1", cancellationToken);
