@@ -27,7 +27,7 @@ public static class LiveAssets
         // shortcut: no lower bound on device_time, so the probes grow with the partition count; bound it to the
         // retention window once partitions are dropped.
         var rows = await db.Database.SqlQuery<Row>($"""
-            SELECT a.id, a.name, a.type, a.asset_group_id, d.id IS NOT NULL AS has_device, d.last_received_at,
+            SELECT a.id, a.name, a.type, a.asset_group_id, t.attached_at, d.last_received_at,
                    EXISTS (SELECT FROM alerts al WHERE al.asset_id = a.id AND al.status <> {resolved}) AS has_active_alert,
                    r.serial_number AS device_serial_number, r.boot, r.seq AS sequence_number, r.device_time, r.received_time,
                    r.latitude, r.longitude, r.speed_kph, r.engine_temp_c, r.fuel_pct, r.vibration_mm_s, r.battery_v
@@ -49,7 +49,7 @@ public static class LiveAssets
 
         return [.. rows.Select(row => new LiveAssetResponse(
             row.Id, row.Name, Enum.Parse<AssetType>(row.Type), row.AssetGroupId,
-            AssetStatuses.Of(row.HasDevice, row.HasActiveAlert, row.LastReceivedAt, now), row.LastReceivedAt,
+            AssetStatuses.Of(row.AttachedAt, row.HasActiveAlert, row.LastReceivedAt, now), row.LastReceivedAt,
             row.DeviceSerialNumber is null
                 ? null
                 : new ReadingResponse(row.DeviceSerialNumber, row.Boot!.Value, row.SequenceNumber!.Value, row.DeviceTime!.Value,
@@ -59,7 +59,7 @@ public static class LiveAssets
 
     // One row of the query above; the Reading columns are all null when the Asset has none.
     private sealed record Row(
-        Guid Id, string Name, string Type, Guid? AssetGroupId, bool HasDevice, DateTimeOffset? LastReceivedAt, bool HasActiveAlert,
+        Guid Id, string Name, string Type, Guid? AssetGroupId, DateTimeOffset? AttachedAt, DateTimeOffset? LastReceivedAt, bool HasActiveAlert,
         string? DeviceSerialNumber, int? Boot, long? SequenceNumber, DateTimeOffset? DeviceTime, DateTimeOffset? ReceivedTime,
         double? Latitude, double? Longitude, float? SpeedKph, float? EngineTempC, float? FuelPct, float? VibrationMmS, float? BatteryV);
 }
