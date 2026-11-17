@@ -112,6 +112,34 @@ public sealed class OfflineAlertTests(FieldTrackFixture fixture) : AlertTest(fix
     }
 
     [Fact]
+    public async Task A_detach_that_commits_while_a_sweep_waits_to_raise_leaves_no_Offline_Alert()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        await using var api = await StartIngestAsync(time);
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        await CreateAsync(admin, "/alert-rules", Silent(asset));
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, time.GetUtcNow()));
+        await LastReceivedAtAsync(admin);
+        using var sweeps = new InstrumentRecorder(api.Services, IngestMetrics.MeterName, IngestMetrics.SweepsInstrument);
+        await StepUntilAsync(api, time, () => Task.FromResult(sweeps.Total), total => total == 59);
+
+        // A detach in progress: it has bumped the Alert Rule version, so the sweep that would raise waits on it.
+        await using var detach = await OpenDatabaseAsync();
+        await using var transaction = await detach.BeginTransactionAsync(CancellationToken);
+        await SqlAsync(detach, "UPDATE alert_rule_version SET version = version + 1");
+        await SqlAsync(detach, "UPDATE attachments SET detached_at = now()");
+        time.Advance(TimeSpan.FromSeconds(1));
+        await LockWaitsAsync(1);
+        await transaction.CommitAsync(CancellationToken);
+        await EventuallyAsync(() => Task.FromResult(sweeps.Total), total => total == 60);
+        await StepUntilAsync(api, time, () => Task.FromResult(sweeps.Total), total => total >= 62);
+
+        (await ListAsync(admin, "/alerts")).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task The_sweep_pushes_an_Asset_whose_Device_has_been_silent_for_120_seconds_as_Offline()
     {
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
@@ -149,7 +177,7 @@ public sealed class OfflineAlertTests(FieldTrackFixture fixture) : AlertTest(fix
     // overtakes a slow sweep. Call it once the worker is connected: it sweeps only from then.
     private static async Task<T> StepUntilAsync<T>(WebApplicationFactory<Program> api, FakeTimeProvider time, Func<Task<T>> read, Func<T, bool> done)
     {
-        using var sweeps = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.SweepsInstrument);
+        using var sweeps = new InstrumentRecorder(api.Services, IngestMetrics.MeterName, IngestMetrics.SweepsInstrument);
         for (var step = 1; step <= 300; step++)
         {
             time.Advance(TimeSpan.FromSeconds(1));

@@ -1,5 +1,5 @@
 using System.Buffers;
-using System.Diagnostics.Metrics;
+using System.Diagnostics;
 using System.Threading.Channels;
 using FieldTrack.Api.Live;
 using FieldTrack.Api.Messaging;
@@ -30,7 +30,7 @@ public sealed partial class IngestWorker(
     IOptions<IngestOptions> options,
     NpgsqlDataSource dataSource,
     TimeProvider time,
-    IMeterFactory meters,
+    IngestMetrics metrics,
     LivePush live,
     ILogger<IngestWorker> logger,
     IIngestCrashPoints? crashes = null) : BackgroundService
@@ -41,29 +41,11 @@ public sealed partial class IngestWorker(
     /// </summary>
     public const string TopicFilter = "fieldtrack/+/devices/+/telemetry";
 
-    /// <summary>The tag on <see cref="RejectedMessagesInstrument"/> holding the <see cref="RejectReason"/> name.</summary>
-    public const string ReasonTag = "reason";
-
     /// <summary>The one version of the telemetry contract ingest reads (spec #21).</summary>
     public const string ContractVersion = "v1";
 
-    /// <summary>The meter ingest reports on.</summary>
-    public const string MeterName = "FieldTrack.Ingest";
-
-    /// <summary>The counter of Rejected messages stored, tagged with their <c>reason</c>.</summary>
-    public const string RejectedMessagesInstrument = "fieldtrack.ingest.rejected_messages";
-
-    /// <summary>The counter of Readings dropped as identical duplicates: the same key and content hash as the stored copy (ADR 0003).</summary>
-    public const string IdenticalDuplicatesInstrument = "fieldtrack.ingest.identical_duplicates";
-
-    /// <summary>
-    /// The counter of Readings dropped as conflicting duplicates: the same key as the stored copy but a different content
-    /// hash, which a correct Device never sends, so it points at a Device bug (ADR 0001).
-    /// </summary>
-    public const string ConflictingDuplicatesInstrument = "fieldtrack.ingest.conflicting_duplicates";
-
-    /// <summary>The counter of Offline sweeps run (ADR 0005), so a stalled sweep shows.</summary>
-    public const string SweepsInstrument = "fieldtrack.ingest.sweeps";
+    /// <summary>The source of the trace spans ingest starts.</summary>
+    public const string ActivitySourceName = "FieldTrack.Ingest";
 
     /// <summary>
     /// The topic each ingest session publishes its caught-up marker on and subscribes to (ADR 0005 restart grace). The
@@ -89,18 +71,7 @@ public sealed partial class IngestWorker(
     // matching both would be delivered, and so rejected, twice.
     private static readonly string[] _retiredTopicFilters = ["fieldtrack/v1/devices/+/telemetry"];
 
-    // IMeterFactory hands out one Meter per name, so each counter below shares it.
-    private readonly Counter<long> _rejectedMessages = meters.Create(MeterName).CreateCounter<long>(
-        RejectedMessagesInstrument, "{message}", "Telemetry messages stored as Rejected messages, by reason.");
-
-    private readonly Counter<long> _identicalDuplicates = meters.Create(MeterName).CreateCounter<long>(
-        IdenticalDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with the same content hash.");
-
-    private readonly Counter<long> _conflictingDuplicates = meters.Create(MeterName).CreateCounter<long>(
-        ConflictingDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with a different content hash.");
-
-    private readonly Counter<long> _sweeps = meters.Create(MeterName).CreateCounter<long>(
-        SweepsInstrument, "{sweep}", "Offline sweeps run.");
+    private static readonly ActivitySource _activities = new(ActivitySourceName);
 
     // The last sweep's time, kept across ingest sessions, so an Asset that turns Offline while a session restarts is
     // still pushed by the next sweep (ADR 0005).
@@ -241,9 +212,10 @@ public sealed partial class IngestWorker(
                     }
                 }
 
-                Enqueue(await writer.SweepAsync(_lastSweep, now, caughtUpAt, stoppingToken));
+                var swept = await writer.SweepAsync(_lastSweep, now, caughtUpAt, stoppingToken);
+                metrics.RecordSweep(swept);
+                Enqueue(swept);
                 _lastSweep = now;
-                _sweeps.Add(1);
                 // Fixed rate from the due time, so the 1 s bound holds under load; a sweep that fell a whole interval
                 // behind skips ahead instead of bursting.
                 nextSweep += SweepEvery;
@@ -272,17 +244,40 @@ public sealed partial class IngestWorker(
             return false;
         }
 
+        // Caught-up markers are not telemetry: they are acknowledged with the batch but never stored or counted.
+        var telemetry = batch.Where(message => message.Args.ApplicationMessage.Topic != CaughtUpTopic).ToList();
         var caughtUp = batch.Any(message => message.Args.ApplicationMessage.Topic == CaughtUpTopic
                                             && message.Args.ApplicationMessage.Payload.ToArray().AsSpan().SequenceEqual(marker));
-        var (readings, rejected) = Parse(batch);
-        var written = await writer.WriteAsync(readings, rejected, stoppingToken);
-        foreach (var reason in written.Rejected)
+        if (telemetry.Count == 0)
         {
-            _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
+            foreach (var message in batch)
+            {
+                await message.Args.AcknowledgeAsync(CancellationToken.None);
+            }
+
+            return caughtUp;
         }
 
-        _identicalDuplicates.Add(written.IdenticalDuplicates);
-        _conflictingDuplicates.Add(written.ConflictingDuplicates);
+        // The span runs to the end of the batch, acknowledgements and push enqueue included, not the wait for its first
+        // message; Npgsql's spans nest in it.
+        using var activity = _activities.StartActivity("ingest batch");
+        var (readings, rejected) = Parse(telemetry);
+        var started = Stopwatch.GetTimestamp();
+        WrittenBatch written;
+        try
+        {
+            written = await writer.WriteAsync(readings, rejected, stoppingToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Otherwise a failed batch looks like a successful one in the trace.
+            activity?.AddException(exception);
+            activity?.SetStatus(ActivityStatusCode.Error);
+            throw;
+        }
+
+        activity?.SetTag("fieldtrack.ingest.batch_size", telemetry.Count);
+        metrics.RecordBatch([.. telemetry.Select(message => message.ReceivedTime)], time.GetUtcNow(), Stopwatch.GetElapsedTime(started), written);
         crashes?.Reached(IngestCrashPoint.AfterCommit);
 
         // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
@@ -413,8 +408,7 @@ public sealed partial class IngestWorker(
     /// Reads each message as a Reading, or as a Rejected message when its topic version or payload breaks the
     /// contract. Whether its Device is known and not Archived is decided when the batch is stored. A message gets
     /// the first reason in this order: topic version, then payload, then Device. So a malformed payload from an
-    /// unknown or Archived Device is rejected for its payload: the Device check needs a parsed Reading. Caught-up markers
-    /// (<see cref="CaughtUpTopic"/>) are not telemetry and are skipped.
+    /// unknown or Archived Device is rejected for its payload: the Device check needs a parsed Reading.
     /// </summary>
     private static (List<ReceivedReading> Readings, List<ReceivedRejectedMessage> Rejected) Parse(List<ReceivedMessage> batch)
     {
@@ -423,11 +417,6 @@ public sealed partial class IngestWorker(
         foreach (var (args, receivedTime) in batch)
         {
             var message = args.ApplicationMessage;
-            if (message.Topic == CaughtUpTopic)
-            {
-                continue;
-            }
-
             var payload = message.Payload.ToArray();
             void Reject(RejectReason reason) => rejected.Add(new(message.Topic, payload, reason, receivedTime, message.Dup));
 

@@ -485,3 +485,5 @@ $RECYCLE.BIN/
 simulator-state.json
 simulator-state.json.lock
 manifest-*.json
+bench/results/*
+!bench/results/.gitkeep

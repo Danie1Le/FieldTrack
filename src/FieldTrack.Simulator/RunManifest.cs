@@ -43,6 +43,10 @@ internal sealed record RunManifest(DateTimeOffset StartedAt, DateTimeOffset Ende
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
+    /// <summary>Readings the Manifest lists.</summary>
+    [JsonIgnore]
+    public long Published => Devices.Sum(device => device.Ranges.Sum(range => range.LastSequence - range.FirstSequence + 1));
+
     /// <summary>
     /// The Manifest of a run that ended with <paramref name="devices"/> in the state they were left in. <paramref name="endedAt"/>
     /// must be <paramref name="startedAt"/> plus the run's elapsed time, the clock the Devices step by.

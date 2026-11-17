@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Domain.Telemetry;
@@ -199,7 +200,8 @@ public sealed class ReadingWriter : IAsyncDisposable
         (_connection, _rules, _crashes) = (connection, rules, crashes);
 
     /// <summary>
-    /// Opens a connection from <paramref name="dataSource"/>, prepares its stage table and loads the rule state.
+    /// Opens a connection from <paramref name="dataSource"/> and prepares its stage table; the first batch loads the
+    /// rules and rule state.
     /// <paramref name="time"/> stamps the Alerts it creates; <paramref name="crashes"/> is the crash tests' hook.
     /// </summary>
     public static async Task<ReadingWriter> OpenAsync(
@@ -210,7 +212,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         {
             await using var command = new NpgsqlCommand(CreateStage, connection);
             await command.ExecuteNonQueryAsync(cancellationToken);
-            return new ReadingWriter(connection, await AlertRuleRunner.LoadAsync(connection, time, cancellationToken), crashes);
+            return new ReadingWriter(connection, new AlertRuleRunner(time), crashes);
         }
         catch
         {
@@ -276,20 +278,32 @@ public sealed class ReadingWriter : IAsyncDisposable
 
         _crashes?.Reached(IngestCrashPoint.AfterStage);
 
-        // Separate statements, so each sees what committed while the one before waited on a lock.
-        await using (var locks = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(LockDevices), new(LockAssets) } })
+        // Separate statements, so each sees what committed while the one before waited on a lock. The Alert Rule
+        // version comes last, like in the API's changes (after their Device or Asset), so the two never deadlock.
+        long version;
+        await using (var locks = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(LockDevices), new(LockAssets), new(AlertRuleRunner.ReadVersion) } })
+        await using (var reader = await locks.ExecuteReaderAsync(cancellationToken))
         {
-            await locks.ExecuteNonQueryAsync(cancellationToken);
+            // Skip the two lock statements' result sets, which have no columns, to reach the version's.
+            await reader.NextResultAsync(cancellationToken);
+            await reader.NextResultAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            version = reader.GetInt64(0);
         }
 
-        // Store, then the enabled rules in the same round trip (ADR 0005).
+        // Store, then reload the rules if the version moved, in the same round trip (ADR 0005).
         var reasons = new List<RejectReason>();
         var (identical, conflicting) = (0, 0);
         var stored = new List<AssetReading>();
-        List<AlertRule> rules;
-        await using (var store = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(_store), new(AlertRuleRunner.LoadRules) } })
-        await using (var reader = await store.ExecuteReaderAsync(cancellationToken))
+        var reload = _rules.ReloadCommands(version);
+        await using (var store = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(_store) } })
         {
+            foreach (var command in reload)
+            {
+                store.BatchCommands.Add(command);
+            }
+
+            await using var reader = await store.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
                 if (!reader.IsDBNull(0))
@@ -310,16 +324,22 @@ public sealed class ReadingWriter : IAsyncDisposable
                 }
             }
 
-            await reader.NextResultAsync(cancellationToken);
-            rules = await AlertRuleRunner.ReadRulesAsync(reader, cancellationToken);
+            // The reload's result sets follow Store's only when ReloadCommands added its statements for this version.
+            if (reload.Length > 0)
+            {
+                await reader.NextResultAsync(cancellationToken);
+                await _rules.ReloadAsync(reader, version, cancellationToken);
+            }
         }
 
-        var outcome = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
+        var evaluationStarted = Stopwatch.GetTimestamp();
+        var outcome = await _rules.EvaluateAsync(transaction, stored, cancellationToken);
+        var evaluation = Stopwatch.GetElapsedTime(evaluationStarted);
         _crashes?.Reached(IngestCrashPoint.AfterEvaluation);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(outcome.States);
         return new WrittenBatch(
-            reasons, identical, conflicting, [.. stored.Select(reading => reading.AssetId).Distinct()], outcome.Raised, outcome.Resolved);
+            reasons, identical, conflicting, [.. stored.Select(reading => reading.AssetId).Distinct()], outcome.Raised, outcome.Resolved, evaluation);
     }
 
     /// <summary>
@@ -335,9 +355,10 @@ public sealed class ReadingWriter : IAsyncDisposable
     /// <param name="cancellationToken">Cancels the sweep.</param>
     public async Task<WrittenBatch> SweepAsync(DateTimeOffset since, DateTimeOffset at, DateTimeOffset? caughtUpAt, CancellationToken cancellationToken)
     {
+        // The rules first, then the Attachments they are judged against, so those are never older than the rules.
+        await _rules.RefreshAsync(_connection, cancellationToken);
         var assets = new List<AttachedAsset>();
-        List<AlertRule> rules;
-        await using (var read = new NpgsqlBatch(_connection) { BatchCommands = { new(ReadAttached), new(AlertRuleRunner.LoadOfflineRules) } })
+        await using (var read = new NpgsqlCommand(ReadAttached, _connection))
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
@@ -345,9 +366,6 @@ public sealed class ReadingWriter : IAsyncDisposable
                 assets.Add(new AttachedAsset(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1),
                     reader.GetFieldValue<DateTimeOffset>(2), reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTimeOffset>(3)));
             }
-
-            await reader.NextResultAsync(cancellationToken);
-            rules = await AlertRuleRunner.ReadRulesAsync(reader, cancellationToken);
         }
 
         // Each Asset is pushed once, by the sweep that first sees it Offline: the instant lies in (last sweep, now].
@@ -357,8 +375,9 @@ public sealed class ReadingWriter : IAsyncDisposable
                                      && since < offlineFrom && offlineFrom <= at)
                 .Select(asset => asset.AssetId),
         ];
-        var raised = await _rules.SweepAsync(_connection, rules, assets, at, caughtUpAt, cancellationToken);
-        return new WrittenBatch([], 0, 0, turnedOffline, raised, []);
+        var raised = await _rules.SweepAsync(_connection, assets, at, caughtUpAt, cancellationToken);
+        // No batch: nothing rejected, deduplicated or evaluated against Readings, so no rule evaluation time either.
+        return new WrittenBatch([], 0, 0, turnedOffline, raised, [], TimeSpan.Zero);
     }
 
     /// <inheritdoc />
