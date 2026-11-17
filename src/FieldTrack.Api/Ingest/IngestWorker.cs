@@ -21,8 +21,9 @@ namespace FieldTrack.Api.Ingest;
 /// on the next connect; the Reading key table drops any copy already stored (ADR 0003). A message that cannot
 /// become a Reading is acknowledged the same way, stored as a Rejected message in its batch's transaction, and a
 /// redelivered copy of one already stored is dropped too. After the PUBACKs, a separate push loop sends each
-/// committed batch's changes to the dashboards through <see cref="LivePush"/>, best effort (ADR 0005). The worker is
-/// a single instance (spec #21).
+/// committed batch's changes to the dashboards through <see cref="LivePush"/>, best effort (ADR 0005). Every
+/// <see cref="SweepEvery"/>, between batches on the same loop, it sweeps for silent Devices: Offline Alerts and Assets
+/// turning Offline (ADR 0005). The worker is a single instance (spec #21).
 /// </summary>
 public sealed partial class IngestWorker(
     IOptions<BrokerOptions> broker,
@@ -46,6 +47,12 @@ public sealed partial class IngestWorker(
     /// <summary>The source of the trace spans ingest starts.</summary>
     public const string ActivitySourceName = "FieldTrack.Ingest";
 
+    /// <summary>
+    /// The topic each ingest session publishes its caught-up marker on and subscribes to (ADR 0005 restart grace). The
+    /// payload is the session's own random token, so a marker an earlier session left unacknowledged is ignored.
+    /// </summary>
+    public const string CaughtUpTopic = "fieldtrack/ingest/caught-up";
+
     /// <summary>How long the broker keeps the session, and its queued messages, while the worker is away.</summary>
     public const uint SessionExpirySeconds = 3_600;
 
@@ -55,6 +62,9 @@ public sealed partial class IngestWorker(
     /// <summary>...or this long after its first message (ADR 0004: p95 publish-to-commit under 200 ms).</summary>
     public static readonly TimeSpan FlushAfter = TimeSpan.FromMilliseconds(25);
 
+    /// <summary>How often the worker sweeps for silent Devices, so an Offline Alert is at most this late (ADR 0005).</summary>
+    public static readonly TimeSpan SweepEvery = TimeSpan.FromSeconds(1);
+
     private static readonly TimeSpan _retryAfter = TimeSpan.FromSeconds(2);
 
     // Filters earlier versions subscribed to. A resumed session keeps them beside TopicFilter, and a message
@@ -62,6 +72,10 @@ public sealed partial class IngestWorker(
     private static readonly string[] _retiredTopicFilters = ["fieldtrack/v1/devices/+/telemetry"];
 
     private static readonly ActivitySource _activities = new(ActivitySourceName);
+
+    // The last sweep's time, kept across ingest sessions, so an Asset that turns Offline while a session restarts is
+    // still pushed by the next sweep (ADR 0005).
+    private DateTimeOffset _lastSweep;
 
     /// <summary>How many committed batches may wait for the push loop before the oldest is dropped.</summary>
     public const int PushBacklog = 64;
@@ -78,6 +92,7 @@ public sealed partial class IngestWorker(
 
     private async Task IngestAsync(CancellationToken stoppingToken)
     {
+        _lastSweep = time.GetUtcNow();
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -146,7 +161,10 @@ public sealed partial class IngestWorker(
 
         // Subscribing again is harmless on a resumed session and restores the subscription if it expired.
         await client.SubscribeAsync(
-            new MqttClientSubscribeOptionsBuilder().WithTopicFilter(TopicFilter, MqttQualityOfServiceLevel.AtLeastOnce).Build(),
+            new MqttClientSubscribeOptionsBuilder()
+                .WithTopicFilter(TopicFilter, MqttQualityOfServiceLevel.AtLeastOnce)
+                .WithTopicFilter(CaughtUpTopic, MqttQualityOfServiceLevel.AtLeastOnce)
+                .Build(),
             stoppingToken);
         // Harmless when the session never had them: the broker answers NoSubscriptionExisted.
         foreach (var retired in _retiredTopicFilters)
@@ -154,46 +172,56 @@ public sealed partial class IngestWorker(
             await client.UnsubscribeAsync(retired, stoppingToken);
         }
 
+        // ADR 0005 restart grace: Readings still queued in the broker would end a Device's silence, so Offline rules
+        // raise nothing until this session has received its backlog, and count from then. Mosquitto keeps one queue per
+        // session across topics, so this marker comes back behind every message it already held for the session, and
+        // those are stored with or before the marker's batch.
+        var marker = Guid.NewGuid().ToByteArray();
+        await client.PublishAsync(
+            new MqttApplicationMessageBuilder()
+                .WithTopic(CaughtUpTopic).WithPayload(marker).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(),
+            stoppingToken);
+
         LogConnected(options.Value.ClientId, connected.IsSessionPresent);
 
+        DateTimeOffset? caughtUpAt = null;
+        var nextSweep = time.GetUtcNow() + SweepEvery;
         try
         {
             while (true)
             {
-                var batch = await NextBatchAsync(received.Reader, stoppingToken);
-                // The span runs to the end of the iteration, acknowledgements and push enqueue included, not the wait
-                // for the batch's first message; Npgsql's spans nest in it.
-                using var activity = _activities.StartActivity("ingest batch");
-                var (readings, rejected) = Parse(batch);
-                var started = Stopwatch.GetTimestamp();
-                WrittenBatch written;
-                try
+                var batch = await NextBatchAsync(received.Reader, nextSweep - time.GetUtcNow(), stoppingToken);
+                if (await StoreAsync(writer, batch, marker, stoppingToken))
                 {
-                    written = await writer.WriteAsync(readings, rejected, stoppingToken);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    // Otherwise a failed batch looks like a successful one in the trace.
-                    activity?.AddException(exception);
-                    activity?.SetStatus(ActivityStatusCode.Error);
-                    throw;
+                    caughtUpAt ??= time.GetUtcNow();
                 }
 
-                activity?.SetTag("fieldtrack.ingest.batch_size", batch.Count);
-                metrics.RecordBatch([.. batch.Select(message => message.ReceivedTime)], time.GetUtcNow(), Stopwatch.GetElapsedTime(started), written);
-                crashes?.Reached(IngestCrashPoint.AfterCommit);
-
-                // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
-                // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.
-                foreach (var message in batch)
+                var now = time.GetUtcNow();
+                if (now < nextSweep)
                 {
-                    await message.Args.AcknowledgeAsync(CancellationToken.None);
+                    continue;
                 }
 
-                // Pushed only now, after commit (ADR 0005) and after the PUBACKs (#35), so neither waits on it.
-                if (written.AssetIds.Count > 0 || written.RaisedAlertIds.Count > 0 || written.ResolvedAlertIds.Count > 0)
+                // Everything received up to the sweep time is stored first, so the sweep never finds a Device silent
+                // whose Reading is already waiting here.
+                while (ReceivedUpTo(received.Reader, now) is { Count: > 0 } waiting)
                 {
-                    _committed.Writer.TryWrite(written);
+                    if (await StoreAsync(writer, waiting, marker, stoppingToken))
+                    {
+                        caughtUpAt ??= time.GetUtcNow();
+                    }
+                }
+
+                var swept = await writer.SweepAsync(_lastSweep, now, caughtUpAt, stoppingToken);
+                metrics.RecordSweep(swept);
+                Enqueue(swept);
+                _lastSweep = now;
+                // Fixed rate from the due time, so the 1 s bound holds under load; a sweep that fell a whole interval
+                // behind skips ahead instead of bursting.
+                nextSweep += SweepEvery;
+                if (nextSweep <= now)
+                {
+                    nextSweep = now + SweepEvery;
                 }
             }
         }
@@ -205,6 +233,71 @@ public sealed partial class IngestWorker(
             {
                 await client.DisconnectAsync(cancellationToken: CancellationToken.None);
             }
+        }
+    }
+
+    // Stores a batch and acknowledges it; returns whether it held this session's caught-up marker.
+    private async Task<bool> StoreAsync(ReadingWriter writer, List<ReceivedMessage> batch, byte[] marker, CancellationToken stoppingToken)
+    {
+        if (batch.Count == 0)
+        {
+            return false;
+        }
+
+        // Caught-up markers are not telemetry: they are acknowledged with the batch but never stored or counted.
+        var telemetry = batch.Where(message => message.Args.ApplicationMessage.Topic != CaughtUpTopic).ToList();
+        var caughtUp = batch.Any(message => message.Args.ApplicationMessage.Topic == CaughtUpTopic
+                                            && message.Args.ApplicationMessage.Payload.ToArray().AsSpan().SequenceEqual(marker));
+        if (telemetry.Count == 0)
+        {
+            foreach (var message in batch)
+            {
+                await message.Args.AcknowledgeAsync(CancellationToken.None);
+            }
+
+            return caughtUp;
+        }
+
+        // The span runs to the end of the batch, acknowledgements and push enqueue included, not the wait for its first
+        // message; Npgsql's spans nest in it.
+        using var activity = _activities.StartActivity("ingest batch");
+        var (readings, rejected) = Parse(telemetry);
+        var started = Stopwatch.GetTimestamp();
+        WrittenBatch written;
+        try
+        {
+            written = await writer.WriteAsync(readings, rejected, stoppingToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Otherwise a failed batch looks like a successful one in the trace.
+            activity?.AddException(exception);
+            activity?.SetStatus(ActivityStatusCode.Error);
+            throw;
+        }
+
+        activity?.SetTag("fieldtrack.ingest.batch_size", telemetry.Count);
+        metrics.RecordBatch([.. telemetry.Select(message => message.ReceivedTime)], time.GetUtcNow(), Stopwatch.GetElapsedTime(started), written);
+        crashes?.Reached(IngestCrashPoint.AfterCommit);
+
+        // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
+        // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.
+        foreach (var message in batch)
+        {
+            await message.Args.AcknowledgeAsync(CancellationToken.None);
+        }
+
+        // Pushed only now, after commit (ADR 0005) and after the PUBACKs (#35), so neither waits on it.
+        Enqueue(written);
+        return caughtUp;
+    }
+
+    // Hands a committed batch or sweep to the push loop, unless it changed nothing the dashboards show.
+    private void Enqueue(WrittenBatch written)
+    {
+        if (written.AssetIds.Count > 0 || written.RaisedAlertIds.Count > 0 || written.ResolvedAlertIds.Count > 0)
+        {
+            _committed.Writer.TryWrite(written);
         }
     }
 
@@ -244,9 +337,35 @@ public sealed partial class IngestWorker(
             .WithReceiveMaximum(2 * BatchSize)
             .Build();
 
-    private static async Task<List<ReceivedMessage>> NextBatchAsync(ChannelReader<ReceivedMessage> reader, CancellationToken stoppingToken)
+    /// <summary>
+    /// The next batch, or an empty one once <paramref name="sweepIn"/> passes with no message, so the loop can sweep.
+    /// When a sweep is due it returns at once, and the loop stores only what was received up to the sweep time
+    /// (<see cref="ReceivedUpTo"/>) before sweeping, so a busy broker never starves the sweep.
+    /// </summary>
+    private async Task<List<ReceivedMessage>> NextBatchAsync(ChannelReader<ReceivedMessage> reader, TimeSpan sweepIn, CancellationToken stoppingToken)
     {
-        var batch = new List<ReceivedMessage>(BatchSize) { await reader.ReadAsync(stoppingToken) };
+        if (sweepIn <= TimeSpan.Zero)
+        {
+            return [];
+        }
+
+        using (var sweepDue = new CancellationTokenSource(sweepIn, time))
+        using (var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, sweepDue.Token))
+        {
+            try
+            {
+                if (!await reader.WaitToReadAsync(wait.Token))
+                {
+                    throw new ChannelClosedException();
+                }
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                return [];
+            }
+        }
+
+        var batch = new List<ReceivedMessage>(BatchSize);
         using var flush = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         flush.CancelAfter(FlushAfter);
         while (batch.Count < BatchSize)
@@ -268,6 +387,18 @@ public sealed partial class IngestWorker(
             {
                 break;
             }
+        }
+
+        return batch;
+    }
+
+    // Up to a batch of the messages already waiting that were received at or before cutoff, without waiting for more.
+    private static List<ReceivedMessage> ReceivedUpTo(ChannelReader<ReceivedMessage> reader, DateTimeOffset cutoff)
+    {
+        var batch = new List<ReceivedMessage>();
+        while (batch.Count < BatchSize && reader.TryPeek(out var next) && next.ReceivedTime <= cutoff && reader.TryRead(out next))
+        {
+            batch.Add(next);
         }
 
         return batch;
