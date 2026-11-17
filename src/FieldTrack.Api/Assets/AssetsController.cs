@@ -26,6 +26,16 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             .Select(asset => ToResponse(asset))
             .ToListAsync(cancellationToken);
 
+    /// <summary>Reads one Asset, Archived ones too, so a history view can still name it.</summary>
+    /// <response code="404">No Asset has this id.</response>
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType<AssetResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AssetResponse>> Get(Guid id, CancellationToken cancellationToken) =>
+        await db.Assets.Where(asset => asset.Id == id).Select(asset => ToResponse(asset)).SingleOrDefaultAsync(cancellationToken) is { } asset
+            ? asset
+            : NotFound();
+
     /// <summary>Creates an Asset.</summary>
     /// <response code="400">A missing name, an unknown Asset Type or an unknown Asset Group.</response>
     [HttpPost]

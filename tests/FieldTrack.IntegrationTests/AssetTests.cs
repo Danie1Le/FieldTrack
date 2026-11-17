@@ -100,10 +100,12 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
         var listed = await ListAsync(admin, "/assets");
         var withArchived = await ListAsync(admin, "/assets?includeArchived=true");
+        var archived = await admin.GetFromJsonAsync<JsonElement>($"/assets/{asset}", CancellationToken);
 
         deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         listed.Select(Describe).ShouldBe([("Generator 1", "Generator", null, false)]);
         withArchived.Select(Describe).ShouldBe([("Generator 1", "Generator", null, false), ("Haul truck 7", "Truck", null, true)]);
+        Describe(archived).ShouldBe(("Haul truck 7", "Truck", null, true));
     }
 
     [Fact]
@@ -112,6 +114,16 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         using var admin = await AdminClientAsync();
 
         using var response = await admin.DeleteAsync($"/assets/{Guid.NewGuid()}", CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Reading_an_unknown_Asset_is_not_found()
+    {
+        using var admin = await AdminClientAsync();
+
+        using var response = await admin.GetAsync($"/assets/{Guid.NewGuid()}", CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
@@ -127,6 +139,7 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         await AuthClient.AuthorizeAsync(client, "operator@fieldtrack.test", "Operator-pass-1");
 
         var assets = await ListAsync(client, "/assets");
+        var one = await client.GetFromJsonAsync<JsonElement>($"/assets/{asset}", CancellationToken);
         using var groups = await client.GetAsync("/asset-groups", CancellationToken);
         using var createAsset = await PostAssetAsync(client, new { name = "Generator 1", type = "Generator" });
         using var editAsset = await client.PutAsJsonAsync($"/assets/{asset}", new { name = "Renamed", type = "Truck" }, CancellationToken);
@@ -135,6 +148,7 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
         using var renameGroup = await client.PutAsJsonAsync($"/asset-groups/{group}", new { name = "Renamed" }, CancellationToken);
 
         assets.Select(Describe).ShouldBe([("Haul truck 7", "Truck", group, false)]);
+        Describe(one).ShouldBe(("Haul truck 7", "Truck", group, false));
         groups.StatusCode.ShouldBe(HttpStatusCode.OK);
         new[] { createAsset, editAsset, deleteAsset, createGroup, renameGroup }
             .Select(response => response.StatusCode)
