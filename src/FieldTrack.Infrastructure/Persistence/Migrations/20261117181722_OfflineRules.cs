@@ -77,7 +77,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
             migrationBuilder.AddCheckConstraint(
                 name: "ck_alert_rules_kind",
                 table: "alert_rules",
-                sql: "kind IN ('Threshold', 'Offline')");
+                sql: "kind IN ('Threshold', 'GeofenceExit', 'GeofenceEnter', 'Offline')");
 
             migrationBuilder.AddCheckConstraint(
                 name: "ck_alert_rules_offline",
@@ -176,7 +176,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
             migrationBuilder.AddCheckConstraint(
                 name: "ck_alert_rules_kind",
                 table: "alert_rules",
-                sql: "kind IN ('Threshold')");
+                sql: "kind IN ('Threshold', 'GeofenceExit', 'GeofenceEnter')");
         }
     }
 }

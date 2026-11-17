@@ -30,6 +30,15 @@ public sealed class AlertRule
     /// <summary>Threshold rules: what the rule watches and where it breaches and clears; null for other kinds.</summary>
     public ThresholdSettings? ThresholdSettings { get; set; }
 
+    /// <summary>Geofence rules: the Geofence watched; null for other kinds.</summary>
+    public Guid? GeofenceId { get; set; }
+
+    /// <summary>
+    /// Geofence rules: the Geofence named by <see cref="GeofenceId"/>, which ingest loads with the rule so the evaluator
+    /// can check containment; not stored with the rule.
+    /// </summary>
+    public IGeofence? Geofence { get; set; }
+
     /// <summary>
     /// Offline rules: how many seconds the Asset's Device may send nothing before the rule raises, so critical
     /// equipment can alert sooner than the global Offline Asset Status (spec #21 story 31); null for other kinds.

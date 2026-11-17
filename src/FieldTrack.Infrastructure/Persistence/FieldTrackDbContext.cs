@@ -34,6 +34,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
     public DbSet<Attachment> Attachments => Set<Attachment>();
 
+    /// <summary>Named areas that Geofence rules watch.</summary>
+    public DbSet<Geofence> Geofences => Set<Geofence>();
+
     /// <summary>Alert Rules, enabled and disabled.</summary>
     public DbSet<AlertRule> AlertRules => Set<AlertRule>();
 
@@ -190,6 +193,16 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             attachment.HasIndex(a => new { a.AssetId, a.AttachedAt });
         });
 
+        builder.Entity<Geofence>(geofence =>
+        {
+            geofence.Property(g => g.Kind).HasConversion<string>();
+            geofence.ToTable(table => table.HasCheckConstraint("ck_geofences_kind", NamesCheck<GeofenceKind>("kind")));
+            // Spec #21 Storage: a geography polygon with a GiST index, for history queries and the spatial benchmark;
+            // ingest checks containment in memory (ADR 0005).
+            geofence.Property(g => g.Area).HasColumnType("geography (Polygon, 4326)");
+            geofence.HasIndex(g => g.Area).HasMethod("gist");
+        });
+
         // Enums are stored by name with checks, like Asset Type, because ingest reads rules and writes Alerts with
         // hand-written SQL (ADR 0005). Enum names in SQL come from nameof, so a rename reaches every check.
         builder.Entity<AlertRule>(rule =>
@@ -211,6 +224,8 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                 table.HasCheckConstraint("ck_alert_rules_sensor", NamesCheck<Sensor>("sensor"));
                 table.HasCheckConstraint("ck_alert_rules_operator", NamesCheck<ThresholdOperator>("operator"));
                 table.HasCheckConstraint("ck_alert_rules_target", "(asset_id IS NULL) <> (asset_group_id IS NULL)");
+                table.HasCheckConstraint("ck_alert_rules_geofence",
+                    $"(kind IN ('{nameof(AlertRuleKind.GeofenceExit)}', '{nameof(AlertRuleKind.GeofenceEnter)}')) = (geofence_id IS NOT NULL)");
                 // double precision holds NaN and ±Infinity; Postgres sorts NaN above Infinity, so the upper bound on
                 // hysteresis refuses both.
                 table.HasCheckConstraint("ck_alert_rules_threshold",
@@ -226,6 +241,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // Readings and so no Alerts; an Asset with history is Archived instead (#24).
             rule.HasOne<Asset>().WithMany().HasForeignKey(r => r.AssetId).OnDelete(DeleteBehavior.Cascade);
             rule.HasOne<AssetGroup>().WithMany().HasForeignKey(r => r.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
+            // A Geofence that a rule names cannot be deleted. The rule's Geofence is loaded by ingest, not mapped.
+            rule.HasOne<Geofence>().WithMany().HasForeignKey(r => r.GeofenceId).OnDelete(DeleteBehavior.Restrict);
+            rule.Ignore(r => r.Geofence);
         });
 
         builder.Entity<Alert>(alert =>
