@@ -194,17 +194,35 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
 
     private static string InsertRule(params (string Column, string Value)[] overrides) => Insert("alert_rules", new()
     {
-        ["id"] = $"'{AlertRuleId}'", ["name"] = "'r'", ["kind"] = "'Threshold'", ["asset_id"] = $"'{AssetId}'", ["asset_group_id"] = "NULL",
-        ["severity"] = "'Critical'", ["enabled"] = "true", ["sensor"] = "'EngineTempC'", ["operator"] = "'GreaterThan'",
-        ["threshold"] = "105", ["hysteresis"] = "5",
+        ["id"] = $"'{AlertRuleId}'",
+        ["name"] = "'r'",
+        ["kind"] = "'Threshold'",
+        ["asset_id"] = $"'{AssetId}'",
+        ["asset_group_id"] = "NULL",
+        ["severity"] = "'Critical'",
+        ["enabled"] = "true",
+        ["sensor"] = "'EngineTempC'",
+        ["operator"] = "'GreaterThan'",
+        ["threshold"] = "105",
+        ["hysteresis"] = "5",
     }, overrides);
 
     private static string InsertAlert(params (string Column, string Value)[] overrides) => Insert("alerts", new()
     {
-        ["id"] = "gen_random_uuid()", ["alert_rule_id"] = $"'{AlertRuleId}'", ["asset_id"] = $"'{AssetId}'",
-        ["reading_device_id"] = "gen_random_uuid()", ["reading_boot"] = "1", ["reading_sequence_number"] = "0",
-        ["severity"] = "'Critical'", ["message"] = "'m'", ["status"] = "'Open'", ["raised_at"] = "now()", ["resolved_at"] = "NULL",
-        ["resolve_reason"] = "NULL", ["created_at"] = "now()", ["from_backlog"] = "false",
+        ["id"] = "gen_random_uuid()",
+        ["alert_rule_id"] = $"'{AlertRuleId}'",
+        ["asset_id"] = $"'{AssetId}'",
+        ["reading_device_id"] = "gen_random_uuid()",
+        ["reading_boot"] = "1",
+        ["reading_sequence_number"] = "0",
+        ["severity"] = "'Critical'",
+        ["message"] = "'m'",
+        ["status"] = "'Open'",
+        ["raised_at"] = "now()",
+        ["resolved_at"] = "NULL",
+        ["resolve_reason"] = "NULL",
+        ["created_at"] = "now()",
+        ["from_backlog"] = "false",
     }, overrides);
 
     private static string Resolved(params (string Column, string Value)[] overrides) =>
