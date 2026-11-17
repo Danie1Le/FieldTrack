@@ -1,0 +1,9 @@
+{
+  "devices": [
+    { "serial": "TRK-001", "assetName": "Haul truck 1", "assetType": "Truck", "route": "routes/haul-road.gpx", "speedKph": 35, "sensors": ["speedKph", "engineTempC", "fuelPct", "batteryV"] },
+    { "serial": "TRK-002", "assetName": "Haul truck 2", "assetType": "Truck", "route": "routes/site-loop.gpx", "speedKph": 28, "sensors": ["speedKph", "engineTempC", "fuelPct", "batteryV"] },
+    { "serial": "EXC-001", "assetName": "Excavator 1", "assetType": "Excavator", "speedKph": 6, "sensors": ["speedKph", "engineTempC", "fuelPct", "vibrationMmS"] },
+    { "serial": "GEN-001", "assetName": "Generator 1", "assetType": "Generator", "position": { "lat": 45.5231, "lon": -122.6765 }, "sensors": ["engineTempC", "fuelPct", "vibrationMmS", "batteryV"] },
+    { "serial": "SUB-001", "assetName": "Substation sensor 1", "assetType": "Sensor", "position": { "lat": 45.5262, "lon": -122.6742 }, "sensors": ["vibrationMmS", "batteryV"] }
+  ]
+}

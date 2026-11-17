@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="FieldTrack" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Haul road</name>
+    <desc>Drawn by hand for FieldTrack demos, not taken from map data. A closed loop of about 3 km.</desc>
+  </metadata>
+  <trk>
+    <name>Haul road</name>
+    <trkseg>
+      <trkpt lat="45.5198" lon="-122.6702"/>
+      <trkpt lat="45.5210" lon="-122.6660"/>
+      <trkpt lat="45.5232" lon="-122.6628"/>
+      <trkpt lat="45.5262" lon="-122.6612"/>
+      <trkpt lat="45.5285" lon="-122.6640"/>
+      <trkpt lat="45.5270" lon="-122.6685"/>
+      <trkpt lat="45.5240" lon="-122.6705"/>
+      <trkpt lat="45.5198" lon="-122.6702"/>
+    </trkseg>
+  </trk>
+</gpx>
