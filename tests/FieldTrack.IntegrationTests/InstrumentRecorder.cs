@@ -9,13 +9,13 @@ namespace FieldTrack.IntegrationTests;
 /// in <see cref="Seconds"/>. Only meters from that host's <see cref="IMeterFactory"/> count, so other hosts in the
 /// test run cannot add to it.
 /// </summary>
-internal sealed class CounterRecorder : IDisposable
+internal sealed class InstrumentRecorder : IDisposable
 {
     private readonly MeterListener _listener = new();
     private readonly ConcurrentQueue<(long Value, Dictionary<string, object?> Tags)> _measurements = new();
     private readonly ConcurrentQueue<double> _seconds = new();
 
-    public CounterRecorder(IServiceProvider services, string meterName, string instrumentName)
+    public InstrumentRecorder(IServiceProvider services, string meterName, string instrumentName)
     {
         var meters = services.GetRequiredService<IMeterFactory>();
         _listener.InstrumentPublished = (instrument, listener) =>

@@ -1,7 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Azure.Monitor.OpenTelemetry.AspNetCore;
+using FieldTrack.Api.Observability;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 
@@ -44,6 +48,21 @@ public sealed class ObservabilityTests(FieldTrackFixture fixture) : IntegrationT
         using var response = await client.GetAsync("/health", CancellationToken);
 
         response.EnsureSuccessStatusCode();
+        // The Distro would switch off the redaction of SignalR's access_token in url.query unless told otherwise.
+        api.Services.GetRequiredService<IConfiguration>()[ObservabilityExtensions.DisableUrlQueryRedactionKey].ShouldBe("false");
+        // Live Metrics pings a public endpoint; it stays off unless configured.
+        api.Services.GetRequiredService<IOptions<AzureMonitorOptions>>().Value.EnableLiveMetrics.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task The_host_refuses_to_start_when_the_URL_query_redaction_is_switched_off()
+    {
+        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
+            builder.UseSetting(ObservabilityExtensions.DisableUrlQueryRedactionKey, "true"));
+
+        var failure = Should.Throw<OptionsValidationException>(() => api.CreateClient());
+
+        failure.Message.ShouldContain(ObservabilityExtensions.DisableUrlQueryRedactionKey);
     }
 
     /// <summary>Keeps every span that ends, as an exporter would receive it.</summary>
