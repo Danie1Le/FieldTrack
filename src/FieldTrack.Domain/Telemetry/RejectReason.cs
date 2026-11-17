@@ -1,6 +1,9 @@
 namespace FieldTrack.Domain.Telemetry;
 
-/// <summary>Why a telemetry payload cannot become a Reading (spec #21, Telemetry contract).</summary>
+/// <summary>
+/// Why a message on a telemetry topic cannot become a Reading (spec #21, Telemetry contract). Rejected messages
+/// store it by name, so renaming a member needs a data migration.
+/// </summary>
 public enum RejectReason
 {
     /// <summary>
@@ -20,4 +23,13 @@ public enum RejectReason
 
     /// <summary>Device time more than 7 days before Received time.</summary>
     TooLate,
+
+    /// <summary>The topic names a version of the telemetry contract other than <c>v1</c>.</summary>
+    UnknownTopicVersion,
+
+    /// <summary>No Device, Archived or not, has the serial number in the topic.</summary>
+    UnknownSerialNumber,
+
+    /// <summary>The Device with the serial number in the topic is Archived, so it may no longer write Readings.</summary>
+    ArchivedDevice,
 }
