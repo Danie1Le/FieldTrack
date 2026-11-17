@@ -1,11 +1,15 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using FieldTrack.Api.Observability;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using FieldTrack.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 
@@ -63,6 +67,44 @@ public sealed class ObservabilityTests(FieldTrackFixture fixture) : IntegrationT
         var failure = Should.Throw<OptionsValidationException>(() => api.CreateClient());
 
         failure.Message.ShouldContain(ObservabilityExtensions.DisableUrlQueryRedactionKey);
+    }
+
+    [Fact]
+    public async Task Npgsql_metrics_name_the_ingest_and_EF_data_sources_so_the_connection_string_stays_out_of_tags()
+    {
+        var poolNames = new ConcurrentBag<string>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == "Npgsql")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) => CollectPoolNames(tags, poolNames));
+        listener.SetMeasurementEventCallback<int>((_, _, tags, _) => CollectPoolNames(tags, poolNames));
+        listener.Start();
+        await using var scope = Fixture.Api.Services.CreateAsyncScope();
+        // Hold both connections open: the pool gauges report only pools that exist.
+        await using var ingest = await scope.ServiceProvider.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync(CancellationToken);
+        var db = scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>();
+        await db.Database.OpenConnectionAsync(CancellationToken);
+
+        listener.RecordObservableInstruments();
+
+        poolNames.ShouldContain(PersistenceServiceCollectionExtensions.IngestDataSourceName);
+        poolNames.ShouldContain(PersistenceServiceCollectionExtensions.EntityFrameworkDataSourceName);
+    }
+
+    private static void CollectPoolNames(ReadOnlySpan<KeyValuePair<string, object?>> tags, ConcurrentBag<string> names)
+    {
+        foreach (var tag in tags)
+        {
+            if (tag.Key.EndsWith("pool.name", StringComparison.Ordinal) && tag.Value is string name)
+            {
+                names.Add(name);
+            }
+        }
     }
 
     /// <summary>Keeps every span that ends, as an exporter would receive it.</summary>
