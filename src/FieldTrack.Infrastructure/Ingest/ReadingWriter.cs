@@ -274,10 +274,10 @@ public sealed class ReadingWriter : IAsyncDisposable
             rules = await AlertRuleRunner.ReadRulesAsync(reader, cancellationToken);
         }
 
-        var (ruleStates, raised, resolved) = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
+        var outcome = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        _rules.Keep(ruleStates);
-        return new WrittenBatch(reasons, [.. stored.Select(reading => reading.AssetId).Distinct()], raised, resolved);
+        _rules.Keep(outcome.States);
+        return new WrittenBatch(reasons, [.. stored.Select(reading => reading.AssetId).Distinct()], outcome.Raised, outcome.Resolved);
     }
 
     /// <inheritdoc />

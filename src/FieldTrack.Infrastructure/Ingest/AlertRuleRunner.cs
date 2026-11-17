@@ -28,12 +28,14 @@ public sealed class AlertRuleRunner
         FOR KEY SHARE
         """;
 
+    private const string ResolvedAlertId = "resolved_alert_id";
+
     // Conditional, so a manual resolve that got there first wins (#10). Returns the id of the Alert it resolved, for
     // the live push.
-    private const string ResolveActive = """
+    private const string ResolveActive = $"""
         UPDATE alerts SET status = 'Resolved', resolved_at = @at, resolve_reason = 'Cleared'
         WHERE alert_rule_id = @rule AND asset_id = @asset AND status <> 'Resolved'
-        RETURNING id
+        RETURNING id AS {ResolvedAlertId}
         """;
 
     private const string InsertAlert = """
@@ -74,11 +76,9 @@ public sealed class AlertRuleRunner
 
     /// <summary>
     /// Evaluates <paramref name="rules"/>, the enabled rules, against <paramref name="stored"/>, the Readings a batch
-    /// stored for Assets in use, in receive order, and writes the outcome in <paramref name="transaction"/>. Returns
-    /// the rule states to keep once the transaction commits (pass them to <see cref="Keep"/>), and the ids of the
-    /// Alerts raised and of the Active Alerts resolved, to push once it commits.
+    /// stored for Assets in use, in receive order, and writes the outcome in <paramref name="transaction"/>.
     /// </summary>
-    public async Task<(IReadOnlyDictionary<(Guid Rule, Guid Asset), RuleState> States, List<Guid> Raised, List<Guid> Resolved)> EvaluateAsync(
+    public async Task<RuleOutcome> EvaluateAsync(
         NpgsqlTransaction transaction, IReadOnlyList<AlertRule> rules, IReadOnlyList<AssetReading> stored, CancellationToken cancellationToken)
     {
         var changed = new Dictionary<(Guid Rule, Guid Asset), RuleState>();
@@ -117,10 +117,15 @@ public sealed class AlertRuleRunner
 
         if (writes.BatchCommands.Count > 0)
         {
-            // Only the resolves return rows.
             await using var reader = await writes.ExecuteReaderAsync(cancellationToken);
             do
             {
+                // Read by column name, so rows another command might return are never taken for resolved Alerts.
+                if (reader.FieldCount == 0 || reader.GetName(0) != ResolvedAlertId)
+                {
+                    continue;
+                }
+
                 while (await reader.ReadAsync(cancellationToken))
                 {
                     resolved.Add(reader.GetGuid(0));
@@ -129,7 +134,7 @@ public sealed class AlertRuleRunner
             while (await reader.NextResultAsync(cancellationToken));
         }
 
-        return (changed, raised, resolved);
+        return new RuleOutcome(changed, raised, resolved);
     }
 
     /// <summary>Takes the rule states of a committed batch into memory.</summary>
