@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
+using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -31,6 +32,15 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
     /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
     public DbSet<Attachment> Attachments => Set<Attachment>();
+
+    /// <summary>Alert Rules, enabled and disabled.</summary>
+    public DbSet<AlertRule> AlertRules => Set<AlertRule>();
+
+    /// <summary>Alerts, Active and Resolved.</summary>
+    public DbSet<Alert> Alerts => Set<Alert>();
+
+    /// <summary>Rule state per Alert Rule and Asset, which ingest keeps (ADR 0005).</summary>
+    public DbSet<AlertRuleState> AlertRuleStates => Set<AlertRuleState>();
 
     /// <summary>
     /// Ends the open Attachments matching <paramref name="which"/> at <paramref name="at"/>, returning how many
@@ -100,8 +110,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // Stored by name so hand-written SQL and exports read it without a lookup. The check keeps
             // hand-written SQL to the same names; renaming an AssetType member needs a data migration.
             asset.Property(a => a.Type).HasConversion<string>();
-            asset.ToTable(table => table.HasCheckConstraint(
-                "ck_assets_type", $"type IN ({string.Join(", ", Enum.GetNames<AssetType>().Select(name => $"'{name}'"))})"));
+            asset.ToTable(table => table.HasCheckConstraint("ck_assets_type", In<AssetType>("type")));
             // An Asset Group that still has Assets cannot be deleted (#24).
             asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -131,5 +140,66 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             attachment.HasIndex(a => new { a.DeviceId, a.AttachedAt });
             attachment.HasIndex(a => new { a.AssetId, a.AttachedAt });
         });
+
+        // Enums are stored by name like Asset Type, with checks, because ingest writes Alerts with hand-written SQL.
+        builder.Entity<AlertRule>(rule =>
+        {
+            rule.Property(r => r.Kind).HasConversion<string>();
+            rule.Property(r => r.Severity).HasConversion<string>();
+            rule.Property(r => r.Sensor).HasConversion<string>();
+            rule.Property(r => r.Operator).HasConversion<string>();
+            rule.ToTable(table =>
+            {
+                table.HasCheckConstraint("ck_alert_rules_kind", In<AlertRuleKind>("kind"));
+                table.HasCheckConstraint("ck_alert_rules_severity", In<Severity>("severity"));
+                table.HasCheckConstraint("ck_alert_rules_sensor", In<Sensor>("sensor"));
+                table.HasCheckConstraint("ck_alert_rules_operator", In<ThresholdOperator>("operator"));
+                table.HasCheckConstraint("ck_alert_rules_target", "(asset_id IS NULL) <> (asset_group_id IS NULL)");
+                table.HasCheckConstraint("ck_alert_rules_threshold",
+                    "kind <> 'Threshold' OR (sensor IS NOT NULL AND operator IS NOT NULL AND threshold IS NOT NULL AND hysteresis IS NOT NULL AND hysteresis >= 0)");
+            });
+            // A rule on one Asset goes with it when the Asset is deleted outright, which happens only while it has no
+            // Readings and so no Alerts; an Asset with history is Archived instead (#24).
+            rule.HasOne<Asset>().WithMany().HasForeignKey(r => r.AssetId).OnDelete(DeleteBehavior.Cascade);
+            rule.HasOne<AssetGroup>().WithMany().HasForeignKey(r => r.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Alert>(alert =>
+        {
+            alert.ComplexProperty(a => a.Reading);
+            alert.Property(a => a.Severity).HasConversion<string>();
+            alert.Property(a => a.Status).HasConversion<string>();
+            alert.Property(a => a.ResolveReason).HasConversion<string>();
+            alert.ToTable(table =>
+            {
+                table.HasCheckConstraint("ck_alerts_severity", In<Severity>("severity"));
+                table.HasCheckConstraint("ck_alerts_status", In<AlertStatus>("status"));
+                table.HasCheckConstraint("ck_alerts_resolve_reason", In<ResolveReason>("resolve_reason"));
+            });
+            // Alerts are history: their rule and Asset are kept (disabled, Archived), never deleted under them.
+            alert.HasOne<AlertRule>().WithMany().HasForeignKey(a => a.AlertRuleId).OnDelete(DeleteBehavior.Restrict);
+            alert.HasOne<Asset>().WithMany().HasForeignKey(a => a.AssetId).OnDelete(DeleteBehavior.Restrict);
+            // At most one Active Alert per Alert Rule and Asset (#10, ADR 0005).
+            alert.HasIndex(a => new { a.AlertRuleId, a.AssetId })
+                .IsUnique()
+                .HasFilter("status <> 'Resolved'")
+                .HasDatabaseName("ix_alerts_alert_rule_id_asset_id_active");
+            // The Alert feed, newest first, and an Asset's Alert history.
+            alert.HasIndex(a => a.RaisedAt);
+            alert.HasIndex(a => new { a.AssetId, a.RaisedAt });
+        });
+
+        // Rule state is not history: it goes with its rule or Asset.
+        builder.Entity<AlertRuleState>(state =>
+        {
+            state.HasKey(s => new { s.AlertRuleId, s.AssetId });
+            state.HasOne<AlertRule>().WithMany().HasForeignKey(s => s.AlertRuleId).OnDelete(DeleteBehavior.Cascade);
+            state.HasOne<Asset>().WithMany().HasForeignKey(s => s.AssetId).OnDelete(DeleteBehavior.Cascade);
+        });
     }
+
+    /// <summary>A check that <paramref name="column"/> holds a member name of <typeparamref name="TEnum"/> (or null).</summary>
+    private static string In<TEnum>(string column)
+        where TEnum : struct, Enum =>
+        $"{column} IN ({string.Join(", ", Enum.GetNames<TEnum>().Select(name => $"'{name}'"))})";
 }
