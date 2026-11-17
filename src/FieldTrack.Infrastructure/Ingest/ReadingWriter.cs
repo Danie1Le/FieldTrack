@@ -6,9 +6,10 @@ using NpgsqlTypes;
 namespace FieldTrack.Infrastructure.Ingest;
 
 /// <summary>
-/// Stores batches of Readings exactly once (ADR 0003, ADR 0004) and evaluates Alert Rules against the new ones in the
-/// same transaction (ADR 0005). It holds one connection, with its stage table and rule state, for the life of an
-/// ingest session; dispose it and open a new one after any failure.
+/// Stores batches of Readings exactly once (ADR 0003, ADR 0004), and the batch's Rejected messages with them, so
+/// stored plus rejected always equals published (spec #21), and evaluates Alert Rules against the new Readings in
+/// the same transaction (ADR 0005). It holds one connection, with its stage table and rule state, for the life of
+/// an ingest session; dispose it and open a new one after any failure.
 /// </summary>
 public sealed class ReadingWriter : IAsyncDisposable
 {
@@ -19,6 +20,7 @@ public sealed class ReadingWriter : IAsyncDisposable
     private const string CreateStage = """
         CREATE TEMP TABLE IF NOT EXISTS ingest_stage (
             ordinal integer NOT NULL,
+            topic text NOT NULL,
             serial_number text NOT NULL,
             boot integer NOT NULL,
             seq bigint NOT NULL,
@@ -31,14 +33,26 @@ public sealed class ReadingWriter : IAsyncDisposable
             fuel_pct real NULL,
             vibration_mm_s real NULL,
             battery_v real NULL,
-            content_hash bytea NOT NULL
+            payload bytea NOT NULL,
+            redelivered boolean NOT NULL
+        ) ON COMMIT DELETE ROWS;
+        CREATE TEMP TABLE IF NOT EXISTS reject_stage (
+            topic text NOT NULL,
+            payload bytea NOT NULL,
+            reason text NOT NULL,
+            received_time timestamptz NOT NULL,
+            redelivered boolean NOT NULL
         ) ON COMMIT DELETE ROWS
         """;
 
     private const string Copy = """
-        COPY ingest_stage (ordinal, serial_number, boot, seq, device_time, received_time, lat, lon,
-                           speed_kph, engine_temp_c, fuel_pct, vibration_mm_s, battery_v, content_hash)
+        COPY ingest_stage (ordinal, topic, serial_number, boot, seq, device_time, received_time, lat, lon,
+                           speed_kph, engine_temp_c, fuel_pct, vibration_mm_s, battery_v, payload, redelivered)
         FROM STDIN (FORMAT BINARY)
+        """;
+
+    private const string CopyRejected = """
+        COPY reject_stage (topic, payload, reason, received_time, redelivered) FROM STDIN (FORMAT BINARY)
         """;
 
     // Readings have no foreign keys, and Asset and Device delete decide between remove and Archive by
@@ -60,13 +74,20 @@ public sealed class ReadingWriter : IAsyncDisposable
 
     // One statement: new keys go into reading_keys, and only the Readings whose key was new are stored,
     // so the first stored copy wins, across batches and within one (lowest ordinal = received first).
-    // Telemetry from unknown or Archived Devices is skipped (#27 records it as Rejected messages).
+    // The content hash is SHA-256 over the raw payload: a Device resends a Reading byte for byte, so "identical
+    // duplicate" (ADR 0003) means an identical payload, and any other copy is conflicting.
+    // Telemetry from unknown or Archived Devices becomes Rejected messages, decided in this same statement so
+    // each message is stored or rejected against one snapshot of devices, never both or neither. They are stored
+    // with the batch's other Rejected messages, the topic clipped to RejectedMessage.MaxTopicLength.
+    // A crash between commit and PUBACK makes the broker redeliver the batch, marked DUP. A redelivered Rejected
+    // message is skipped when the same topic and payload was rejected in the last hour (the broker session's
+    // expiry, so no older copy can be redelivered), so stored plus rejected still equals published (ADR 0004).
     // Among overlapping ended Attachments, the one attached last wins (#25).
     // Stamping is one-shot, from the Attachments committed when the Reading is stored, and is never redone.
     // Device time may run up to TelemetryPayload.MaxAhead past Received time, so a Reading near an attach
     // or detach can land on the neighbouring side: stored before an attach that covers it, it keeps no Asset;
     // stored before a detach that ends before its Device time, it keeps the old Asset.
-    private const string Store = $"""
+    private static readonly string _store = $"""
         WITH staged AS (
             SELECT DISTINCT ON (d.id, s.boot, s.seq) d.id AS device_id, s.*
             FROM ingest_stage s
@@ -75,7 +96,7 @@ public sealed class ReadingWriter : IAsyncDisposable
             ORDER BY d.id, s.boot, s.seq, s.ordinal
         ), new_keys AS (
             INSERT INTO reading_keys (device_id, boot, seq, device_time, content_hash)
-            SELECT device_id, boot, seq, device_time, content_hash FROM staged
+            SELECT device_id, boot, seq, device_time, sha256(payload) FROM staged
             ON CONFLICT DO NOTHING
             RETURNING device_id, boot, seq
         ), stored AS (
@@ -91,30 +112,56 @@ public sealed class ReadingWriter : IAsyncDisposable
             FROM staged s
             JOIN new_keys USING (device_id, boot, seq)
             RETURNING device_id, boot, seq, asset_id
-        ), received AS (
+        ), rejected AS (
+            INSERT INTO rejected_messages (topic, topic_clipped, payload, reason, received_time)
+            SELECT left(r.topic, {RejectedMessage.MaxTopicLength}), char_length(r.topic) > {RejectedMessage.MaxTopicLength},
+                   r.payload, r.reason, r.received_time
+            FROM (
+                SELECT topic, payload, reason, received_time, redelivered FROM reject_stage
+                UNION ALL
+                SELECT s.topic, s.payload,
+                       CASE WHEN d.id IS NULL THEN '{nameof(RejectReason.UnknownSerialNumber)}' ELSE '{nameof(RejectReason.ArchivedDevice)}' END,
+                       s.received_time, s.redelivered
+                FROM ingest_stage s
+                LEFT JOIN devices d ON d.serial_number = s.serial_number
+                WHERE d.id IS NULL OR d.archived
+            ) r
+            WHERE NOT (r.redelivered AND EXISTS (
+                SELECT FROM rejected_messages m
+                WHERE m.topic = left(r.topic, {RejectedMessage.MaxTopicLength})
+                  AND m.received_time > r.received_time - interval '1 hour'
+                  AND m.payload = r.payload))
+            ORDER BY r.received_time
+            RETURNING reason
+        ), last_received AS (
             UPDATE devices d
             SET last_received_at = r.received_time
             FROM (SELECT device_id, max(received_time) AS received_time FROM staged GROUP BY device_id) r
             WHERE d.id = r.device_id
+        ), evaluated AS (
+            -- The new Readings of Assets in use, for rule evaluation (ADR 0005). A backlog Reading stamped with an
+            -- Asset Archived since is stored but evaluates no rule.
+            SELECT s.ordinal, s.device_id, r.asset_id, a.asset_group_id, s.boot, s.seq, s.device_time, s.lat, s.lon,
+                   s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
+            FROM stored r
+            JOIN staged s USING (device_id, boot, seq)
+            JOIN assets a ON a.id = r.asset_id
+            WHERE NOT a.archived
         )
-        -- The new Readings of Assets in use, in receive order, for rule evaluation (ADR 0005). A backlog Reading
-        -- stamped with an Asset Archived since is stored but evaluates no rule.
-        SELECT s.device_id, r.asset_id, a.asset_group_id, s.boot, s.seq, s.device_time, s.lat, s.lon,
-               s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
-        FROM stored r
-        JOIN staged s USING (device_id, boot, seq)
-        JOIN assets a ON a.id = r.asset_id
-        WHERE NOT a.archived
-        ORDER BY s.ordinal
+        -- Both kinds of row from one statement (FULL JOIN ON false is a typed UNION): each stored Rejected message's
+        -- reason with null Reading columns, then each Reading to evaluate, in receive order, with a null reason.
+        SELECT j.reason, e.*
+        FROM rejected j FULL JOIN evaluated e ON false
+        ORDER BY e.ordinal NULLS FIRST
         """;
 
-    // One row of Store's final SELECT; edit the two together.
-    private static AssetReading ReadStored(NpgsqlDataReader reader)
+    // One row of _store's final SELECT; edit the two together. Column 1 is the ordinal, used only for order.
+    private static AssetReading ReadEvaluated(NpgsqlDataReader reader)
     {
         var reading = new Reading(
-            reader.GetInt32(3), reader.GetInt64(4), reader.GetFieldValue<DateTimeOffset>(5), reader.GetDouble(6), reader.GetDouble(7),
-            Sensor(8), Sensor(9), Sensor(10), Sensor(11), Sensor(12));
-        return new AssetReading(reader.GetGuid(1), reader.IsDBNull(2) ? null : reader.GetGuid(2), new StoredReading(reader.GetGuid(0), reading));
+            reader.GetInt32(5), reader.GetInt64(6), reader.GetFieldValue<DateTimeOffset>(7), reader.GetDouble(8), reader.GetDouble(9),
+            Sensor(10), Sensor(11), Sensor(12), Sensor(13), Sensor(14));
+        return new AssetReading(reader.GetGuid(3), reader.IsDBNull(4) ? null : reader.GetGuid(4), new StoredReading(reader.GetGuid(2), reading));
 
         float? Sensor(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
     }
@@ -145,20 +192,40 @@ public sealed class ReadingWriter : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stores <paramref name="readings"/> (in receive order) in one transaction and stamps each with its
-    /// Asset; Readings already stored are skipped. The Alert Rules are evaluated against the newly stored ones and
-    /// their Alerts and rule state commit with them. Returns once committed.
+    /// Stores <paramref name="readings"/> (in receive order) and <paramref name="rejected"/> in one transaction, and
+    /// stamps each Reading with its Asset; Readings already stored are skipped, Readings from unknown or Archived
+    /// Devices become Rejected messages, and redelivered Rejected messages already stored are skipped. The Alert Rules
+    /// are evaluated against the newly stored Readings, and their Alerts and rule state commit with them. Returns once
+    /// committed, with the reason of every Rejected message stored.
     /// </summary>
-    public async Task WriteAsync(IReadOnlyList<ReceivedReading> readings, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<RejectReason>> WriteAsync(
+        IReadOnlyList<ReceivedReading> readings, IReadOnlyList<ReceivedRejectedMessage> rejected, CancellationToken cancellationToken)
     {
         await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
+        if (rejected.Count > 0)
+        {
+            await using var import = await _connection.BeginBinaryImportAsync(CopyRejected, cancellationToken);
+            foreach (var message in rejected)
+            {
+                await import.StartRowAsync(cancellationToken);
+                await import.WriteAsync(message.Topic, NpgsqlDbType.Text, cancellationToken);
+                await import.WriteAsync(message.Payload, NpgsqlDbType.Bytea, cancellationToken);
+                await import.WriteAsync(message.Reason.ToString(), NpgsqlDbType.Text, cancellationToken);
+                await import.WriteAsync(message.ReceivedTime, NpgsqlDbType.TimestampTz, cancellationToken);
+                await import.WriteAsync(message.Redelivered, NpgsqlDbType.Boolean, cancellationToken);
+            }
+
+            await import.CompleteAsync(cancellationToken);
+        }
+
         await using (var import = await _connection.BeginBinaryImportAsync(Copy, cancellationToken))
         {
             for (var ordinal = 0; ordinal < readings.Count; ordinal++)
             {
-                var (serialNumber, reading, receivedTime, contentHash) = readings[ordinal];
+                var (topic, serialNumber, reading, receivedTime, payload, redelivered) = readings[ordinal];
                 await import.StartRowAsync(cancellationToken);
                 await import.WriteAsync(ordinal, NpgsqlDbType.Integer, cancellationToken);
+                await import.WriteAsync(topic, NpgsqlDbType.Text, cancellationToken);
                 await import.WriteAsync(serialNumber, NpgsqlDbType.Text, cancellationToken);
                 await import.WriteAsync(reading.Boot, NpgsqlDbType.Integer, cancellationToken);
                 await import.WriteAsync(reading.SequenceNumber, NpgsqlDbType.Bigint, cancellationToken);
@@ -171,32 +238,36 @@ public sealed class ReadingWriter : IAsyncDisposable
                     await import.WriteAsync(sensor, NpgsqlDbType.Real, cancellationToken);
                 }
 
-                await import.WriteAsync(contentHash, NpgsqlDbType.Bytea, cancellationToken);
+                await import.WriteAsync(payload, NpgsqlDbType.Bytea, cancellationToken);
+                await import.WriteAsync(redelivered, NpgsqlDbType.Boolean, cancellationToken);
             }
 
             await import.CompleteAsync(cancellationToken);
         }
 
-        // Separate statements, so each sees what committed while the one before waited on a lock. The rules are read
-        // in the same round trip, after storing.
-        var store = new NpgsqlBatchCommand(Store);
-        await using var batch = new NpgsqlBatch(_connection, transaction)
+        // Separate statements, so each sees what committed while the one before waited on a lock.
+        await using (var locks = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(LockDevices), new(LockAssets) } })
         {
-            BatchCommands = { new(LockDevices), new(LockAssets), store, new(AlertRuleRunner.LoadRules) },
-        };
+            await locks.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // Store, then the enabled rules in the same round trip (ADR 0005).
+        var reasons = new List<RejectReason>();
         var stored = new List<AssetReading>();
         List<AlertRule> rules;
-        await using (var reader = await batch.ExecuteReaderAsync(cancellationToken))
+        await using (var store = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(_store), new(AlertRuleRunner.LoadRules) } })
+        await using (var reader = await store.ExecuteReaderAsync(cancellationToken))
         {
-            // Result sets come in command order: skip the lock statements' to reach Store's, then the rules follow.
-            for (var skip = batch.BatchCommands.IndexOf(store); skip > 0; skip--)
-            {
-                await reader.NextResultAsync(cancellationToken);
-            }
-
             while (await reader.ReadAsync(cancellationToken))
             {
-                stored.Add(ReadStored(reader));
+                if (reader.IsDBNull(0))
+                {
+                    stored.Add(ReadEvaluated(reader));
+                }
+                else
+                {
+                    reasons.Add(Enum.Parse<RejectReason>(reader.GetString(0)));
+                }
             }
 
             await reader.NextResultAsync(cancellationToken);
@@ -206,6 +277,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         var ruleStates = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(ruleStates);
+        return reasons;
     }
 
     /// <inheritdoc />

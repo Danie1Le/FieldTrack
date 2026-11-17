@@ -103,7 +103,7 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
         // One batch, as a Coverage gap's backlog arrives, and not in Sequence number order.
         await using (var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken))
         {
-            await writer.WriteAsync([Received(2, t.AddSeconds(2), 95), Received(0, t, 90), Received(1, t.AddSeconds(1), 107)], CancellationToken);
+            await writer.WriteAsync([Received(2, t.AddSeconds(2), 95), Received(0, t, 90), Received(1, t.AddSeconds(1), 107)], [], CancellationToken);
         }
 
         var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
@@ -135,7 +135,7 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
 
         // Committed but never acknowledged, so the broker delivers it again to a new ingest session. Only the store
         // statement's duplicate filter stops it: another Device's Reading always counts as newer (ADR 0005).
-        await WriteAsync(breach);
+        await WriteAsync([breach[0] with { Redelivered = true }]);
 
         var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
         alert.GetProperty("status").GetString().ShouldBe("Resolved");
@@ -168,11 +168,12 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
     private async Task WriteAsync(IReadOnlyList<ReceivedReading> readings)
     {
         await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
-        await writer.WriteAsync(readings, CancellationToken);
+        await writer.WriteAsync(readings, [], CancellationToken);
     }
 
     private static ReceivedReading Received(long seq, DateTimeOffset deviceTime, float engineTempC, string serialNumber = "TRK-007") =>
-        new(serialNumber, new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null), DateTimeOffset.UtcNow, [(byte)seq]);
+        new(TelemetryPublisher.TopicOf(serialNumber), serialNumber, new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null),
+            DateTimeOffset.UtcNow, [(byte)seq], Redelivered: false);
 
     private static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
         TelemetryPublisher.Payload(1, seq, deviceTime, more: FormattableString.Invariant($",\"engineTempC\":{engineTempC}"));
