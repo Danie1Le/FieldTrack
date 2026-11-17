@@ -37,15 +37,17 @@ internal static class GeofenceBench
 
         var (centre, halfSideMeters, area) = await DefineAreaAsync(dataSource, fraction, cancellationToken);
         var parameters = new Dictionary<string, object> { ["area"] = area };
+
+        await log.WriteLineAsync($"a {halfSideMeters * 2:0} m square; timing with the index");
+        var withIndex = await QueryBench.MeasureAsync(dataSource, Query, parameters, withoutIndexScans: false, warmRuns, cancellationToken);
+        await log.WriteLineAsync("timing without index scans");
+        var withoutIndex = await QueryBench.MeasureAsync(dataSource, Query, parameters, withoutIndexScans: true, warmRuns, cancellationToken);
+
+        // Counted last: running the query first would warm the index the first timed run is meant to meet cold.
         await using var count = dataSource.CreateCommand(Query);
         count.CommandTimeout = 600;
         count.Parameters.AddWithValue("area", area);
         var inside = (long)(await count.ExecuteScalarAsync(cancellationToken))!;
-
-        await log.WriteLineAsync($"{inside} of {readings} Readings inside a {halfSideMeters * 2:0} m square; timing with the index");
-        var withIndex = await QueryBench.MeasureAsync(dataSource, Query, parameters, withoutIndexScans: false, warmRuns, cancellationToken);
-        await log.WriteLineAsync("timing without index scans");
-        var withoutIndex = await QueryBench.MeasureAsync(dataSource, Query, parameters, withoutIndexScans: true, warmRuns, cancellationToken);
 
         return await target.WriteResultAsync(
             "geofence",

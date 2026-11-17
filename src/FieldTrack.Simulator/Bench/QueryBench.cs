@@ -9,10 +9,11 @@ internal static class QueryBench
     public const int WarmRuns = 10;
 
     /// <summary>
-    /// What the "cold" run is, written into every result: the first execution on this database after the preceding step, not an empty cache.
-    /// Shared buffers are cold only if Postgres was restarted first, and the operating system's cache stays warm either way.
+    /// What the "cold" run is, written into every result: the first execution of the query, not an empty cache. Shared buffers are cold only
+    /// if Postgres was restarted first, the setup before the first run has read part of what the query needs (the geofence area is calibrated
+    /// by a scan of the table, the history Asset's range by its index), and the operating system's cache is not flushed.
     /// </summary>
-    public const string ColdBasis = "first execution; shared buffers are cold only if Postgres was restarted beforehand, the OS cache is not flushed";
+    public const string ColdBasis = "first execution of the query; shared buffers are cold only if Postgres was restarted beforehand, setup reads have warmed part of them, the OS cache is not flushed";
 
     /// <summary>
     /// Runs <paramref name="sql"/> once and then <paramref name="warmRuns"/> more times under <c>EXPLAIN (ANALYZE, BUFFERS)</c>. With
