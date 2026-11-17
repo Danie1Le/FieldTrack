@@ -1,8 +1,11 @@
 using System.Net;
 using System.Text.Json;
+using FieldTrack.Api.Auth;
 using FieldTrack.Api.Live;
 using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Ingest;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
@@ -18,17 +21,22 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
         await AttachedDeviceAsync(admin, "TRK-001");
         await AttachedDeviceAsync(admin, "TRK-002");
         var (_, alerting) = await AttachedDeviceAsync(admin, "TRK-003");
+        var (_, archived) = await AttachedDeviceAsync(admin, "TRK-004");
         await CreateAsync(admin, "/alert-rules", Overheat(alerting));
         var t = DateTimeOffset.UtcNow.AddSeconds(1);
         // The newest by Device time is the latest, even when an older one is stored after it.
-        await WriteAsync(Received("TRK-002", 0, t.AddSeconds(2), 90, lat: 51.6), Received("TRK-003", 0, t, 110));
+        await WriteAsync(Received("TRK-002", 0, t.AddSeconds(2), 90, lat: 51.6), Received("TRK-003", 0, t, 110), Received("TRK-004", 0, t, 90));
         await WriteAsync(Received("TRK-002", 1, t.AddSeconds(1), 95, lat: 51.4));
+        // An Asset with Readings is Archived, not removed.
+        (await admin.DeleteAsync($"/assets/{archived}", CancellationToken)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
         var assets = (await ListAsync(admin, "/assets/live")).ToDictionary(asset => asset.GetProperty("name").GetString()!);
 
+        assets.ShouldNotContainKey("Asset of TRK-004");
         assets["Spare generator"].GetProperty("status").GetString().ShouldBe("NoDevice");
         assets["Spare generator"].GetProperty("latest").ValueKind.ShouldBe(JsonValueKind.Null);
-        assets["Asset of TRK-001"].GetProperty("status").GetString().ShouldBe("Offline");
+        // Attached moments ago and silent since: its 120 s have not run out (Offline itself is tested in Domain).
+        assets["Asset of TRK-001"].GetProperty("status").GetString().ShouldBe("Normal");
         assets["Asset of TRK-001"].GetProperty("lastReceivedAt").ValueKind.ShouldBe(JsonValueKind.Null);
         assets["Asset of TRK-003"].GetProperty("status").GetString().ShouldBe("Alerting");
         var normal = assets["Asset of TRK-002"];
@@ -40,6 +48,11 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
         latest.GetProperty("latitude").GetDouble().ShouldBe(51.6, tolerance: 1e-9);
         latest.GetProperty("longitude").GetDouble().ShouldBe(-0.12, tolerance: 1e-9);
         latest.GetProperty("engineTempC").GetSingle().ShouldBe(90);
+        // Same shape and values as the history read's newest Reading.
+        var from = Uri.EscapeDataString(t.AddMinutes(-1).ToString("O"));
+        var to = Uri.EscapeDataString(t.AddMinutes(1).ToString("O"));
+        var history = await ListAsync(admin, $"/assets/{normal.GetProperty("id").GetString()}/readings?from={from}&to={to}");
+        latest.GetRawText().ShouldBe(history[^1].GetRawText());
     }
 
     [Fact]
@@ -64,6 +77,7 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     {
         using var admin = await AdminClientAsync();
         var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        await AttachedDeviceAsync(admin, "TRK-008");
         await CreateAsync(admin, "/alert-rules", Overheat(asset));
         await WriteAsync(Received("TRK-007", 0, DateTimeOffset.UtcNow.AddSeconds(1), 110));
         var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem().GetProperty("id").GetString()!;
@@ -78,11 +92,61 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
             var updated = await client.NextAsync(LiveHub.AlertUpdated);
             updated.GetProperty("id").GetString().ShouldBe(alert);
             updated.GetProperty("status").GetString().ShouldBe("Open");
+            // Only the Alert's Asset, not TRK-008's.
             var assets = await client.NextAsync(LiveHub.AssetsUpdated);
             var pushed = assets.EnumerateArray().ShouldHaveSingleItem();
             pushed.GetProperty("id").GetString().ShouldBe(asset);
             pushed.GetProperty("status").GetString().ShouldBe("Alerting");
         }
+    }
+
+    [Fact]
+    public async Task An_Alert_raised_and_Resolved_in_one_commit_goes_as_updated_not_raised()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-009");
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var t = DateTimeOffset.UtcNow.AddSeconds(1);
+        await WriteAsync(Received("TRK-009", 0, t, 110));
+        await WriteAsync(Received("TRK-009", 1, t.AddSeconds(1), 90));
+        var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
+        alert.GetProperty("status").GetString().ShouldBe("Resolved");
+        var id = Guid.Parse(alert.GetProperty("id").GetString()!);
+        await using var client = await LiveClient.ConnectAsync(Fixture.Api, Token(admin));
+
+        await Fixture.Api.Services.GetRequiredService<LivePush>().PushAsync([], [id], [id], CancellationToken);
+
+        var (name, payload) = await client.NextAsync();
+        name.ShouldBe(LiveHub.AlertUpdated);
+        payload.GetProperty("id").GetGuid().ShouldBe(id);
+        (await client.NextAsync()).Name.ShouldBe(LiveHub.AssetsUpdated);
+    }
+
+    [Fact]
+    public async Task A_failed_push_is_logged_and_never_reaches_the_caller()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-010");
+        await using var api = Fixture.Api.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddSingleton<HubLifetimeManager<LiveHub>>(BrokenLiveHub.Throwing())));
+
+        await Should.NotThrowAsync(() => api.Services.GetRequiredService<LivePush>().PushAsync([Guid.Parse(asset)], [], [], CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_WebSocket_connection_closes_when_its_access_token_expires()
+    {
+        // Issue a token with 5 s left, then put the clock right so only the token is old.
+        var time = new AdjustableTimeProvider { Offset = -(TokenService.AccessTokenLifetime - TimeSpan.FromSeconds(5)) };
+        await using var api = Fixture.Api.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(time)));
+        var tokens = await AuthClient.SignInAsync(api.CreateClient(), FieldTrackApiFactory.AdminEmail, FieldTrackApiFactory.AdminPassword);
+        time.Offset = TimeSpan.Zero;
+
+        await using var client = await LiveClient.ConnectAsync(api, tokens.AccessToken, webSockets: true);
+
+        client.Closed.IsCompleted.ShouldBeFalse();
+        await client.Closed.WaitAsync(TimeSpan.FromSeconds(20), CancellationToken);
     }
 
     private static string Token(HttpClient client) => client.DefaultRequestHeaders.Authorization!.Parameter!;
