@@ -31,5 +31,8 @@ internal sealed class CounterRecorder : IDisposable
     /// <summary>Every value added so far, with its tags.</summary>
     public IReadOnlyList<(long Value, Dictionary<string, object?> Tags)> Measurements => [.. _measurements];
 
+    /// <summary>The sum of every value added so far.</summary>
+    public long Total => _measurements.Sum(measured => measured.Value);
+
     public void Dispose() => _listener.Dispose();
 }
