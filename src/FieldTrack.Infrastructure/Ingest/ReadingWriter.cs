@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using FieldTrack.Domain.Alerts;
+using FieldTrack.Domain.Assets;
 using FieldTrack.Domain.Telemetry;
 using Npgsql;
 using NpgsqlTypes;
@@ -9,8 +10,9 @@ namespace FieldTrack.Infrastructure.Ingest;
 /// <summary>
 /// Stores batches of Readings exactly once (ADR 0003, ADR 0004), and the batch's Rejected messages with them, so
 /// stored plus rejected always equals published (spec #21), and evaluates Alert Rules against the new Readings in
-/// the same transaction (ADR 0005). It holds one connection, with its stage table and rule state, for the life of
-/// an ingest session; dispose it and open a new one after any failure.
+/// the same transaction (ADR 0005). Between batches, <see cref="SweepAsync"/> watches for silent Devices. It holds one
+/// connection, with its stage table and rule state, for the life of an ingest session; dispose it and open a new one
+/// after any failure.
 /// </summary>
 public sealed class ReadingWriter : IAsyncDisposable
 {
@@ -141,9 +143,11 @@ public sealed class ReadingWriter : IAsyncDisposable
             WHERE d.id = r.device_id
         ), evaluated AS (
             -- The new Readings of Assets in use, for rule evaluation (ADR 0005). A backlog Reading stamped with an
-            -- Asset Archived since is stored but evaluates no rule.
+            -- Asset Archived since is stored but evaluates no rule. The Asset's Device now (one open Attachment at
+            -- most) tells a former Device's backlog apart for Offline rules.
             SELECT s.ordinal, s.device_id, r.asset_id, a.asset_group_id, s.boot, s.seq, s.device_time, s.lat, s.lon,
-                   s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v
+                   s.speed_kph, s.engine_temp_c, s.fuel_pct, s.vibration_mm_s, s.battery_v,
+                   (SELECT t.device_id FROM attachments t WHERE t.asset_id = r.asset_id AND t.detached_at IS NULL) AS attached_device_id
             FROM stored r
             JOIN staged s USING (device_id, boot, seq)
             JOIN assets a ON a.id = r.asset_id
@@ -166,13 +170,24 @@ public sealed class ReadingWriter : IAsyncDisposable
         ORDER BY e.ordinal NULLS FIRST
         """;
 
+    // The Assets in use with a Device attached, and how long that Device has been silent, for each sweep (ADR 0005).
+    // last_received_at is the column each batch updates on the same loop, so a sweep always sees the batches before it.
+    private const string ReadAttached = """
+        SELECT t.asset_id, a.asset_group_id, t.attached_at, d.last_received_at
+        FROM attachments t
+        JOIN assets a ON a.id = t.asset_id
+        JOIN devices d ON d.id = t.device_id
+        WHERE t.detached_at IS NULL AND NOT a.archived
+        """;
+
     // One row of _store's final SELECT; edit the two together. Column 2 is the ordinal, used only for order.
     private static AssetReading ReadEvaluated(NpgsqlDataReader reader)
     {
         var reading = new Reading(
             reader.GetInt32(6), reader.GetInt64(7), reader.GetFieldValue<DateTimeOffset>(8), reader.GetDouble(9), reader.GetDouble(10),
             Sensor(11), Sensor(12), Sensor(13), Sensor(14), Sensor(15));
-        return new AssetReading(reader.GetGuid(4), reader.IsDBNull(5) ? null : reader.GetGuid(5), new StoredReading(reader.GetGuid(3), reading));
+        return new AssetReading(reader.GetGuid(4), reader.IsDBNull(5) ? null : reader.GetGuid(5), reader.IsDBNull(16) ? null : reader.GetGuid(16),
+            new StoredReading(reader.GetGuid(3), reading));
 
         float? Sensor(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
     }
@@ -325,6 +340,44 @@ public sealed class ReadingWriter : IAsyncDisposable
         _rules.Keep(outcome.States);
         return new WrittenBatch(
             reasons, identical, conflicting, [.. stored.Select(reading => reading.AssetId).Distinct()], outcome.Raised, outcome.Resolved, evaluation);
+    }
+
+    /// <summary>
+    /// One sweep (ADR 0005) at <paramref name="at"/>, run between batches on the ingest loop so it never races one, after
+    /// every message received up to <paramref name="at"/> is stored: raises the Offline Alerts due (none before
+    /// <paramref name="caughtUpAt"/>, when ingest caught up with the broker backlog), and returns them with the Assets that
+    /// turned Offline in (<paramref name="since"/>, <paramref name="at"/>], for the live push. Asset Status is computed on
+    /// read, so nothing is stored for those; only the dashboards need telling.
+    /// </summary>
+    /// <param name="since">The previous sweep's time, kept across ingest sessions so no Asset's turn is missed.</param>
+    /// <param name="at">The sweep time.</param>
+    /// <param name="caughtUpAt">When this ingest session caught up with the broker backlog, or null.</param>
+    /// <param name="cancellationToken">Cancels the sweep.</param>
+    public async Task<WrittenBatch> SweepAsync(DateTimeOffset since, DateTimeOffset at, DateTimeOffset? caughtUpAt, CancellationToken cancellationToken)
+    {
+        // The rules first, then the Attachments they are judged against, so those are never older than the rules.
+        await _rules.RefreshAsync(_connection, cancellationToken);
+        var assets = new List<AttachedAsset>();
+        await using (var read = new NpgsqlCommand(ReadAttached, _connection))
+        await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                assets.Add(new AttachedAsset(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                    reader.GetFieldValue<DateTimeOffset>(2), reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTimeOffset>(3)));
+            }
+        }
+
+        // Each Asset is pushed once, by the sweep that first sees it Offline: the instant lies in (last sweep, now].
+        Guid[] turnedOffline =
+        [
+            .. assets.Where(asset => AssetStatuses.OfflineFrom(asset.AttachedAt, asset.LastReceivedAt) is var offlineFrom
+                                     && since < offlineFrom && offlineFrom <= at)
+                .Select(asset => asset.AssetId),
+        ];
+        var raised = await _rules.SweepAsync(_connection, assets, at, caughtUpAt, cancellationToken);
+        // No batch: nothing rejected, deduplicated or evaluated against Readings, so no rule evaluation time either.
+        return new WrittenBatch([], 0, 0, turnedOffline, raised, [], TimeSpan.Zero);
     }
 
     /// <inheritdoc />

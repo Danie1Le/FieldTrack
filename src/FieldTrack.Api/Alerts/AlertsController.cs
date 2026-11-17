@@ -28,12 +28,18 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time, 
 
     /// <summary>
     /// Lists the newest Alerts by Device time raised, newest first: only Active ones when <paramref name="active"/> is
-    /// true, only Resolved ones when false, both when left out.
+    /// true, only Resolved ones when false, both when left out; only those of one Asset when <paramref name="assetId"/>
+    /// is given (the Asset detail page).
     /// </summary>
     [HttpGet]
-    public async Task<IReadOnlyList<AlertResponse>> List(bool? active, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<AlertResponse>> List(bool? active, Guid? assetId, CancellationToken cancellationToken)
     {
         var alerts = db.Alerts.AsQueryable();
+        if (assetId is { } asset)
+        {
+            alerts = alerts.Where(alert => alert.AssetId == asset);
+        }
+
         if (active is { } isActive)
         {
             alerts = alerts.Where(alert => (alert.Status != AlertStatus.Resolved) == isActive);

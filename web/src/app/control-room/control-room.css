@@ -163,6 +163,12 @@ td.name .muted {
   margin-left: 6px;
 }
 
+/* The name opens the Asset's page; a click elsewhere on the row selects it on the map. */
+td.name a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
 tr.group td {
   background: var(--panel-2);
 }

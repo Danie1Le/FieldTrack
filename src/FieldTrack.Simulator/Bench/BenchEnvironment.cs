@@ -15,6 +15,8 @@ internal static class BenchEnvironment
     [
         "server_version", "shared_buffers", "effective_cache_size", "work_mem", "maintenance_work_mem", "max_connections", "synchronous_commit",
         "fsync", "wal_level", "max_wal_size", "checkpoint_timeout", "track_commit_timestamp",
+        // What the query benchmarks' plans depend on.
+        "max_parallel_workers_per_gather", "jit", "random_page_cost",
     ];
 
     /// <summary>Captures the environment of a benchmark of the compose project <paramref name="composeProject"/> and its database.</summary>

@@ -28,11 +28,14 @@ public sealed class ObservabilityTests(FieldTrackFixture fixture) : IntegrationT
 
         // Refused for want of a valid token, but the request still has its span.
         using var response = await client.PostAsync($"/hubs/live/negotiate?negotiateVersion=1&access_token={secret}", content: null, CancellationToken);
-        api.Services.GetRequiredService<TracerProvider>().ForceFlush();
 
-        // Every host in the test process shares the ActivitySources, so this also sees other hosts' requests.
-        var spans = exported.Ended.ToArray();
-        spans.ShouldContain(activity => activity.TagObjects.Contains(new KeyValuePair<string, object?>("url.path", "/hubs/live/negotiate")));
+        // The server ends a request's span after it has written the response, so the client can have the response first. The wait is
+        // for that span, so the guard cannot pass without it. Every host in the test process shares the ActivitySources, so this
+        // also sees other hosts' requests.
+        var spans = await EventuallyAsync(
+            () => Task.FromResult(exported.Ended.ToArray()),
+            ended => ended.Any(IsNegotiateRequest));
+        spans.ShouldContain(activity => IsNegotiateRequest(activity));
         foreach (var activity in spans)
         {
             activity.DisplayName.ShouldNotContain(secret);
@@ -95,6 +98,9 @@ public sealed class ObservabilityTests(FieldTrackFixture fixture) : IntegrationT
         poolNames.ShouldContain(PersistenceServiceCollectionExtensions.IngestDataSourceName);
         poolNames.ShouldContain(PersistenceServiceCollectionExtensions.EntityFrameworkDataSourceName);
     }
+
+    private static bool IsNegotiateRequest(Activity activity) =>
+        activity.TagObjects.Contains(new KeyValuePair<string, object?>("url.path", "/hubs/live/negotiate"));
 
     private static void CollectPoolNames(ReadOnlySpan<KeyValuePair<string, object?>> tags, ConcurrentBag<string> names)
     {
