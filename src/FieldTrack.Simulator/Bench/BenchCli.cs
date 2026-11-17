@@ -66,11 +66,25 @@ internal static class BenchCli
         var outcome = kind switch
         {
             "seed-history" => await SeedHistoryAsync(options, target, cancellationToken),
-            "geofence" => await GeofenceBench.RunAsync(target, fraction: 0.01, QueryBench.WarmRuns, Console.Out, cancellationToken),
-            _ => await HistoryBench.RunAsync(target, QueryBench.WarmRuns, Console.Out, cancellationToken),
+            "geofence" => await GeofenceBench.RunAsync(
+                target, fraction: 0.01, Vertices(options.GetNumber("vertices")), QueryBench.WarmRuns, await PostgresRestartAsync(target, cancellationToken), Console.Out, cancellationToken),
+            _ => await HistoryBench.RunAsync(target, QueryBench.WarmRuns, await PostgresRestartAsync(target, cancellationToken), Console.Out, cancellationToken),
         };
         return Report(outcome);
     }
+
+    // Fails before anything is restarted when --compose-project or --db point at the wrong database.
+    private static async Task<Func<CancellationToken, Task>> PostgresRestartAsync(BenchTarget target, CancellationToken cancellationToken) =>
+        (await DockerPostgres.FindAsync(target.ComposeProject, target.Database.DataSource, cancellationToken)).RestartAsync;
+
+    /// <summary>The geofence shape's position count from <c>--vertices</c>, defaulting to the headline square.</summary>
+    /// <exception cref="SimulatorException">The value is not a whole number.</exception>
+    internal static int Vertices(double? value) => value switch
+    {
+        null => GeofenceBench.SquareVertices,
+        { } number when double.IsInteger(number) => (int)Math.Clamp(number, -1, 100_000),
+        _ => throw new SimulatorException($"--vertices must be a whole number, got {value}."),
+    };
 
     private static async Task<BenchOutcome> SeedHistoryAsync(Options options, BenchTarget target, CancellationToken cancellationToken)
     {

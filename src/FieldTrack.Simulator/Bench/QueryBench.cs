@@ -9,20 +9,23 @@ internal static class QueryBench
     public const int WarmRuns = 10;
 
     /// <summary>
-    /// What the "cold" run is, written into every result: the first execution of the query, not an empty cache. Shared buffers are cold only
-    /// if Postgres was restarted first, the setup before the first run has read part of what the query needs (the geofence area is calibrated
-    /// by a scan of the table, the history Asset's range by its index), and the operating system's cache is not flushed.
+    /// What the "cold" run is, written into every result: the first execution after Postgres was restarted, so shared buffers are empty and
+    /// nothing the setup read (area calibration, choosing the Asset) is in them. The operating system's page cache (inside the Docker VM) is
+    /// not flushed, so a block can still come from memory rather than disk.
     /// </summary>
-    public const string ColdBasis = "first execution of the query; shared buffers are cold only if Postgres was restarted beforehand, setup reads have warmed part of them, the OS cache is not flushed";
+    public const string ColdBasis = "first execution after a restart of Postgres (shared buffers empty, setup done before the restart); the OS page cache is not flushed";
 
     /// <summary>
-    /// Runs <paramref name="sql"/> once and then <paramref name="warmRuns"/> more times under <c>EXPLAIN (ANALYZE, BUFFERS)</c>. With
-    /// <paramref name="withoutIndexScans"/> the planner may not use index scans, index-only scans or bitmap scans (it falls back to a
-    /// sequential scan): the way to measure a query without its index without dropping an index that takes minutes to rebuild.
+    /// Restarts Postgres with <paramref name="restart"/>, then runs <paramref name="sql"/> once (the cold run) and <paramref name="warmRuns"/>
+    /// more times under <c>EXPLAIN (ANALYZE, BUFFERS)</c>. With <paramref name="withoutIndexScans"/> the planner may not use index scans,
+    /// index-only scans or bitmap scans (it falls back to a sequential scan): the way to measure a query without its index without dropping
+    /// an index that takes minutes to rebuild.
     /// </summary>
     public static async Task<QueryTiming> MeasureAsync(
-        NpgsqlDataSource dataSource, string sql, IReadOnlyDictionary<string, object> parameters, bool withoutIndexScans, int warmRuns, CancellationToken cancellationToken)
+        NpgsqlDataSource dataSource, string sql, IReadOnlyDictionary<string, object> parameters, bool withoutIndexScans, int warmRuns,
+        Func<CancellationToken, Task> restart, CancellationToken cancellationToken)
     {
+        await restart(cancellationToken);
         var cold = await ExplainAsync(dataSource, sql, parameters, withoutIndexScans, cancellationToken);
         var warm = new List<QueryPlan>(warmRuns);
         for (var run = 0; run < warmRuns; run++)
@@ -46,7 +49,7 @@ internal static class QueryBench
         }
 
         // A scan of a large table on a database that is busy otherwise outlasts Npgsql's 30 s default.
-        await using var command = new NpgsqlCommand($"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}", connection, transaction) { CommandTimeout = 600 };
+        await using var command = new NpgsqlCommand($"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}", connection, transaction) { CommandTimeout = BenchDatabase.CommandTimeoutSeconds };
         foreach (var (name, value) in parameters)
         {
             command.Parameters.AddWithValue(name, value);

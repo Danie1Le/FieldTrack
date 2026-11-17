@@ -16,6 +16,9 @@ internal sealed record QueryPlan(
     /// <summary>Planning and execution: what a client waits for, less the network.</summary>
     public double TotalMs => PlanningMs + ExecutionMs;
 
+    /// <summary>Whether an index scan (plain, index-only or bitmap) ran: false means the planner read the table in full.</summary>
+    public bool UsedIndex => NodeTypes.Any(node => node.Contains("Index", StringComparison.Ordinal));
+
     /// <summary>Reads the output of <c>EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)</c>.</summary>
     public static QueryPlan Parse(string explainJson)
     {

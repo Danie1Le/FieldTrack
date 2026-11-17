@@ -47,6 +47,22 @@ public sealed class BenchCliTests
     }
 
     [Fact]
+    public void The_geofence_shape_defaults_to_the_five_position_square()
+    {
+        BenchCli.Vertices(null).ShouldBe(5);
+        BenchCli.Vertices(65).ShouldBe(65);
+    }
+
+    [Theory]
+    [InlineData(5.5)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void A_fractional_vertex_count_is_refused(double vertices)
+    {
+        Should.Throw<SimulatorException>(() => BenchCli.Vertices(vertices));
+    }
+
+    [Fact]
     public void The_history_window_defaults_to_thirty_days_every_eight_minutes()
     {
         BenchCli.HistoryWindow(null, null).ShouldBe((TimeSpan.FromDays(30), TimeSpan.FromMinutes(8)));

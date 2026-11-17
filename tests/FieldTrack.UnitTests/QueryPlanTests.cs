@@ -40,6 +40,17 @@ public sealed class QueryPlanTests
     }
 
     [Fact]
+    public void A_plan_knows_whether_an_index_ran()
+    {
+        QueryPlan.Parse(Explain).UsedIndex.ShouldBeTrue();
+        QueryPlan.Parse("""
+            [{ "Plan": { "Node Type": "Aggregate", "Actual Rows": 1, "Shared Hit Blocks": 1, "Shared Read Blocks": 0,
+                         "Plans": [ { "Node Type": "Seq Scan", "Relation Name": "readings", "Actual Rows": 3 } ] },
+               "Planning Time": 0.1, "Execution Time": 1 }]
+            """).UsedIndex.ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_summary_of_runs_gives_the_cold_run_and_the_median_of_the_warm_ones()
     {
         var cold = QueryPlan.Parse(Explain);
