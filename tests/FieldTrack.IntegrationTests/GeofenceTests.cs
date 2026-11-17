@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using FieldTrack.Api.Live;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -179,6 +180,33 @@ public sealed class GeofenceTests(FieldTrackFixture fixture) : AlertTest(fixture
             await change();
             ((long)(await SqlAsync(database, "SELECT version FROM alert_rule_version"))!).ShouldBeGreaterThan(before, name);
         }
+    }
+
+    [Fact]
+    public async Task Every_Geofence_create_edit_and_delete_tells_the_dashboards_and_a_refused_change_does_not()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        await using var live = await LiveClient.ConnectAsync(Fixture.Api, admin.DefaultRequestHeaders.Authorization!.Parameter);
+
+        var named = await CreateAsync(admin, "/geofences", Depot());
+        await live.NextAsync(LiveHub.GeofencesChanged);
+        await CreateAsync(admin, "/alert-rules", LeftDepot(asset, named));
+        using var invalid = await admin.PostAsJsonAsync("/geofences", Depot() with { name = "" }, CancellationToken);
+        using var unknown = await admin.PutAsJsonAsync($"/geofences/{Guid.NewGuid()}", Depot(), CancellationToken);
+        using var refused = await admin.DeleteAsync($"/geofences/{named}", CancellationToken);
+        // Each push is sent before its response returns, so a push by a refused change would already be queued.
+        (await live.AnyWithinAsync(TimeSpan.FromSeconds(1))).ShouldBeNull();
+        var geofence = await CreateAsync(admin, "/geofences", Depot() with { name = "Yard" });
+        await live.NextAsync(LiveHub.GeofencesChanged);
+        (await admin.PutAsJsonAsync($"/geofences/{geofence}", Depot() with { area = Square(0, 0, 1) }, CancellationToken)).EnsureSuccessStatusCode();
+        await live.NextAsync(LiveHub.GeofencesChanged);
+        (await admin.DeleteAsync($"/geofences/{geofence}", CancellationToken)).EnsureSuccessStatusCode();
+        await live.NextAsync(LiveHub.GeofencesChanged);
+
+        invalid.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        refused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
     }
 
     [Theory]

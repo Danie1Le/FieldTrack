@@ -13,7 +13,7 @@ namespace FieldTrack.Api.Alerts;
 /// <summary>
 /// Geofences, named areas that Geofence rules watch. Everyone signed in reads them; only Admins change them. An edit or
 /// delete bumps the Alert Rule version in its transaction, so ingest reloads the Geofences with the rules before its
-/// next batch (ADR 0005).
+/// next batch (ADR 0005). Every committed change is pushed as <see cref="LiveHub.GeofencesChanged"/>.
 /// </summary>
 [ApiController]
 [Route("geofences")]
@@ -58,6 +58,7 @@ public sealed class GeofencesController(FieldTrackDbContext db, TimeProvider tim
         var geofence = new Geofence { Name = request.Name, Kind = request.Kind!.Value, Area = area };
         db.Geofences.Add(geofence);
         await db.SaveChangesAsync(cancellationToken);
+        await live.GeofencesChangedAsync(cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ToResponse(geofence));
     }
 
@@ -106,6 +107,7 @@ public sealed class GeofencesController(FieldTrackDbContext db, TimeProvider tim
 
         await transaction.CommitAsync(cancellationToken);
         await live.AlertsUpdatedAsync(resolved, cancellationToken);
+        await live.GeofencesChangedAsync(cancellationToken);
         return ToResponse(geofence);
     }
 
@@ -135,6 +137,7 @@ public sealed class GeofencesController(FieldTrackDbContext db, TimeProvider tim
 
         await db.Geofences.Where(geofence => geofence.Id == id).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.GeofencesChangedAsync(cancellationToken);
         return NoContent();
     }
 
