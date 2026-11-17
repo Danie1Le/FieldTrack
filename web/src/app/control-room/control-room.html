@@ -1,5 +1,81 @@
 <header class="bar">
   <h1>FieldTrack</h1>
   <span class="muted">Control room</span>
-  <button type="button" class="btn sign-out" (click)="auth.signOut()">Sign out</button>
+  <div class="summary">
+    @for (group of groups(); track group.status) {
+      <span class="pill st-{{ group.status }}">{{ group.label }}</span>
+      <span class="mono count">{{ group.assets.length }}</span>
+    }
+  </div>
+  @if (fleet.connection() !== 'live') {
+    <span class="connection" role="status">{{ fleet.connection() === 'connecting' ? 'Connecting…' : 'Reconnecting…' }}</span>
+  }
+  <button type="button" class="btn" (click)="auth.signOut()">Sign out</button>
 </header>
+
+<nav class="tabs" role="tablist" aria-label="Control room">
+  <button type="button" role="tab" [attr.aria-selected]="tab() === 'map'" (click)="tab.set('map')">Map</button>
+  <button type="button" role="tab" [attr.aria-selected]="tab() === 'assets'" (click)="tab.set('assets')">Assets</button>
+  <button type="button" role="tab" [attr.aria-selected]="tab() === 'alerts'" (click)="tab.set('alerts')">Alerts</button>
+</nav>
+
+<div class="columns" [attr.data-tab]="tab()">
+  <section class="panel column assets" aria-label="Assets">
+    <header><strong>Assets</strong><span class="muted">grouped by status</span></header>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Last seen</th>
+            <th class="num">Temp °C</th>
+            <th class="num">Fuel %</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (group of groups(); track group.status) {
+            <tr class="group">
+              <td colspan="4">
+                <span class="pill st-{{ group.status }}">{{ group.label }}</span>
+                <span class="mono muted">{{ group.assets.length }}</span>
+              </td>
+            </tr>
+            @for (asset of group.assets; track asset.id) {
+              @let breached = this.breached(asset);
+              <tr
+                class="asset"
+                tabindex="0"
+                [class.selected]="asset.id === selected()"
+                [attr.aria-selected]="asset.id === selected()"
+                (click)="selectRow(asset)"
+                (keydown.enter)="selectRow(asset)"
+              >
+                <td class="name">
+                  <strong>{{ asset.name }}</strong> <span class="muted">{{ groupName(asset) }}</span>
+                </td>
+                <td class="muted">{{ lastSeen(asset) }}</td>
+                <td class="num mono" [class.hot]="breached.has('EngineTempC')">
+                  {{ asset.latest?.engineTempC == null ? '—' : (asset.latest!.engineTempC | number: '1.1-1') }}
+                </td>
+                <td class="num mono" [class.hot]="breached.has('FuelPct')">
+                  {{ asset.latest?.fuelPct == null ? '—' : (asset.latest!.fuelPct | number: '1.0-0') }}
+                </td>
+              </tr>
+            }
+          } @empty {
+            <tr>
+              <td colspan="4" class="muted">{{ fleet.connection() === 'live' ? 'No Assets yet.' : 'Loading…' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <app-fleet-map class="map" [assets]="fleet.assets()" [selected]="selected()" (select)="selected.set($event)" />
+
+  <section class="panel column alerts" aria-label="Alert feed">
+    <header><strong>Alert feed</strong></header>
+    <p class="muted placeholder">The Alert feed is not built yet.</p>
+  </section>
+</div>
