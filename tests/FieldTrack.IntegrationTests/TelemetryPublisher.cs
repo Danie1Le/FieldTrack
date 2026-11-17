@@ -21,15 +21,30 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates the broker session an ingest worker with <paramref name="clientId"/> resumes, so messages
-    /// published from now on wait for it however long it takes to connect.
+    /// Creates the broker session an ingest worker with <paramref name="clientId"/> resumes, subscribed to
+    /// <paramref name="topicFilter"/>, so messages published from now on wait for it however long it takes to connect.
     /// </summary>
-    public static async Task CreateIngestSessionAsync(FieldTrackFixture fixture, string clientId)
+    public static async Task CreateIngestSessionAsync(FieldTrackFixture fixture, string clientId, string topicFilter = IngestWorker.TopicFilter)
     {
         using var client = new MqttClientFactory().CreateMqttClient();
-        var options = Options(fixture, clientId).WithCleanStart(false).WithSessionExpiryInterval(IngestWorker.SessionExpirySeconds).Build();
-        await client.ConnectAsync(options, TestContext.Current.CancellationToken);
-        await client.SubscribeAsync(IngestWorker.TopicFilter, MqttQualityOfServiceLevel.AtLeastOnce, TestContext.Current.CancellationToken);
+        await client.ConnectAsync(IngestSessionOptions(fixture, clientId), TestContext.Current.CancellationToken);
+        await client.SubscribeAsync(topicFilter, MqttQualityOfServiceLevel.AtLeastOnce, TestContext.Current.CancellationToken);
+        await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Connects to the ingest worker's broker session and leaves again without acknowledging anything. The broker
+    /// drops the worker's connection, so its PUBACKs never arrive, as if it had crashed.
+    /// </summary>
+    public static async Task TakeOverIngestSessionAsync(FieldTrackFixture fixture, string clientId)
+    {
+        using var client = new MqttClientFactory().CreateMqttClient();
+        client.ApplicationMessageReceivedAsync += args =>
+        {
+            args.AutoAcknowledge = false;
+            return Task.CompletedTask;
+        };
+        await client.ConnectAsync(IngestSessionOptions(fixture, clientId), TestContext.Current.CancellationToken);
         await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
     }
 
@@ -37,10 +52,14 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     public static string Payload(int boot, long seq, DateTimeOffset deviceTime, double lat = 51.5, double lon = -0.12, string more = "") =>
         string.Create(CultureInfo.InvariantCulture, $"{{\"boot\":{boot},\"seq\":{seq},\"ts\":{deviceTime.ToUnixTimeMilliseconds()},\"lat\":{lat},\"lon\":{lon}{more}}}");
 
-    public async Task PublishAsync(string serialNumber, string payload)
+    public Task PublishAsync(string serialNumber, string payload) => PublishToAsync(TopicOf(serialNumber), payload);
+
+    public static string TopicOf(string serialNumber) => $"fieldtrack/{IngestWorker.ContractVersion}/devices/{serialNumber}/telemetry";
+
+    public async Task PublishToAsync(string topic, string payload)
     {
         var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"fieldtrack/v1/devices/{serialNumber}/telemetry")
+            .WithTopic(topic)
             .WithPayload(Encoding.UTF8.GetBytes(payload))
             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
             .Build();
@@ -53,6 +72,9 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
         await _client.DisconnectAsync();
         _client.Dispose();
     }
+
+    private static MqttClientOptions IngestSessionOptions(FieldTrackFixture fixture, string clientId) =>
+        Options(fixture, clientId).WithCleanStart(false).WithSessionExpiryInterval(IngestWorker.SessionExpirySeconds).Build();
 
     private static MqttClientOptionsBuilder Options(FieldTrackFixture fixture, string clientId) =>
         new MqttClientOptionsBuilder().WithTcpServer(fixture.BrokerHost, fixture.BrokerPort).WithClientId(clientId);

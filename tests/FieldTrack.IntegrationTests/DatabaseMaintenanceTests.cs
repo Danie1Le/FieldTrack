@@ -1,4 +1,6 @@
 using System.Globalization;
+using FieldTrack.Api.Maintenance;
+using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Identity;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.TestHost;
@@ -104,6 +106,38 @@ public sealed class DatabaseMaintenanceTests(FieldTrackFixture fixture) : Integr
 
         kept.ShouldBe([(byte)3, (byte)4, (byte)5]);
     }
+
+    [Fact]
+    public async Task Rejected_messages_older_than_the_retention_are_purged()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await using (var scope = Fixture.Api.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>();
+            db.RejectedMessages.AddRange(
+                Rejected("old", now - DatabaseMaintenanceJob.RejectedMessageRetention - TimeSpan.FromMinutes(1)),
+                Rejected("recent", now - DatabaseMaintenanceJob.RejectedMessageRetention + TimeSpan.FromHours(1)));
+            await db.SaveChangesAsync(CancellationToken);
+        }
+
+        // A new host runs the maintenance job on startup.
+        await using var api = Fixture.Api.WithWebHostBuilder(_ => { });
+        api.StartServer();
+
+        var kept = await EventuallyAsync(
+            async () =>
+            {
+                await using var scope = Fixture.Api.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>();
+                return await db.RejectedMessages.Select(message => message.Topic).ToListAsync(CancellationToken);
+            },
+            topics => topics.Count == 1);
+
+        kept.ShouldBe(["recent"]);
+    }
+
+    private static RejectedMessage Rejected(string topic, DateTimeOffset receivedTime) =>
+        new() { Topic = topic, Payload = [], Reason = RejectReason.BadJson, ReceivedTime = receivedTime };
 
     private static RefreshToken Token(Guid userId, byte hash, DateTimeOffset expiresAt, DateTimeOffset? revokedAt) => new()
     {

@@ -3,6 +3,7 @@ using System.Linq.Expressions;
 using System.Text;
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Assets;
+using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -41,6 +42,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
     /// <summary>Rule state per Alert Rule and Asset, which ingest keeps (ADR 0005).</summary>
     public DbSet<AlertRuleState> AlertRuleStates => Set<AlertRuleState>();
+
+    /// <summary>Telemetry messages ingest refused, with their reasons.</summary>
+    public DbSet<RejectedMessage> RejectedMessages => Set<RejectedMessage>();
 
     /// <summary>
     /// Ends the open Attachments matching <paramref name="which"/> at <paramref name="at"/>, returning how many
@@ -110,7 +114,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // Stored by name so hand-written SQL and exports read it without a lookup. The check keeps
             // hand-written SQL to the same names; renaming an AssetType member needs a data migration.
             asset.Property(a => a.Type).HasConversion<string>();
-            asset.ToTable(table => table.HasCheckConstraint("ck_assets_type", EnumNamesCheck<AssetType>("type")));
+            asset.ToTable(table => table.HasCheckConstraint("ck_assets_type", NamesCheck<AssetType>("type")));
             // An Asset Group that still has Assets cannot be deleted (#24).
             asset.HasOne<AssetGroup>().WithMany().HasForeignKey(a => a.AssetGroupId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -157,10 +161,10 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             });
             rule.ToTable(table =>
             {
-                table.HasCheckConstraint("ck_alert_rules_kind", EnumNamesCheck<AlertRuleKind>("kind"));
-                table.HasCheckConstraint("ck_alert_rules_severity", EnumNamesCheck<Severity>("severity"));
-                table.HasCheckConstraint("ck_alert_rules_sensor", EnumNamesCheck<Sensor>("sensor"));
-                table.HasCheckConstraint("ck_alert_rules_operator", EnumNamesCheck<ThresholdOperator>("operator"));
+                table.HasCheckConstraint("ck_alert_rules_kind", NamesCheck<AlertRuleKind>("kind"));
+                table.HasCheckConstraint("ck_alert_rules_severity", NamesCheck<Severity>("severity"));
+                table.HasCheckConstraint("ck_alert_rules_sensor", NamesCheck<Sensor>("sensor"));
+                table.HasCheckConstraint("ck_alert_rules_operator", NamesCheck<ThresholdOperator>("operator"));
                 table.HasCheckConstraint("ck_alert_rules_target", "(asset_id IS NULL) <> (asset_group_id IS NULL)");
                 // double precision holds NaN and ±Infinity; Postgres sorts NaN above Infinity, so the upper bound on
                 // hysteresis refuses both.
@@ -183,9 +187,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             alert.Property(a => a.ResolveReason).HasConversion<string>();
             alert.ToTable(table =>
             {
-                table.HasCheckConstraint("ck_alerts_severity", EnumNamesCheck<Severity>("severity"));
-                table.HasCheckConstraint("ck_alerts_status", EnumNamesCheck<AlertStatus>("status"));
-                table.HasCheckConstraint("ck_alerts_resolve_reason", EnumNamesCheck<ResolveReason>("resolve_reason"));
+                table.HasCheckConstraint("ck_alerts_severity", NamesCheck<Severity>("severity"));
+                table.HasCheckConstraint("ck_alerts_status", NamesCheck<AlertStatus>("status"));
+                table.HasCheckConstraint("ck_alerts_resolve_reason", NamesCheck<ResolveReason>("resolve_reason"));
                 // Ingest and manual resolve write these with SQL: a Resolved Alert has its time and reason, an Active
                 // one neither, and only a breach that cleared inside its batch is from backlog.
                 table.HasCheckConstraint("ck_alerts_resolution",
@@ -215,10 +219,22 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             state.HasOne<AlertRule>().WithMany().HasForeignKey(s => s.AlertRuleId).OnDelete(DeleteBehavior.Cascade);
             state.HasOne<Asset>().WithMany().HasForeignKey(s => s.AssetId).OnDelete(DeleteBehavior.Cascade);
         });
+
+        builder.Entity<RejectedMessage>(rejected =>
+        {
+            // By name, like Asset Type, and checked so hand-written SQL keeps to the same names.
+            rejected.Property(r => r.Reason).HasConversion<string>();
+            rejected.ToTable(table => table.HasCheckConstraint("ck_rejected_messages_reason", NamesCheck<RejectReason>("reason")));
+            // Anyone who can publish can add rows, so each row is bounded: the payload by the broker's
+            // message_size_limit, the topic here.
+            rejected.Property(r => r.Topic).HasMaxLength(RejectedMessage.MaxTopicLength);
+            // The retention purge deletes by Received time; the second index finds a topic's recent Rejected messages.
+            rejected.HasIndex(r => r.ReceivedTime);
+            rejected.HasIndex(r => new { r.Topic, r.ReceivedTime });
+        });
     }
 
-    /// <summary>A check that <paramref name="column"/> holds a member name of <typeparamref name="TEnum"/> (or null).</summary>
-    private static string EnumNamesCheck<TEnum>(string column)
-        where TEnum : struct, Enum =>
+    /// <summary>A CHECK that <paramref name="column"/> holds the name of a <typeparamref name="TEnum"/> member.</summary>
+    private static string NamesCheck<TEnum>(string column) where TEnum : struct, Enum =>
         $"{column} IN ({string.Join(", ", Enum.GetNames<TEnum>().Select(name => $"'{name}'"))})";
 }
