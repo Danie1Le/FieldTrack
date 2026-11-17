@@ -25,12 +25,13 @@ internal sealed record FleetDevice(
     IReadOnlyList<Sensor> Sensors);
 
 /// <summary>
-/// The fleet file: every simulated Device, shared by <c>seed</c> and <c>run</c> so a demo and a benchmark start
-/// from one setup (spec #21). A Device with a <c>route</c> follows it, one with a <c>position</c> reports from there,
+/// The fleet file: every simulated Device, so a demo and a benchmark start from one setup (spec #21). A Device with a <c>route</c> follows it, one with a <c>position</c> reports from there,
 /// and one with neither random-walks.
 /// </summary>
 internal sealed partial class FleetFile
 {
+    private const int MaxAssetNameLength = 200;
+
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { AllowDuplicateProperties = false };
 
     private FleetFile(IReadOnlyList<FleetDevice> devices) => Devices = devices;
@@ -67,11 +68,16 @@ internal sealed partial class FleetFile
             throw new SimulatorException("The fleet file lists no devices.");
         }
 
-        var serials = new HashSet<string>();
         var parsed = devices.Select(device => ToDevice(device, baseDirectory)).ToList();
-        foreach (var device in parsed.Where(device => !serials.Add(device.Serial)))
+        foreach (var twice in parsed.GroupBy(device => device.Serial).Where(group => group.Count() > 1))
         {
-            throw new SimulatorException($"Serial number {device.Serial} appears twice in the fleet file.");
+            throw new SimulatorException($"Serial number {twice.Key} appears twice in the fleet file.");
+        }
+
+        // The API allows one Device per Asset, so a shared Asset would fail halfway through seeding.
+        foreach (var shared in parsed.GroupBy(device => device.AssetName).Where(group => group.Count() > 1))
+        {
+            throw new SimulatorException($"Devices {string.Join(" and ", shared.Select(device => device.Serial))} both use Asset '{shared.Key}'.");
         }
 
         return new FleetFile(parsed);
@@ -86,6 +92,12 @@ internal sealed partial class FleetFile
             throw new SimulatorException($"Serial '{serial}' must be 1 to 64 letters, digits, '.', '_' or '-'.");
         }
 
+        // The API's rule for an Asset name, checked here for the same reason.
+        if (dto.AssetName is not null && (string.IsNullOrWhiteSpace(dto.AssetName) || dto.AssetName.Length > MaxAssetNameLength))
+        {
+            throw new SimulatorException($"Device {serial}: assetName must be 1 to {MaxAssetNameLength} characters and not blank.");
+        }
+
         if (!Enum.TryParse<AssetType>(dto.AssetType, ignoreCase: true, out var assetType) || !Enum.IsDefined(assetType))
         {
             throw new SimulatorException($"Device {serial}: assetType must be one of {string.Join(", ", Enum.GetNames<AssetType>())}.");
@@ -96,6 +108,7 @@ internal sealed partial class FleetFile
             throw new SimulatorException($"Device {serial}: give a route or a position, not both.");
         }
 
+        // A missing coordinate is null, which fails the range check, instead of 0.
         if (dto.Position is { Lat: not (>= -90 and <= 90) } or { Lon: not (>= -180 and <= 180) })
         {
             throw new SimulatorException($"Device {serial}: position must have lat within -90..90 and lon within -180..180.");
@@ -106,7 +119,7 @@ internal sealed partial class FleetFile
             dto.AssetName ?? serial,
             assetType,
             dto.Route is null ? null : Path.GetFullPath(dto.Route, baseDirectory),
-            dto.Position,
+            dto.Position is { Lat: { } lat, Lon: { } lon } ? new Position(lat, lon) : null,
             (dto.Sensors ?? []).Select(name => ParseSensor(serial, name)).Distinct().ToList());
     }
 
@@ -120,5 +133,7 @@ internal sealed partial class FleetFile
 
     private sealed record FleetDto(List<DeviceDto?>? Devices);
 
-    private sealed record DeviceDto(string? Serial, string? AssetName, string? AssetType, string? Route, Position? Position, List<string>? Sensors);
+    private sealed record DeviceDto(string? Serial, string? AssetName, string? AssetType, string? Route, PositionDto? Position, List<string>? Sensors);
+
+    private sealed record PositionDto(double? Lat, double? Lon);
 }
