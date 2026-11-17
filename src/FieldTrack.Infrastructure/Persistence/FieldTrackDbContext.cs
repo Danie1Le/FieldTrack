@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Linq.Expressions;
+using System.Text;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -40,6 +42,25 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             .Where(which)
             .Where(attachment => attachment.DetachedAt == null)
             .ExecuteUpdateAsync(set => set.SetProperty(attachment => attachment.DetachedAt, at), cancellationToken);
+
+    /// <summary>
+    /// Creates the missing daily Reading partitions for the UTC days <paramref name="first"/> to <paramref name="last"/>
+    /// (ADR 0003: own job, no pg_partman). Safe to run from several hosts at once.
+    /// </summary>
+    public Task CreateReadingPartitionsAsync(DateOnly first, DateOnly last, CancellationToken cancellationToken)
+    {
+        // One implicit transaction; the advisory lock makes concurrent runs take turns instead of racing on the names.
+        // CREATE ... PARTITION OF takes ACCESS EXCLUSIVE on readings, and ingest would queue behind a CREATE waiting
+        // on a long reader, so give up after 5 s: partitions exist days ahead and the job retries next hour.
+        var sql = new StringBuilder("SELECT pg_advisory_xact_lock(hashtext('readings partitions'));SET LOCAL lock_timeout = '5s';");
+        for (var day = first; day <= last; day = day.AddDays(1))
+        {
+            sql.Append(CultureInfo.InvariantCulture,
+                $"CREATE TABLE IF NOT EXISTS readings_{day:yyyyMMdd} PARTITION OF readings FOR VALUES FROM ('{day:yyyy-MM-dd}T00:00:00Z') TO ('{day.AddDays(1):yyyy-MM-dd}T00:00:00Z');");
+        }
+
+        return Database.ExecuteSqlRawAsync(sql.ToString(), cancellationToken);
+    }
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder builder)
