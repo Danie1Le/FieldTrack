@@ -56,7 +56,7 @@ th,
 td {
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .num {
@@ -90,6 +90,7 @@ form {
 }
 
 label {
+  max-width: 28rem;
   display: flex;
   flex-direction: column;
   gap: 2px;

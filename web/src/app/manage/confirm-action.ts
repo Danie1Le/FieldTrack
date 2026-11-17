@@ -20,7 +20,7 @@ import { Component, input, output, signal } from '@angular/core';
     }
   `,
   styles: `
-    .ask { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; white-space: normal; text-align: left; }
+    .ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 18rem; margin: 6px 0 0 auto; white-space: normal; text-align: left; }
     .yes { color: var(--alert); border-color: var(--alert); }
   `,
 })
