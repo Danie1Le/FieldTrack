@@ -49,7 +49,7 @@ public sealed class RefreshTokenStorageTests(FieldTrackFixture fixture) : Integr
 
     private static async Task<FieldTrackUser> AddUserAsync(FieldTrackDbContext db)
     {
-        var user = new FieldTrackUser { Id = Guid.NewGuid(), UserName = "storage@example.com" };
+        var user = new FieldTrackUser { Id = Guid.NewGuid(), UserName = "storage@example.com", DisplayName = "Storage" };
         db.Users.Add(user);
         await db.SaveChangesAsync(CancellationToken);
         return user;

@@ -88,6 +88,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
         builder.Entity<FieldTrackUser>(user =>
         {
             user.ToTable("users");
+            user.Property(u => u.DisplayName).HasMaxLength(FieldTrackUser.MaxDisplayNameLength);
             user.HasIndex(u => u.NormalizedEmail).HasDatabaseName("ix_users_normalized_email");
             user.HasIndex(u => u.NormalizedUserName).HasDatabaseName("ix_users_normalized_user_name");
         });

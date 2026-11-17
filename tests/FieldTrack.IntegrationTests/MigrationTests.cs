@@ -1,5 +1,9 @@
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Telemetry;
+using FieldTrack.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 
 namespace FieldTrack.IntegrationTests;
@@ -192,12 +196,42 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     public async Task Database_keeps_an_Alert_Resolved_by_hand_with_its_user_note_and_latch_and_refuses_a_note_longer_than_MaxNoteLength()
     {
         await InsertRuleAsync();
-        (string, string)[] byHand = [("resolve_reason", "'Manual'"), ("resolved_by", AnyUser), ("latched", "true")];
+        // Acknowledged first: Resolving keeps who Acknowledged it (story 47).
+        (string, string)[] byHand = [
+            ("resolve_reason", "'Manual'"), ("resolved_by", AnyUser), ("latched", "true"), ("acknowledged_by", AnyUser), ("acknowledged_at", "now()")];
         await ExecuteAsync(Resolved([.. byHand, ("note", $"repeat('n', {Alert.MaxNoteLength})")]));
 
         var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(Resolved([.. byHand, ("note", $"repeat('n', {Alert.MaxNoteLength + 1})")])));
 
         failure.SqlState.ShouldBe(PostgresErrorCodes.StringDataRightTruncation);
+    }
+
+    [Fact]
+    public async Task AlertActions_gives_users_created_before_it_their_emails_local_part_as_display_name()
+    {
+        var database = $"backfill_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE DATABASE {database}");
+        try
+        {
+            var connectionString = new NpgsqlConnectionStringBuilder(Fixture.DatabaseConnectionString) { Database = database }.ConnectionString;
+            await using var db = new FieldTrackDbContext(new DbContextOptionsBuilder<FieldTrackDbContext>()
+                .UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite()).UseSnakeCaseNamingConvention().Options);
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync("AlertRulesAndAlerts", CancellationToken);
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO users (id, user_name, email, email_confirmed, phone_number_confirmed, two_factor_enabled, lockout_enabled, access_failed_count, must_change_password)
+                VALUES (gen_random_uuid(), 'jo.smith@example.com', 'jo.smith@example.com', false, false, false, true, 0, false)
+                """, CancellationToken);
+
+            await migrator.MigrateAsync(cancellationToken: CancellationToken);
+
+            (await db.Database.SqlQueryRaw<string>("SELECT display_name AS \"Value\" FROM users").SingleAsync(CancellationToken)).ShouldBe("jo.smith");
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools();
+            await ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)");
+        }
     }
 
     [Fact]

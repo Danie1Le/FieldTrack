@@ -13,7 +13,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FieldTrack.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(FieldTrackDbContext))]
-    [Migration("20261117094143_AlertActions")]
+    [Migration("20261117100021_AlertActions")]
     partial class AlertActions
     {
         /// <inheritdoc />
@@ -433,6 +433,12 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("text")
                         .HasColumnName("concurrency_stamp");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("display_name");
 
                     b.Property<string>("Email")
                         .HasMaxLength(256)
