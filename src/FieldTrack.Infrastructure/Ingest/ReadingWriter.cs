@@ -147,21 +147,31 @@ public sealed class ReadingWriter : IAsyncDisposable
             JOIN staged s USING (device_id, boot, seq)
             JOIN assets a ON a.id = r.asset_id
             WHERE NOT a.archived
+        ), duplicates AS (
+            -- Every copy of a known Device's Reading that was not stored, and whether its content hash matches the
+            -- stored copy's (ADR 0003): an earlier batch's key (this statement's snapshot predates new_keys), or else
+            -- this batch's first copy. The Device lock above means no other batch can store the key meanwhile.
+            SELECT sha256(s.payload) = coalesce(k.content_hash, sha256(f.payload)) AS identical
+            FROM ingest_stage s
+            JOIN staged f ON f.serial_number = s.serial_number AND f.boot = s.boot AND f.seq = s.seq
+            LEFT JOIN reading_keys k ON k.device_id = f.device_id AND k.boot = f.boot AND k.seq = f.seq
+            WHERE s.ordinal <> f.ordinal OR k.device_id IS NOT NULL
         )
-        -- Both kinds of row from one statement (FULL JOIN ON false is a typed UNION): each stored Rejected message's
-        -- reason with null Reading columns, then each Reading to evaluate, in receive order, with a null reason.
-        SELECT j.reason, e.*
-        FROM rejected j FULL JOIN evaluated e ON false
+        -- Every kind of row from one statement (FULL JOIN ON false is a typed UNION): each stored Rejected message's
+        -- reason, then each duplicate's hash match, each with nulls in the other columns, then each Reading to
+        -- evaluate, in receive order.
+        SELECT j.reason, u.identical, e.*
+        FROM rejected j FULL JOIN duplicates u ON false FULL JOIN evaluated e ON false
         ORDER BY e.ordinal NULLS FIRST
         """;
 
-    // One row of _store's final SELECT; edit the two together. Column 1 is the ordinal, used only for order.
+    // One row of _store's final SELECT; edit the two together. Column 2 is the ordinal, used only for order.
     private static AssetReading ReadEvaluated(NpgsqlDataReader reader)
     {
         var reading = new Reading(
-            reader.GetInt32(5), reader.GetInt64(6), reader.GetFieldValue<DateTimeOffset>(7), reader.GetDouble(8), reader.GetDouble(9),
-            Sensor(10), Sensor(11), Sensor(12), Sensor(13), Sensor(14));
-        return new AssetReading(reader.GetGuid(3), reader.IsDBNull(4) ? null : reader.GetGuid(4), new StoredReading(reader.GetGuid(2), reading));
+            reader.GetInt32(6), reader.GetInt64(7), reader.GetFieldValue<DateTimeOffset>(8), reader.GetDouble(9), reader.GetDouble(10),
+            Sensor(11), Sensor(12), Sensor(13), Sensor(14), Sensor(15));
+        return new AssetReading(reader.GetGuid(4), reader.IsDBNull(5) ? null : reader.GetGuid(5), new StoredReading(reader.GetGuid(3), reading));
 
         float? Sensor(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFloat(ordinal);
     }
@@ -196,9 +206,9 @@ public sealed class ReadingWriter : IAsyncDisposable
     /// stamps each Reading with its Asset; Readings already stored are skipped, Readings from unknown or Archived
     /// Devices become Rejected messages, and redelivered Rejected messages already stored are skipped. The Alert Rules
     /// are evaluated against the newly stored Readings, and their Alerts and rule state commit with them. Returns once
-    /// committed, with the reason of every Rejected message stored.
+    /// committed, with what the batch stored besides its Readings and how many copies it dropped as duplicates.
     /// </summary>
-    public async Task<IReadOnlyList<RejectReason>> WriteAsync(
+    public async Task<WrittenBatch> WriteAsync(
         IReadOnlyList<ReceivedReading> readings, IReadOnlyList<ReceivedRejectedMessage> rejected, CancellationToken cancellationToken)
     {
         await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
@@ -253,6 +263,7 @@ public sealed class ReadingWriter : IAsyncDisposable
 
         // Store, then the enabled rules in the same round trip (ADR 0005).
         var reasons = new List<RejectReason>();
+        var (identical, conflicting) = (0, 0);
         var stored = new List<AssetReading>();
         List<AlertRule> rules;
         await using (var store = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(_store), new(AlertRuleRunner.LoadRules) } })
@@ -260,13 +271,21 @@ public sealed class ReadingWriter : IAsyncDisposable
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                if (reader.IsDBNull(0))
+                if (!reader.IsDBNull(0))
+                {
+                    reasons.Add(Enum.Parse<RejectReason>(reader.GetString(0)));
+                }
+                else if (reader.IsDBNull(1))
                 {
                     stored.Add(ReadEvaluated(reader));
                 }
+                else if (reader.GetBoolean(1))
+                {
+                    identical++;
+                }
                 else
                 {
-                    reasons.Add(Enum.Parse<RejectReason>(reader.GetString(0)));
+                    conflicting++;
                 }
             }
 
@@ -277,7 +296,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         var ruleStates = await _rules.EvaluateAsync(transaction, rules, stored, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         _rules.Keep(ruleStates);
-        return reasons;
+        return new WrittenBatch(reasons, identical, conflicting);
     }
 
     /// <inheritdoc />

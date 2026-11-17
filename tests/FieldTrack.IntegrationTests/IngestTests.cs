@@ -64,13 +64,16 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
     }
 
     [Fact]
-    public async Task A_republished_Reading_is_stored_once_and_the_first_copy_wins()
+    public async Task A_republished_Reading_is_stored_once_the_first_copy_wins_and_each_copy_is_counted_as_identical_or_conflicting()
     {
         await using var api = await StartIngestAsync();
         using var admin = await AdminClientAsync(api);
         var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        using var identical = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.IdenticalDuplicatesInstrument);
+        using var conflicting = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.ConflictingDuplicatesInstrument);
         var t = DateTimeOffset.UtcNow;
         var original = TelemetryPublisher.Payload(1, 0, t, more: ""","fuelPct":50""");
+        var second = TelemetryPublisher.Payload(1, 1, t.AddSeconds(1), more: ""","fuelPct":49""");
         await using var device = await TelemetryPublisher.ConnectAsync(Fixture);
 
         await device.PublishAsync("TRK-007", original);
@@ -78,8 +81,9 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         // The same message again, then a conflicting copy of the same Reading, in later batches...
         await device.PublishAsync("TRK-007", original);
         await device.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, t.AddSeconds(5), more: ""","fuelPct":10"""));
-        // ...and both copies of one Reading inside one batch.
-        await device.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 1, t.AddSeconds(1), more: ""","fuelPct":49"""));
+        // ...and copies of one Reading inside one batch: identical, then conflicting.
+        await device.PublishAsync("TRK-007", second);
+        await device.PublishAsync("TRK-007", second);
         await device.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 1, t.AddSeconds(1), more: ""","fuelPct":9"""));
         // A different Boot restarts the Sequence number, so this is a new Reading (ADR 0001).
         await device.PublishAsync("TRK-007", TelemetryPublisher.Payload(2, 0, t.AddSeconds(2), more: ""","fuelPct":48"""));
@@ -87,6 +91,9 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
 
         history.Select(reading => (reading.GetProperty("boot").GetInt32(), reading.GetProperty("sequenceNumber").GetInt64(), reading.GetProperty("fuelPct").GetSingle()))
             .ShouldBe([(1, 0L, 50f), (1, 1L, 49f), (2, 0L, 48f)]);
+        // Counted after commit, so the last batch's copies may land just after its Readings show up in history.
+        (await EventuallyAsync(() => Task.FromResult(identical.Total), total => total >= 2)).ShouldBe(2L);
+        (await EventuallyAsync(() => Task.FromResult(conflicting.Total), total => total >= 2)).ShouldBe(2L);
     }
 
     [Fact]

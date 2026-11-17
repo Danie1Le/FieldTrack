@@ -47,6 +47,15 @@ public sealed partial class IngestWorker(
     /// <summary>The counter of Rejected messages stored, tagged with their <c>reason</c>.</summary>
     public const string RejectedMessagesInstrument = "fieldtrack.ingest.rejected_messages";
 
+    /// <summary>The counter of Readings dropped as identical duplicates: the same key and content hash as the stored copy (ADR 0003).</summary>
+    public const string IdenticalDuplicatesInstrument = "fieldtrack.ingest.identical_duplicates";
+
+    /// <summary>
+    /// The counter of Readings dropped as conflicting duplicates: the same key as the stored copy but a different content
+    /// hash, which a correct Device never sends, so it points at a Device bug (spec #21).
+    /// </summary>
+    public const string ConflictingDuplicatesInstrument = "fieldtrack.ingest.conflicting_duplicates";
+
     /// <summary>How long the broker keeps the session, and its queued messages, while the worker is away.</summary>
     public const uint SessionExpirySeconds = 3_600;
 
@@ -62,8 +71,15 @@ public sealed partial class IngestWorker(
     // matching both would be delivered, and so rejected, twice.
     private static readonly string[] _retiredTopicFilters = ["fieldtrack/v1/devices/+/telemetry"];
 
+    // IMeterFactory hands out one Meter per name, so each counter below shares it.
     private readonly Counter<long> _rejectedMessages = meters.Create(MeterName).CreateCounter<long>(
         RejectedMessagesInstrument, "{message}", "Telemetry messages stored as Rejected messages, by reason.");
+
+    private readonly Counter<long> _identicalDuplicates = meters.Create(MeterName).CreateCounter<long>(
+        IdenticalDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with the same content hash.");
+
+    private readonly Counter<long> _conflictingDuplicates = meters.Create(MeterName).CreateCounter<long>(
+        ConflictingDuplicatesInstrument, "{reading}", "Copies of stored Readings dropped with a different content hash.");
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -152,10 +168,14 @@ public sealed partial class IngestWorker(
             {
                 var batch = await NextBatchAsync(received.Reader, stoppingToken);
                 var (readings, rejected) = Parse(batch);
-                foreach (var reason in await writer.WriteAsync(readings, rejected, stoppingToken))
+                var written = await writer.WriteAsync(readings, rejected, stoppingToken);
+                foreach (var reason in written.Rejected)
                 {
                     _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
                 }
+
+                _identicalDuplicates.Add(written.IdenticalDuplicates);
+                _conflictingDuplicates.Add(written.ConflictingDuplicates);
 
                 // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
                 // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.
