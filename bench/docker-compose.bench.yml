@@ -1,6 +1,15 @@
 # Layer over docker-compose.yml for benchmarks (#44):
 #   docker compose -f docker-compose.yml -f bench/docker-compose.bench.yml up --build -d
-# Postgres records each transaction's commit time so `bench` can read when a batch committed (ingest latency).
 services:
   postgres:
-    command: ["postgres", "-c", "track_commit_timestamp=on"]
+    command:
+      - postgres
+      # `bench` reads each batch's commit time from Postgres (ingest latency).
+      - -c
+      - track_commit_timestamp=on
+      # Sized for 2,000 Readings/s: the defaults (128 MB buffers, 1 GB max_wal_size) kept ingest p95 at 3.4 s because
+      # backends wrote dirty pages themselves and WAL-triggered checkpoints stalled commits. Every result records these settings.
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - max_wal_size=4GB

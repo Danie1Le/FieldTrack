@@ -34,7 +34,7 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
     /// <summary>How many Rejected messages are stored.</summary>
     public async Task<long> CountRejectedAsync(CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand("SELECT count(*) FROM rejected_messages");
+        await using var command = Command("SELECT count(*) FROM rejected_messages");
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -51,7 +51,7 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
             throw new SimulatorException("Postgres has track_commit_timestamp off, so commit times are unknown. Start the stack with bench/docker-compose.bench.yml.");
         }
 
-        await using var command = dataSource.CreateCommand("""
+        await using var command = Command("""
             SELECT count(*), percentile_cont(ARRAY[0.5, 0.95, 0.99]) WITHIN GROUP (ORDER BY lag), max(lag)
             FROM (SELECT extract(epoch FROM pg_xact_commit_timestamp(xmin) - device_time) * 1000 AS lag
                   FROM readings WHERE device_time >= @from AND device_time < @to) t
@@ -80,7 +80,7 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
         for (var i = 0; i < 20; i++)
         {
             var before = DateTimeOffset.UtcNow;
-            await using var command = dataSource.CreateCommand("SELECT clock_timestamp()");
+            await using var command = Command("SELECT clock_timestamp()");
             var database = (DateTime)(await command.ExecuteScalarAsync(cancellationToken))!;
             var after = DateTimeOffset.UtcNow;
             if (after - before < best.RoundTrip)
@@ -96,7 +96,7 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
     public async Task<ManifestScore> ScoreAsync(RunManifest manifest, CancellationToken cancellationToken)
     {
         var ranges = manifest.Devices.SelectMany(device => device.Ranges.Select(range => (device.Serial, range))).ToList();
-        await using var command = dataSource.CreateCommand("""
+        await using var command = Command("""
             SELECT coalesce(sum(x.last_seq - x.first_seq + 1), 0)::bigint AS published,
                    coalesce(sum(x.last_seq - x.first_seq + 1 - coalesce(found.n, 0)), 0)::bigint AS missing
             FROM unnest(@serials, @boots, @firsts, @lasts) AS x(serial, boot, first_seq, last_seq)
@@ -127,7 +127,7 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
     /// <summary>The named Postgres settings, as the server reports them.</summary>
     public async Task<IReadOnlyDictionary<string, string>> SettingsAsync(IEnumerable<string> names, CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand("SELECT name, setting FROM pg_settings WHERE name = ANY(@names)");
+        await using var command = Command("SELECT name, setting FROM pg_settings WHERE name = ANY(@names)");
         command.Parameters.AddWithValue("names", names.ToArray());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var settings = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -139,12 +139,20 @@ internal sealed class BenchDatabase(NpgsqlDataSource dataSource)
         return settings;
     }
 
+    // A scan over a long run's Readings, on a database busy ingesting, outlasts Npgsql's 30 s default.
+    private NpgsqlCommand Command(string sql)
+    {
+        var command = dataSource.CreateCommand(sql);
+        command.CommandTimeout = 600;
+        return command;
+    }
+
     private async Task<string?> SettingAsync(string name, CancellationToken cancellationToken) =>
         (await SettingsAsync([name], cancellationToken)).GetValueOrDefault(name);
 
     private async Task<T> ScalarAsync<T>(string sql, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand(sql);
+        await using var command = Command(sql);
         command.Parameters.AddWithValue("from", from);
         command.Parameters.AddWithValue("to", to);
         return (T)(await command.ExecuteScalarAsync(cancellationToken))!;
