@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
 using FieldTrack.Domain.Assets;
+using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -31,6 +32,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
 
     /// <summary>Every period a Device was fitted to an Asset, open and ended.</summary>
     public DbSet<Attachment> Attachments => Set<Attachment>();
+
+    /// <summary>Telemetry messages ingest refused, with their reasons. Ingest writes them with hand-written SQL (ADR 0004).</summary>
+    public DbSet<RejectedMessage> RejectedMessages => Set<RejectedMessage>();
 
     /// <summary>
     /// Ends the open Attachments matching <paramref name="which"/> at <paramref name="at"/>, returning how many
@@ -130,6 +134,14 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
             // ingest's lookup of the Attachment covering a Reading's Device time.
             attachment.HasIndex(a => new { a.DeviceId, a.AttachedAt });
             attachment.HasIndex(a => new { a.AssetId, a.AttachedAt });
+        });
+
+        builder.Entity<RejectedMessage>(rejected =>
+        {
+            // By name, like Asset Type, and checked so ingest's hand-written SQL keeps to the same names.
+            rejected.Property(r => r.Reason).HasConversion<string>();
+            rejected.ToTable(table => table.HasCheckConstraint(
+                "ck_rejected_messages_reason", $"reason IN ({string.Join(", ", Enum.GetNames<RejectReason>().Select(name => $"'{name}'"))})"));
         });
     }
 }

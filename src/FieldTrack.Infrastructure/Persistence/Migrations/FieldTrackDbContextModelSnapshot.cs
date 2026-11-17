@@ -159,6 +159,43 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("FieldTrack.Domain.Telemetry.RejectedMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<byte[]>("Payload")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTimeOffset>("ReceivedTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_time");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("topic");
+
+                    b.HasKey("Id")
+                        .HasName("pk_rejected_messages");
+
+                    b.ToTable("rejected_messages", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_rejected_messages_reason", "reason IN ('BadJson', 'MissingField', 'PositionOutOfRange', 'TooFarAhead', 'TooLate', 'UnknownTopicVersion', 'UnknownSerialNumber', 'ArchivedDevice')");
+                        });
+                });
+
             modelBuilder.Entity("FieldTrack.Infrastructure.Identity.FieldTrackUser", b =>
                 {
                     b.Property<Guid>("Id")

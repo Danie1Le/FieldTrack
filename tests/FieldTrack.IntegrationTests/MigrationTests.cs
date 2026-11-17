@@ -46,6 +46,22 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
         failure.ConstraintName.ShouldBe("ck_attachments_period");
     }
 
+    [Fact]
+    public async Task Database_keeps_a_Rejected_message_by_reason_name_and_refuses_an_unknown_reason()
+    {
+        await ExecuteAsync("""
+            INSERT INTO rejected_messages (topic, payload, reason, received_time)
+            VALUES ('fieldtrack/v2/devices/TRK-007/telemetry', '\x7b7d', 'UnknownTopicVersion', now())
+            """);
+
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync("""
+            INSERT INTO rejected_messages (topic, payload, reason, received_time)
+            VALUES ('fieldtrack/v1/devices/TRK-007/telemetry', '\x7b7d', 'Unreadable', now())
+            """));
+
+        failure.ConstraintName.ShouldBe("ck_rejected_messages_reason");
+    }
+
     private async Task ExecuteAsync(string sql)
     {
         await using var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
