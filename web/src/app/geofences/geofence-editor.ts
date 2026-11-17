@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, afterRenderEffect, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, afterRenderEffect, inject, input, output } from '@angular/core';
 import * as L from 'leaflet';
 import { GeoJsonPolygon, Geofence } from '../control-room/live';
 import { geofenceLayer } from './geofence-layer';
@@ -8,7 +8,8 @@ const polygonOf = (layer: L.Polygon) => layer.toGeoJSON().geometry as GeoJsonPol
 
 /**
  * The Geofences page's map: every Geofence, and the Leaflet-Geoman toolbar to draw a new one. The Geofence being edited
- * is drawn with its vertices draggable in place of its saved shape.
+ * is drawn with its vertices draggable in place of its saved shape. Geoman must be loaded before this is created (the
+ * `/geofences` route does it): it equips only maps and layers created after it loads.
  */
 @Component({
   selector: 'app-geofence-editor',
@@ -30,8 +31,6 @@ export class GeofenceEditor {
   private readonly host: HTMLElement = inject(ElementRef).nativeElement;
   private readonly map = L.map(this.host, { zoomControl: false }).setView([52.2, -1.1], 6);
   private readonly areas = L.layerGroup().addTo(this.map);
-  /** Leaflet-Geoman only equips layers created after it loads. */
-  private readonly geomanLoaded = signal(false);
   private fitted = false;
 
   constructor() {
@@ -47,36 +46,28 @@ export class GeofenceEditor {
       this.map.remove();
     });
 
-    // Loaded here, after Leaflet: Geoman patches the global `L` that Leaflet sets, and only this page needs it.
-    void import('@geoman-io/leaflet-geoman-free').then(() => {
-      // The API refuses crossing edges too; Geoman stops them while drawing.
-      this.map.pm.setGlobalOptions({ allowSelfIntersection: false });
-      this.map.pm.addControls({
-        position: 'topleft',
-        drawMarker: false,
-        drawCircleMarker: false,
-        drawPolyline: false,
-        drawCircle: false,
-        drawText: false,
-        editMode: false,
-        dragMode: false,
-        cutPolygon: false,
-        removalMode: false,
-        rotateMode: false,
-      });
-      this.map.on('pm:create', ({ layer }) => {
-        // The page decides what is drawn: the new area comes back as the draft.
-        layer.remove();
-        this.drawn.emit(polygonOf(layer as L.Polygon));
-      });
-      this.geomanLoaded.set(true);
+    // The API refuses crossing edges too; Geoman stops them while drawing.
+    this.map.pm.setGlobalOptions({ allowSelfIntersection: false });
+    this.map.pm.addControls({
+      position: 'topleft',
+      drawMarker: false,
+      drawCircleMarker: false,
+      drawPolyline: false,
+      drawCircle: false,
+      drawText: false,
+      editMode: false,
+      dragMode: false,
+      cutPolygon: false,
+      removalMode: false,
+      rotateMode: false,
+    });
+    this.map.on('pm:create', ({ layer }) => {
+      // The page decides what is drawn: the new area comes back as the draft.
+      layer.remove();
+      this.drawn.emit(polygonOf(layer as L.Polygon));
     });
 
-    afterRenderEffect(() => {
-      if (this.geomanLoaded()) {
-        this.draw(this.geofences(), this.draft());
-      }
-    });
+    afterRenderEffect(() => this.draw(this.geofences(), this.draft()));
   }
 
   private draw(geofences: Geofence[], draft: { id: string | null; area: GeoJsonPolygon } | null): void {
