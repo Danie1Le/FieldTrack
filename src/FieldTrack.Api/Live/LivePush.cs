@@ -1,4 +1,5 @@
 using FieldTrack.Api.Alerts;
+using FieldTrack.Api.Ingest;
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.SignalR;
@@ -13,7 +14,7 @@ namespace FieldTrack.Api.Live;
 /// failed push is logged and only delays the dashboard until it reloads (ADR 0005), so callers whose change already
 /// committed never fail because of it.
 /// </summary>
-public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFactory scopes, TimeProvider time, ILogger<LivePush> logger)
+public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFactory scopes, TimeProvider time, IngestMetrics metrics, ILogger<LivePush> logger)
 {
     /// <summary>
     /// Sends the Alerts <paramref name="raisedAlertIds"/> as <see cref="LiveHub.AlertRaised"/> and
@@ -46,8 +47,12 @@ public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFact
             // Alerts first, so the Asset read adds nothing to their latency.
             foreach (var alert in alerts)
             {
-                var name = raisedAlertIds.Contains(alert.Id) && alert.Status != AlertStatus.Resolved ? LiveHub.AlertRaised : LiveHub.AlertUpdated;
-                await hub.Clients.All.SendAsync(name, alert, cancellationToken);
+                var raised = raisedAlertIds.Contains(alert.Id) && alert.Status != AlertStatus.Resolved;
+                await hub.Clients.All.SendAsync(raised ? LiveHub.AlertRaised : LiveHub.AlertUpdated, alert, cancellationToken);
+                if (raised)
+                {
+                    metrics.RecordAlertPush(time.GetUtcNow() - alert.CreatedAt);
+                }
             }
 
             var assets = await LiveAssets.ListAsync(db, [.. assetIds.Union(alerts.Select(alert => alert.AssetId))], time.GetUtcNow(), cancellationToken);
@@ -66,6 +71,10 @@ public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFact
     /// <summary>Sends an Alert a user Acknowledged or Resolved, and its Asset; call it once that change commits.</summary>
     public Task AlertUpdatedAsync(Guid alertId, CancellationToken cancellationToken) =>
         PushAsync([], [], [alertId], cancellationToken);
+
+    /// <summary>Sends Alerts the platform resolved outside ingest, and their Assets; call it once that change commits.</summary>
+    public Task AlertsUpdatedAsync(IReadOnlyCollection<Guid> alertIds, CancellationToken cancellationToken) =>
+        PushAsync([], [], alertIds, cancellationToken);
 
     [LoggerMessage(LogLevel.Warning, "Live push failed; dashboards catch up when they reload.")]
     private partial void LogPushFailed(Exception exception);

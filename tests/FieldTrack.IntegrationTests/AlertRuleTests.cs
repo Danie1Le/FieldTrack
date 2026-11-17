@@ -55,20 +55,45 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Fact]
-    public async Task Editing_a_Threshold_rule_into_an_Offline_rule_drops_its_Threshold_settings()
+    public async Task Editing_a_Threshold_rule_into_an_Offline_rule_drops_its_Threshold_settings_and_starts_it_afresh()
     {
         using var admin = await AdminClientAsync();
         var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
         var rule = await CreateAsync(admin, "/alert-rules", Overheat(assetId: asset));
+        var alert = await InsertAlertAsync(rule, asset);
+        await BreachedStateAsync(rule, asset);
 
         using var edited = await admin.PutAsJsonAsync($"/alert-rules/{rule}", Silent(asset), CancellationToken);
         var offline = await edited.Content.ReadFromJsonAsync<JsonElement>(CancellationToken);
+        var resolved = await admin.GetFromJsonAsync<JsonElement>($"/alerts/{alert}", CancellationToken);
+        var statesAfterKindChange = await RuleStatesAsync();
+        // Only the seconds change: that is a condition edit too, so a breached Offline rule (which would skip every sweep
+        // until a Reading) cannot outlive it.
+        await BreachedStateAsync(rule, asset);
+        using var reseconded = await admin.PutAsJsonAsync($"/alert-rules/{rule}", Silent(asset, offlineSeconds: 120), CancellationToken);
 
         edited.StatusCode.ShouldBe(HttpStatusCode.OK);
         offline.GetProperty("kind").GetString().ShouldBe("Offline");
         offline.GetProperty("offlineSeconds").GetInt32().ShouldBe(60);
         offline.GetProperty("sensor").ValueKind.ShouldBe(JsonValueKind.Null);
         offline.GetProperty("threshold").ValueKind.ShouldBe(JsonValueKind.Null);
+        resolved.GetProperty("resolveReason").GetString().ShouldBe("RuleChanged");
+        statesAfterKindChange.ShouldBe(0L);
+        reseconded.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await RuleStatesAsync()).ShouldBe(0L);
+    }
+
+    private async Task BreachedStateAsync(string rule, string asset)
+    {
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, "INSERT INTO alert_rule_states (alert_rule_id, asset_id, breached) VALUES (@p0, @p1, true)",
+            Guid.Parse(rule), Guid.Parse(asset));
+    }
+
+    private async Task<long> RuleStatesAsync()
+    {
+        await using var database = await OpenDatabaseAsync();
+        return (long)(await SqlAsync(database, "SELECT count(*) FROM alert_rule_states"))!;
     }
 
     [Fact]

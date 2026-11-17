@@ -21,8 +21,9 @@ public sealed class FieldTrackFixture : IAsyncLifetime
     private const ushort MqttPort = 1883;
     private const string Schema = "public";
 
-    // PostGIS keeps its coordinate system catalogue in spatial_ref_sys; it is not test data.
-    private static readonly string[] IgnoredTables = ["__EFMigrationsHistory", "spatial_ref_sys"];
+    // PostGIS keeps its coordinate system catalogue in spatial_ref_sys; it is not test data. The migration creates the
+    // one alert_rule_version row (ADR 0005), and ingest needs it.
+    private static readonly string[] IgnoredTables = ["__EFMigrationsHistory", "spatial_ref_sys", "alert_rule_version"];
 
     /// <summary>What a reset deletes: every table in the public schema except the ignored ones.</summary>
     internal static readonly RespawnerOptions RespawnerOptions = new()
@@ -36,13 +37,16 @@ public sealed class FieldTrackFixture : IAsyncLifetime
         // Same split as docker-compose: the image's init scripts load extensions into the
         // maintenance database, and the API creates and migrates the fieldtrack database itself.
         .WithDatabase("postgres")
+        // The bench reads each batch's commit time (bench/docker-compose.bench.yml sets the same).
+        .WithCommand("-c", "track_commit_timestamp=on")
         .Build();
 
     private readonly IContainer _broker = new ContainerBuilder(TestImages.Mosquitto)
         .WithPortBinding(MqttPort, assignRandomHostPort: true)
+        // The shared config plus the one setting the bench needs (bench/docker-compose.bench.yml appends the same): $SYS counters every second.
         .WithResourceMapping(
-            new FileInfo(Path.Combine(AppContext.BaseDirectory, "mosquitto.conf")),
-            new FileInfo("/mosquitto/config/mosquitto.conf"))
+            System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "mosquitto.conf")) + "\nsys_interval 1\n"),
+            "/mosquitto/config/mosquitto.conf")
         .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged(
             "mosquitto version .+ running", wait => wait.WithTimeout(TimeSpan.FromMinutes(1))))
         .Build();

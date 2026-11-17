@@ -26,6 +26,24 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
     public ReconnectingPublisher(string host, int port, string name, TextWriter log) => (_host, _port, _name, _log) = (host, port, name, log);
 
     /// <summary>
+    /// Opens the connection ahead of the first Reading, so a run does not count the time a whole fleet takes to connect against its
+    /// schedule. One attempt, and a failure is not reported: <see cref="PublishAsync"/> retries and logs.
+    /// </summary>
+    public async Task ConnectAsync(CancellationToken cancellationToken)
+    {
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        attempt.CancelAfter(_timeout);
+        try
+        {
+            await ConnectedAsync(attempt.Token);
+        }
+        catch (Exception)
+        {
+            // The first Reading connects again and retries until it is acknowledged.
+        }
+    }
+
+    /// <summary>
     /// Publishes <paramref name="payload"/> to <paramref name="topic"/> and returns once the broker acknowledged it, however many
     /// connections that takes. The retries stop only when <paramref name="cancellationToken"/> is cancelled.
     /// </summary>
