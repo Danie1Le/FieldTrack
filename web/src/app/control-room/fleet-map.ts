@@ -1,7 +1,9 @@
 import { Component, DestroyRef, ElementRef, afterRenderEffect, inject, input, output, untracked } from '@angular/core';
 import * as L from 'leaflet';
+import { baseMap } from '../base-map';
+import { geofenceLayer } from '../geofences/geofence-layer';
 import { kindLetter, onMap, statusLabels } from './asset-status';
-import { LiveAsset } from './live';
+import { Geofence, LiveAsset } from './live';
 
 /**
  * A marker's face: colour plus shape so Asset Status reads without colour vision (green circle Normal, red diamond
@@ -17,7 +19,10 @@ export function markerElement(asset: LiveAsset, selected: boolean): HTMLElement 
   return marker;
 }
 
-/** The live map: one marker per Asset with a position; selecting an Asset highlights and centres its marker. */
+/**
+ * The live map: one marker per Asset with a position, over the Geofences (read-only; Admins edit them on their own
+ * page). Selecting an Asset highlights and centres its marker.
+ */
 @Component({
   selector: 'app-fleet-map',
   template: '',
@@ -25,6 +30,7 @@ export function markerElement(asset: LiveAsset, selected: boolean): HTMLElement 
 })
 export class FleetMap {
   readonly assets = input.required<LiveAsset[]>();
+  readonly geofences = input<Geofence[]>([]);
   readonly selected = input<string | null>(null);
   /** Centres on this Asset; a new object each time, so selecting the same Asset again centres it again. */
   readonly focus = input<{ id: string } | null>(null);
@@ -32,27 +38,17 @@ export class FleetMap {
 
   private readonly host: HTMLElement = inject(ElementRef).nativeElement;
   private readonly markers = new Map<string, L.Marker>();
-  private readonly map = L.map(this.host, { zoomControl: false }).setView([52.2, -1.1], 6);
+  // On narrow screens the map sits behind a tab: baseMap re-measures whenever it is shown or resized.
+  private readonly map = baseMap(this.host, () => this.fitOnce());
+  private readonly areas = L.layerGroup().addTo(this.map);
   private fitted = false;
 
   constructor() {
-    L.control.zoom({ position: 'bottomleft' }).addTo(this.map);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(this.map);
-    // On narrow screens the map sits behind a tab: re-measure whenever it is shown or resized.
-    const resized = new ResizeObserver(() => {
-      this.map.invalidateSize();
-      this.fitOnce();
-    });
-    resized.observe(this.host);
-    inject(DestroyRef).onDestroy(() => {
-      resized.disconnect();
-      this.map.remove();
-    });
-
     afterRenderEffect(() => this.draw(this.assets(), this.selected()));
+    afterRenderEffect(() => {
+      this.areas.clearLayers();
+      this.geofences().forEach((geofence) => this.areas.addLayer(geofenceLayer(geofence)));
+    });
     afterRenderEffect(() => {
       const id = this.focus()?.id;
       const marker = id && untracked(() => this.markers.get(id));

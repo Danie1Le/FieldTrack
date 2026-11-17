@@ -57,6 +57,7 @@ const overheat: AlertRule = {
   operator: 'GreaterThan',
   threshold: 105,
   hysteresis: 5,
+  geofenceId: null,
 };
 const alert = {
   id: 'alert-1',

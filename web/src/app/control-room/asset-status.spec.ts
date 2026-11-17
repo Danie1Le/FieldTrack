@@ -79,6 +79,7 @@ describe('breachedSensors', () => {
     operator: 'GreaterThan',
     threshold: 105,
     hysteresis: 5,
+    geofenceId: null,
     ...changes,
   });
 

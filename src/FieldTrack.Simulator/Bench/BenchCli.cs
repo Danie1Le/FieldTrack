@@ -18,13 +18,15 @@ internal static class BenchCli
     /// <exception cref="SimulatorException">The benchmark is unknown, an option is unusable, or the stack is not ready.</exception>
     public static async Task<bool> RunAsync(string kind, Options options, CancellationToken cancellationToken)
     {
-        if (kind is not ("throughput" or "flood" or "crash" or "duplicates" or "seed-history" or "geofence" or "history"))
+        if (kind is not ("throughput" or "flood" or "crash" or "duplicates" or "seed-history" or "geofence" or "history" or "alert-latency" or "offline" or "hysteresis"))
         {
-            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates, seed-history, geofence or history.");
+            throw new SimulatorException(
+                $"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates, seed-history, geofence, history, alert-latency, offline or hysteresis.");
         }
 
-        var rate = options.GetNumber("rate") ?? (kind == "crash" ? 500 : 2000);
-        var duration = TimeSpan.FromSeconds(options.GetNumber("duration") ?? (kind == "flood" ? 60 : 600));
+        var alertBench = kind is "alert-latency" or "offline" or "hysteresis";
+        var rate = options.GetNumber("rate") ?? (kind == "crash" ? 500 : alertBench ? AlertBenches.DefaultRate : 2000);
+        var duration = TimeSpan.FromSeconds(options.GetNumber("duration") ?? (kind == "flood" ? 60 : alertBench ? AlertBenches.DefaultDurationSeconds : 600));
         var brokerHost = options.Get("mqtt-host") ?? "localhost";
         var brokerPort = (int)(options.GetNumber("mqtt-port") ?? 1883);
         var database = DatabaseConnection(options.Get("db"), Environment.GetEnvironmentVariable("FIELDTRACK_DB_PASSWORD"));
@@ -48,6 +50,11 @@ internal static class BenchCli
         }
 
         var fleet = FleetFile.Load(options.Require("fleet"));
+        if (alertBench)
+        {
+            return Report(await AlertBenches.RunAsync(kind, fleet, target, options, ApiAddress(options), rate, duration, cancellationToken));
+        }
+
         await SeedAsync(fleet, options, cancellationToken);
         Console.WriteLine($"Benchmark {kind}: {fleet.Devices.Count} Devices{(kind == "duplicates" ? string.Empty : $", {duration.TotalSeconds:0} s")}.");
         var outcome = kind switch
