@@ -1,12 +1,11 @@
 using System.Text.Json;
-using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Ingest;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace FieldTrack.IntegrationTests;
 
-public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : IntegrationTest(fixture)
+public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(fixture)
 {
     [Fact]
     public async Task A_breach_published_over_MQTT_raises_an_Alert_and_a_clear_past_the_Hysteresis_resolves_it()
@@ -164,43 +163,13 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : Integration
         (await SqlAsync(database, "SELECT asset_id FROM readings WHERE seq = 1")).ShouldBe(Guid.Parse(asset));
     }
 
-    // A fresh writer per call, as a new ingest session would open.
-    private async Task WriteAsync(IReadOnlyList<ReceivedReading> readings)
-    {
-        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
-        await writer.WriteAsync(readings, [], CancellationToken);
-    }
-
-    internal static ReceivedReading Received(long seq, DateTimeOffset deviceTime, float engineTempC, string serialNumber = "TRK-007") =>
-        new(TelemetryPublisher.TopicOf(serialNumber), serialNumber, new Reading(1, seq, Millis(deviceTime), 51.5, -0.12, null, engineTempC, null, null, null),
-            DateTimeOffset.UtcNow, [(byte)seq], Redelivered: false);
-
     private static string Temp(long seq, DateTimeOffset deviceTime, double engineTempC) =>
         TelemetryPublisher.Payload(1, seq, deviceTime, more: FormattableString.Invariant($",\"engineTempC\":{engineTempC}"));
-
-    private static DateTimeOffset Millis(DateTimeOffset time) => DateTimeOffset.FromUnixTimeMilliseconds(time.ToUnixTimeMilliseconds());
-
-#pragma warning disable IDE1006 // JSON property names
-    internal sealed record RuleRequest(
-        string name, string kind, string? assetId, string? assetGroupId, string severity, bool enabled,
-        string sensor, string @operator, double threshold, double hysteresis);
-#pragma warning restore IDE1006
-
-    internal static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>
-        new("Engine overheat", "Threshold", assetId, assetGroupId, "Critical", true, "EngineTempC", "GreaterThan", 105, 5);
 
     private static async Task<JsonElement[]> AlertsWhenAsync(HttpClient admin, Func<JsonElement[], bool> done)
     {
         var alerts = await EventuallyAsync(() => ListAsync(admin, "/alerts"), done);
         done(alerts).ShouldBeTrue();
         return alerts;
-    }
-
-    internal static async Task<(string Device, string Asset)> AttachedDeviceAsync(HttpClient admin, string serialNumber = "TRK-007", string? assetGroupId = null)
-    {
-        var device = await CreateAsync(admin, "/devices", new { serialNumber });
-        var asset = await CreateAsync(admin, "/assets", new { name = $"Asset of {serialNumber}", type = "Truck", assetGroupId });
-        await CreateAsync(admin, "/attachments", new { deviceId = device, assetId = asset });
-        return (device, asset);
     }
 }

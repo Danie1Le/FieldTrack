@@ -1,17 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using FieldTrack.Api.Auth;
 using FieldTrack.Domain.Alerts;
-using FieldTrack.Infrastructure.Ingest;
-using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
-using static FieldTrack.IntegrationTests.ThresholdAlertTests;
 
 namespace FieldTrack.IntegrationTests;
 
-public sealed class AlertActionTests(FieldTrackFixture fixture) : IntegrationTest(fixture)
+public sealed class AlertActionTests(FieldTrackFixture fixture) : AlertTest(fixture)
 {
     private const string OperatorEmail = "operator@example.com";
+    private const string OperatorName = "Olivia Operator";
     private const string OperatorPassword = "Operator-pass-1";
 
     [Fact]
@@ -26,9 +24,54 @@ public sealed class AlertActionTests(FieldTrackFixture fixture) : IntegrationTes
         acknowledged.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await acknowledged.Content.ReadFromJsonAsync<JsonElement>(CancellationToken);
         body.GetProperty("status").GetString().ShouldBe("Acknowledged");
-        body.GetProperty("acknowledgedBy").GetString().ShouldBe(OperatorEmail);
+        body.GetProperty("acknowledgedBy").GetString().ShouldBe(OperatorName);
         body.GetProperty("acknowledgedAt").GetDateTimeOffset().ShouldBeGreaterThan(DateTimeOffset.UtcNow.AddMinutes(-1));
         again.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Resolving_an_Acknowledged_Alert_keeps_who_Acknowledged_it_and_stores_a_blank_note_as_none()
+    {
+        var (alert, _) = await OpenAlertAsync();
+        using var operatorClient = await OperatorClientAsync();
+        using var admin = await AdminClientAsync();
+        using var acknowledged = await operatorClient.PostAsync($"/alerts/{alert}/acknowledge", content: null, CancellationToken);
+        var acknowledgedAt = (await acknowledged.Content.ReadFromJsonAsync<JsonElement>(CancellationToken)).GetProperty("acknowledgedAt").GetDateTimeOffset();
+
+        using var response = await admin.PostAsJsonAsync($"/alerts/{alert}/resolve", new { note = "  " }, CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var resolved = await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken);
+        resolved.GetProperty("status").GetString().ShouldBe("Resolved");
+        resolved.GetProperty("resolveReason").GetString().ShouldBe("Manual");
+        resolved.GetProperty("acknowledgedBy").GetString().ShouldBe(OperatorName);
+        resolved.GetProperty("acknowledgedAt").GetDateTimeOffset().ShouldBe(acknowledgedAt);
+        resolved.GetProperty("resolvedBy").GetString().ShouldBe(UserSeeder.AdminDisplayName);
+        resolved.GetProperty("note").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task An_Operator_never_sees_a_users_email_in_Alerts()
+    {
+        var (alert, _) = await OpenAlertAsync();
+        using var operatorClient = await OperatorClientAsync();
+        using var admin = await AdminClientAsync();
+        using var acknowledged = await admin.PostAsync($"/alerts/{alert}/acknowledge", content: null, CancellationToken);
+
+        using var resolved = await operatorClient.PostAsync($"/alerts/{alert}/resolve", content: null, CancellationToken);
+        string[] bodies = [
+            await resolved.Content.ReadAsStringAsync(CancellationToken),
+            await operatorClient.GetStringAsync($"/alerts/{alert}", CancellationToken),
+            await operatorClient.GetStringAsync("/alerts?active=false", CancellationToken)];
+
+        resolved.StatusCode.ShouldBe(HttpStatusCode.OK);
+        bodies[1].ShouldContain(UserSeeder.AdminDisplayName);
+        bodies[1].ShouldContain(OperatorName);
+        foreach (var body in bodies)
+        {
+            body.ShouldNotContain(FieldTrackApiFactory.AdminEmail, Case.Insensitive);
+            body.ShouldNotContain(OperatorEmail, Case.Insensitive);
+        }
     }
 
     [Fact]
@@ -42,15 +85,15 @@ public sealed class AlertActionTests(FieldTrackFixture fixture) : IntegrationTes
         using var response = await admin.PostAsJsonAsync($"/alerts/{alert}/resolve", new { note = "Coolant topped up" }, CancellationToken);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var resolved = await response.Content.ReadFromJsonAsync<JsonElement>(CancellationToken);
-        await WriteAsync(Received(1, t.AddSeconds(1), 112));
+        await WriteAsync([Received(1, t.AddSeconds(1), 112)]);
         var stillBreaching = await ListAsync(admin, "/alerts");
-        await WriteAsync(Received(2, t.AddSeconds(2), 90));
-        await WriteAsync(Received(3, t.AddSeconds(3), 111));
+        await WriteAsync([Received(2, t.AddSeconds(2), 90)]);
+        await WriteAsync([Received(3, t.AddSeconds(3), 111)]);
         var alerts = await ListAsync(admin, "/alerts");
 
         resolved.GetProperty("status").GetString().ShouldBe("Resolved");
         resolved.GetProperty("resolveReason").GetString().ShouldBe("Manual");
-        resolved.GetProperty("resolvedBy").GetString().ShouldBe(FieldTrackApiFactory.AdminEmail);
+        resolved.GetProperty("resolvedBy").GetString().ShouldBe(UserSeeder.AdminDisplayName);
         resolved.GetProperty("note").GetString().ShouldBe("Coolant topped up");
         resolved.GetProperty("latched").GetBoolean().ShouldBeTrue();
         stillBreaching.ShouldHaveSingleItem();
@@ -62,6 +105,23 @@ public sealed class AlertActionTests(FieldTrackFixture fixture) : IntegrationTes
         raisedAgain.GetProperty("status").GetString().ShouldBe("Open");
         raisedAgain.GetProperty("reading").GetProperty("sequenceNumber").GetInt64().ShouldBe(3);
         raisedAgain.GetProperty("latched").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Resolving_an_Alert_the_platform_already_Resolved_is_refused_and_leaves_it_Cleared()
+    {
+        var (alert, t) = await OpenAlertAsync();
+        using var operatorClient = await OperatorClientAsync();
+        await WriteAsync([Received(1, t.AddSeconds(1), 90)]);
+
+        using var response = await operatorClient.PostAsJsonAsync($"/alerts/{alert}/resolve", new { note = "Too late" }, CancellationToken);
+        var stored = await operatorClient.GetFromJsonAsync<JsonElement>($"/alerts/{alert}", CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        stored.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
+        stored.GetProperty("resolvedBy").ValueKind.ShouldBe(JsonValueKind.Null);
+        stored.GetProperty("note").ValueKind.ShouldBe(JsonValueKind.Null);
+        stored.GetProperty("latched").GetBoolean().ShouldBeFalse();
     }
 
     [Fact]
@@ -109,7 +169,7 @@ public sealed class AlertActionTests(FieldTrackFixture fixture) : IntegrationTes
         resolved.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await resolved.Content.ReadFromJsonAsync<JsonElement>(CancellationToken);
         body.GetProperty("note").ValueKind.ShouldBe(JsonValueKind.Null);
-        body.GetProperty("resolvedBy").GetString().ShouldBe(OperatorEmail);
+        body.GetProperty("resolvedBy").GetString().ShouldBe(OperatorName);
         again.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         acknowledgeResolved.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
@@ -124,7 +184,7 @@ public sealed class AlertActionTests(FieldTrackFixture fixture) : IntegrationTes
         await CreateAsync(admin, "/alert-rules", Overheat(asset));
         // After the Attachment, so the Reading is stamped with the Asset.
         var t = DateTimeOffset.UtcNow;
-        await WriteAsync(Received(0, t, 110));
+        await WriteAsync([Received(0, t, 110)]);
         return ((await ListAsync(admin, "/alerts")).ShouldHaveSingleItem().GetProperty("id").GetString()!, t);
     }
 
@@ -132,18 +192,11 @@ public sealed class AlertActionTests(FieldTrackFixture fixture) : IntegrationTes
     {
         using (var admin = await AdminClientAsync())
         {
-            await AuthClient.CreateUserAsync(admin, OperatorEmail, "Operator", OperatorPassword);
+            await AuthClient.CreateUserAsync(admin, OperatorEmail, "Operator", OperatorPassword, OperatorName);
         }
 
         var client = Fixture.Api.CreateClient();
         await AuthClient.AuthorizeAsync(client, OperatorEmail, OperatorPassword);
         return client;
-    }
-
-    // A fresh writer per batch, as a new ingest session would open, so each Reading is its own batch.
-    private async Task WriteAsync(ReceivedReading reading)
-    {
-        await using var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken);
-        await writer.WriteAsync([reading], [], CancellationToken);
     }
 }
