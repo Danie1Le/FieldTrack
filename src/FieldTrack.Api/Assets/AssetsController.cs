@@ -74,9 +74,9 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
 
     /// <summary>
     /// Deletes an Asset with no history outright, with its Attachments, so mistakes are easy to clean
-    /// up. An Asset with history (Readings) is Archived instead and its open Attachment ended, which
-    /// keeps the history and hides it from lists; its own Alert Rules are disabled and its Active Alerts resolve as
-    /// Asset archived.
+    /// up. An Asset with history (Readings, or Alerts: an Offline Alert needs no Reading) is Archived instead and its
+    /// open Attachment ended, which keeps the history and hides it from lists; its own Alert Rules are disabled and its
+    /// Active Alerts resolve as Asset archived.
     /// </summary>
     /// <response code="404">No Asset has this id.</response>
     [HttpDelete("{id:guid}")]
@@ -94,13 +94,16 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             return NotFound();
         }
 
-        var hasReadings = await readingHistory.AssetHasReadingsAsync(id, cancellationToken);
-        // Either way the Asset's own rules stop: disabled with it, or deleted with it. Bumped after the Reading history
-        // check, which can be slow and would hold up every ingest batch meanwhile (ADR 0005); the Asset lock already
-        // keeps ingest from stamping a Reading on it.
+        // History (GLOSSARY Archived) is Readings or Alerts: an Offline Alert needs no Reading. ADR 0005 sweep: ingest
+        // holds the Asset row (FOR KEY SHARE) while it raises an Offline Alert, so this lock waits and sees that Alert.
+        var hasHistory = await readingHistory.AssetHasReadingsAsync(id, cancellationToken)
+                         || await db.Alerts.AnyAsync(alert => alert.AssetId == id, cancellationToken);
+        // Either way the Asset's own rules stop: disabled with it, or deleted with it. Bumped after the history check,
+        // which can be slow and would hold up every ingest batch meanwhile (ADR 0005); the Asset lock already keeps
+        // ingest from stamping a Reading on it.
         await db.BumpAlertRuleVersionAsync(cancellationToken);
         List<Guid> resolved = [];
-        if (hasReadings)
+        if (hasHistory)
         {
             asset.Archived = true;
             var now = time.GetUtcNow();
@@ -111,7 +114,7 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
         }
         else
         {
-            // No Readings means no history to keep, so its Attachments go with it (#25).
+            // No Readings or Alerts means no history to keep, so its Attachments go with it (#25).
             await db.Attachments.Where(attachment => attachment.AssetId == id).ExecuteDeleteAsync(cancellationToken);
             db.Assets.Remove(asset);
         }

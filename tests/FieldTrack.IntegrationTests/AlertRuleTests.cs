@@ -37,6 +37,81 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Fact]
+    public async Task Admin_creates_an_Offline_rule_with_its_own_seconds_and_no_Threshold_settings()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+
+        var rule = await CreateAsync(admin, "/alert-rules", Silent(asset));
+        var created = await admin.GetFromJsonAsync<JsonElement>($"/alert-rules/{rule}", CancellationToken);
+        var threshold = await admin.GetFromJsonAsync<JsonElement>($"/alert-rules/{await CreateAsync(admin, "/alert-rules", Overheat(assetId: asset) with { offlineSeconds = 60 })}", CancellationToken);
+
+        created.GetProperty("kind").GetString().ShouldBe("Offline");
+        created.GetProperty("offlineSeconds").GetInt32().ShouldBe(60);
+        created.GetProperty("sensor").ValueKind.ShouldBe(JsonValueKind.Null);
+        created.GetProperty("threshold").ValueKind.ShouldBe(JsonValueKind.Null);
+        // A Threshold rule ignores seconds sent with it.
+        threshold.GetProperty("offlineSeconds").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Editing_a_Threshold_rule_into_an_Offline_rule_drops_its_Threshold_settings_and_starts_it_afresh()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(assetId: asset));
+        var alert = await InsertAlertAsync(rule, asset);
+        await BreachedStateAsync(rule, asset);
+
+        using var edited = await admin.PutAsJsonAsync($"/alert-rules/{rule}", Silent(asset), CancellationToken);
+        var offline = await edited.Content.ReadFromJsonAsync<JsonElement>(CancellationToken);
+        var resolved = await admin.GetFromJsonAsync<JsonElement>($"/alerts/{alert}", CancellationToken);
+        var statesAfterKindChange = await RuleStatesAsync();
+        // Only the seconds change: that is a condition edit too, so a breached Offline rule (which would skip every sweep
+        // until a Reading) cannot outlive it.
+        await BreachedStateAsync(rule, asset);
+        using var reseconded = await admin.PutAsJsonAsync($"/alert-rules/{rule}", Silent(asset, offlineSeconds: 120), CancellationToken);
+
+        edited.StatusCode.ShouldBe(HttpStatusCode.OK);
+        offline.GetProperty("kind").GetString().ShouldBe("Offline");
+        offline.GetProperty("offlineSeconds").GetInt32().ShouldBe(60);
+        offline.GetProperty("sensor").ValueKind.ShouldBe(JsonValueKind.Null);
+        offline.GetProperty("threshold").ValueKind.ShouldBe(JsonValueKind.Null);
+        resolved.GetProperty("resolveReason").GetString().ShouldBe("RuleChanged");
+        statesAfterKindChange.ShouldBe(0L);
+        reseconded.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await RuleStatesAsync()).ShouldBe(0L);
+    }
+
+    private async Task BreachedStateAsync(string rule, string asset)
+    {
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, "INSERT INTO alert_rule_states (alert_rule_id, asset_id, breached) VALUES (@p0, @p1, true)",
+            Guid.Parse(rule), Guid.Parse(asset));
+    }
+
+    private async Task<long> RuleStatesAsync()
+    {
+        await using var database = await OpenDatabaseAsync();
+        return (long)(await SqlAsync(database, "SELECT count(*) FROM alert_rule_states"))!;
+    }
+
+    [Fact]
+    public async Task Create_refuses_an_Offline_rule_without_a_positive_number_of_seconds()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+
+        foreach (var seconds in new int?[] { null, 0, -5 })
+        {
+            using var response = await admin.PostAsJsonAsync("/alert-rules", Silent(asset, seconds), CancellationToken);
+            response.StatusCode.ShouldBe(HttpStatusCode.BadRequest, $"{seconds}");
+        }
+
+        (await ListAsync(admin, "/alert-rules")).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_rule_may_target_an_Asset_Group()
     {
         using var admin = await AdminClientAsync();
@@ -76,6 +151,7 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
             Overheat(assetId: asset) with { kind = "Threshold, Threshold" },
             Overheat(assetId: asset) with { sensor = "1" },
             Overheat(assetId: asset) with { kind = "Offline" },
+            Overheat(assetId: asset) with { offlineSeconds = 0 },
         ];
         foreach (var request in invalid)
         {
@@ -183,29 +259,5 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
         one.GetProperty("resolveReason").ValueKind.ShouldBe(JsonValueKind.Null);
         one.GetProperty("fromBacklog").GetBoolean().ShouldBeFalse();
         unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-    }
-
-    /// <summary>The body of POST /alert-rules; nullable members so tests can leave each one out.</summary>
-#pragma warning disable IDE1006 // JSON property names
-    private sealed record RuleRequest(
-        string name, string? kind, string? assetId, string? assetGroupId, string? severity, bool enabled,
-        string? sensor, string? @operator, object? threshold, double? hysteresis);
-#pragma warning restore IDE1006
-
-    private static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>
-        new("Engine overheat", "Threshold", assetId, assetGroupId, "Critical", true, "EngineTempC", "GreaterThan", 105, 5);
-
-    // Ingest is the only writer of Alerts; these API tests place one directly.
-    private async Task<Guid> InsertAlertAsync(string rule, string asset, string status, DateTimeOffset? raisedAt = null)
-    {
-        var id = Guid.NewGuid();
-        await using var database = await OpenDatabaseAsync();
-        await SqlAsync(database, """
-            INSERT INTO alerts (id, alert_rule_id, asset_id, reading_device_id, reading_boot, reading_sequence_number, severity, message,
-                                status, raised_at, created_at, resolved_at, resolve_reason, from_backlog)
-            VALUES (@p0, @p1, @p2, gen_random_uuid(), 1, 7, 'Critical', 'Engine temp 108.4 °C, above 105 (clears below 100)',
-                    @p3, @p4, now(), CASE WHEN @p3 = 'Resolved' THEN now() END, CASE WHEN @p3 = 'Resolved' THEN 'Cleared' END, false)
-            """, id, Guid.Parse(rule), Guid.Parse(asset), status, raisedAt ?? DateTimeOffset.UtcNow);
-        return id;
     }
 }
