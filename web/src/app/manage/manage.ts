@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet, Routes } from '@angular/router';
 import { AuthService } from '../auth/auth';
 import { AssetsPage } from './assets-page';
+import { DevicesPage } from './devices-page';
 
 /** The frame around the management screens (Admins only, #40): their navigation, then the chosen screen. */
 @Component({
@@ -13,6 +14,7 @@ import { AssetsPage } from './assets-page';
       <span class="muted">Manage</span>
       <nav aria-label="Management screens">
         <a class="btn" routerLink="assets" routerLinkActive="current" ariaCurrentWhenActive="page">Assets</a>
+        <a class="btn" routerLink="devices" routerLinkActive="current" ariaCurrentWhenActive="page">Devices</a>
       </nav>
       <nav class="links">
         <a class="btn" routerLink="/geofences">Geofences</a>
@@ -44,6 +46,7 @@ export const manageRoutes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'assets' },
       { path: 'assets', component: AssetsPage, title: 'Assets · FieldTrack' },
+      { path: 'devices', component: DevicesPage, title: 'Devices · FieldTrack' },
     ],
   },
 ];
