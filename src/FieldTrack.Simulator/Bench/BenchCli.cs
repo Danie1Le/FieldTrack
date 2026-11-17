@@ -18,12 +18,11 @@ internal static class BenchCli
     /// <exception cref="SimulatorException">The benchmark is unknown, an option is unusable, or the stack is not ready.</exception>
     public static async Task<bool> RunAsync(string kind, Options options, CancellationToken cancellationToken)
     {
-        if (kind is not ("throughput" or "flood" or "crash" or "duplicates"))
+        if (kind is not ("throughput" or "flood" or "crash" or "duplicates" or "seed-history"))
         {
-            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash or duplicates.");
+            throw new SimulatorException($"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates or seed-history.");
         }
 
-        var fleet = FleetFile.Load(options.Require("fleet"));
         var rate = options.GetNumber("rate") ?? (kind == "crash" ? 500 : 2000);
         var duration = TimeSpan.FromSeconds(options.GetNumber("duration") ?? (kind == "flood" ? 60 : 600));
         var brokerHost = options.Get("mqtt-host") ?? "localhost";
@@ -38,12 +37,18 @@ internal static class BenchCli
             throw new SimulatorException("The working tree has uncommitted changes, so the git SHA in the result would not identify the code measured. Commit them, or pass --allow-dirty true for a trial run.");
         }
 
-        await SeedAsync(fleet, options, cancellationToken);
         await using var dataSource = NpgsqlDataSource.Create(database);
         var target = new BenchTarget(
             brokerHost, brokerPort, new BenchDatabase(dataSource), options.Get("state") ?? "simulator-state.json",
             options.Get("out") ?? Path.Combine("bench", "results"), composeProject);
 
+        if (kind == "seed-history")
+        {
+            return Report(await SeedHistoryAsync(options, target, cancellationToken));
+        }
+
+        var fleet = FleetFile.Load(options.Require("fleet"));
+        await SeedAsync(fleet, options, cancellationToken);
         Console.WriteLine($"Benchmark {kind}: {fleet.Devices.Count} Devices{(kind == "duplicates" ? string.Empty : $", {duration.TotalSeconds:0} s")}.");
         var outcome = kind switch
         {
@@ -52,6 +57,42 @@ internal static class BenchCli
             "crash" => await CrashAsync(fleet, target, options, rate, duration, cancellationToken),
             _ => await ThroughputBench.SustainedAsync(fleet, target, rate, duration, Console.Out, cancellationToken),
         };
+        return Report(outcome);
+    }
+
+    // 30 days of Device time, 200 Devices, a Reading every 8 minutes: 1.08 million Readings.
+    private static async Task<BenchOutcome> SeedHistoryAsync(Options options, BenchTarget target, CancellationToken cancellationToken)
+    {
+        var fleet = FleetFile.Load(options.Require("fleet"));
+        var routeFiles = Directory.GetFiles(options.Get("routes") ?? Path.Combine("src", "FieldTrack.Simulator", "fleets", "routes"), "*.gpx").Order().ToList();
+        if (routeFiles.Count == 0)
+        {
+            throw new SimulatorException("No GPX routes found: point --routes at a directory of .gpx files.");
+        }
+
+        // Before SeedAsync creates anything through the API.
+        var (span, interval) = HistoryWindow(options.GetNumber("days"), options.GetNumber("interval"));
+        await SeedAsync(fleet, options, cancellationToken);
+        return await HistorySeeder.SeedAsync(
+            fleet, [.. routeFiles.Select(GpxRoute.Load)], target, DateTimeOffset.UtcNow, span, interval, Console.Out, cancellationToken);
+    }
+
+    /// <summary>The history's length and spacing from <c>--days</c> and <c>--interval</c> (seconds), defaulting to 30 days and 480 s.</summary>
+    /// <exception cref="SimulatorException">A value is not finite, <paramref name="days"/> is not positive, or <paramref name="intervalSeconds"/> is under one second.</exception>
+    internal static (TimeSpan Span, TimeSpan Interval) HistoryWindow(double? days, double? intervalSeconds)
+    {
+        var (d, s) = (days ?? 30, intervalSeconds ?? 480);
+        // Zero, negative, NaN or sub-tick intervals never reach the end of the window: the COPY would stream rows until the disk is full.
+        if (!double.IsFinite(d) || d <= 0 || !double.IsFinite(s) || s < 1)
+        {
+            throw new SimulatorException($"--days must be a positive number and --interval at least 1 (seconds), got {d} and {s}.");
+        }
+
+        return (TimeSpan.FromDays(d), TimeSpan.FromSeconds(s));
+    }
+
+    private static bool Report(BenchOutcome outcome)
+    {
         Console.WriteLine(outcome.Json);
         Console.WriteLine($"{(outcome.Pass ? "PASS" : "FAIL")}: {Path.GetFullPath(outcome.Path)}");
         return outcome.Pass;
@@ -92,6 +133,13 @@ internal static class BenchCli
             ?? (_loopback.Contains(builder.Host, StringComparer.OrdinalIgnoreCase)
                 ? DevelopmentPassword
                 : throw new SimulatorException("Set FIELDTRACK_DB_PASSWORD: the development password only applies to a database on localhost."));
+        // Npgsql applies the command timeout to every write of a COPY stream, and a busy server stops reading it while it maintains indexes
+        // (seed-history). A timeout the user put in --db is their choice and kept.
+        if (!builder.ConnectionString.Contains("Command Timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.CommandTimeout = BenchDatabase.CommandTimeoutSeconds;
+        }
+
         return builder.ConnectionString;
     }
 
