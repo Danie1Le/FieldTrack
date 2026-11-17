@@ -26,6 +26,9 @@ describe('Manage', () => {
 
     expect(TestBed.inject(Router).url).toBe('/manage/assets');
     const links = [...((harness.fixture.nativeElement as HTMLElement).querySelectorAll('nav[aria-label="Management screens"] a'))];
-    expect(links.map((link) => [link.textContent!.trim(), link.getAttribute('href')])).toEqual([['Assets', '/manage/assets']]);
+    expect(links.map((link) => [link.textContent!.trim(), link.getAttribute('href')])).toEqual([
+      ['Assets', '/manage/assets'],
+      ['Devices', '/manage/devices'],
+    ]);
   });
 });
