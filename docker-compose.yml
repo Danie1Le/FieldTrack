@@ -70,6 +70,10 @@ services:
       FIELDTRACK_ADMIN_EMAIL: ${FIELDTRACK_ADMIN_EMAIL:-}
       # Temporary password only: the first Admin must replace it at first sign-in (POST /auth/change-password, #61).
       FIELDTRACK_ADMIN_PASSWORD: ${FIELDTRACK_ADMIN_PASSWORD:-}
+      # Demo mode, off unless the password is set: the Demo Operator is reset to it on every start and the login page
+      # shows both (ADR 0002).
+      FIELDTRACK_DEMO_EMAIL: ${FIELDTRACK_DEMO_EMAIL:-}
+      FIELDTRACK_DEMO_PASSWORD: ${FIELDTRACK_DEMO_PASSWORD:-}
       # Metrics, traces and logs go straight to the lgtm container (#48). Application Insights, set by the
       # Azure deployment, takes precedence over this endpoint.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318

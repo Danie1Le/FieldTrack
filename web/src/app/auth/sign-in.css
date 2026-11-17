@@ -28,6 +28,32 @@ p {
   margin: 0 0 6px;
 }
 
+.demo {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.demo dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+
+.demo dt {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.demo dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 label {
   font-size: 13px;
   font-weight: 600;
