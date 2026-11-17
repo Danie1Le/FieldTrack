@@ -13,6 +13,7 @@ internal sealed class SimulatedDevice
 
     private readonly FleetDevice _spec;
     private readonly IMotion _motion;
+    private readonly Random _random;
     private readonly Queue<byte[]> _outbox = new();
     private long _captured;
 
@@ -22,6 +23,7 @@ internal sealed class SimulatedDevice
         _spec = spec;
         Boot = boot;
         _motion = motion;
+        _random = new Random(SeedFor($"{spec.Serial}/noise/{boot}"));
     }
 
     /// <summary>
@@ -87,7 +89,21 @@ internal sealed class SimulatedDevice
         return JsonSerializer.SerializeToUtf8Bytes(message, _json);
     }
 
-    private float? Value(Sensor sensor, double value) => _spec.Sensors.Contains(sensor) ? (float)Math.Round(value, 2) : null;
+    private float? Value(Sensor sensor, double value) => _spec.Sensors.Contains(sensor) ? (float)Math.Round(WithNoise(sensor, value), 2) : null;
+
+    // Box-Muller: a standard normal draw from two uniform ones (1 - u keeps the logarithm finite).
+    private double WithNoise(Sensor sensor, double value)
+    {
+        if (_spec.Noise is not { } noise || !noise.TryGetValue(sensor, out var sigma))
+        {
+            return value;
+        }
+
+        var gaussian = Math.Sqrt(-2 * Math.Log(1 - _random.NextDouble())) * Math.Cos(2 * Math.PI * _random.NextDouble());
+        var noisy = value + (sigma * gaussian);
+        // Noise must not push a sensor past what it can read: no negative speed, no fuel above a full tank.
+        return sensor == Sensor.FuelPct ? Math.Clamp(noisy, 0, 100) : Math.Max(noisy, 0);
+    }
 
     private sealed record Message(
         int Boot,

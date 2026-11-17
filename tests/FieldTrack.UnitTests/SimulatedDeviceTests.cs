@@ -13,6 +13,22 @@ public sealed class SimulatedDeviceTests
         new(new FleetDevice("TRK-001", "Haul truck 1", AssetType.Truck, null, new Position(45.5, -122.6), 30, sensors), boot, new FixedMotion(new Position(45.5, -122.6)));
 
     [Fact]
+    public void A_sensor_with_a_sigma_scatters_around_its_normal_value_and_one_without_stays_exact()
+    {
+        var spec = new FleetDevice(
+            "TRK-001", "Haul truck 1", AssetType.Truck, null, new Position(45.5, -122.6), 30, [Sensor.EngineTempC, Sensor.BatteryV],
+            new Dictionary<Sensor, double> { [Sensor.EngineTempC] = 2 });
+        var device = new SimulatedDevice(spec, 1, new FixedMotion(new Position(45.5, -122.6)));
+
+        var readings = Enumerable.Range(0, 3000).Select(second => JsonDocument.Parse(Take(device, TimeSpan.FromSeconds(second))).RootElement).ToList();
+
+        var temperatures = readings.Select(reading => reading.GetProperty("engineTempC").GetDouble()).ToList();
+        temperatures.Average().ShouldBe(85, tolerance: 0.2);
+        Math.Sqrt(temperatures.Select(t => Math.Pow(t - temperatures.Average(), 2)).Average()).ShouldBe(2, tolerance: 0.15);
+        readings.ShouldAllBe(reading => reading.GetProperty("batteryV").GetDouble() == 13.8);
+    }
+
+    [Fact]
     public void A_payload_is_a_Reading_by_the_telemetry_contract()
     {
         var device = Truck(boot: 3, [.. Enum.GetValues<Sensor>()]);

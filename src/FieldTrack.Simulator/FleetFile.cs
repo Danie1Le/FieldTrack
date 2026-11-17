@@ -17,6 +17,7 @@ internal sealed record Position(double Lat, double Lon);
 /// <param name="Position">Where a stationary Device reports from, or null.</param>
 /// <param name="SpeedKph">How fast a mobile Device travels, in km/h.</param>
 /// <param name="Sensors">The sensors the Device carries.</param>
+/// <param name="Noise">The standard deviation of the Gaussian noise on each sensor, in the sensor's unit; a sensor not listed (or null for all) reads exactly.</param>
 internal sealed record FleetDevice(
     string Serial,
     string AssetName,
@@ -24,12 +25,13 @@ internal sealed record FleetDevice(
     string? Route,
     Position? Position,
     double SpeedKph,
-    IReadOnlyList<Sensor> Sensors);
+    IReadOnlyList<Sensor> Sensors,
+    IReadOnlyDictionary<Sensor, double>? Noise = null);
 
 /// <summary>
 /// The fleet file: every simulated Device, shared by <c>seed</c> and <c>run</c> so a demo and a benchmark start
 /// from one setup (spec #21). A Device with a <c>route</c> follows it, one with a <c>position</c> reports from there,
-/// and one with neither random-walks.
+/// and one with neither random-walks. A <c>noise</c> object gives the Gaussian sigma of each sensor that should scatter.
 /// </summary>
 internal sealed partial class FleetFile
 {
@@ -124,6 +126,7 @@ internal sealed partial class FleetFile
             throw new SimulatorException($"Device {serial}: speedKph must be above 0 and at most {MaxSpeedKph}.");
         }
 
+        var sensors = (dto.Sensors ?? []).Select(name => ParseSensor(serial, name)).Distinct().ToList();
         return new FleetDevice(
             serial,
             dto.AssetName ?? serial,
@@ -131,7 +134,33 @@ internal sealed partial class FleetFile
             dto.Route is null ? null : Path.GetFullPath(dto.Route, baseDirectory),
             dto.Position is { Lat: { } lat, Lon: { } lon } ? new Position(lat, lon) : null,
             dto.SpeedKph ?? DefaultSpeedKph,
-            (dto.Sensors ?? []).Select(name => ParseSensor(serial, name)).Distinct().ToList());
+            sensors,
+            ParseNoise(serial, dto.Noise ?? [], sensors));
+    }
+
+    private static Dictionary<Sensor, double> ParseNoise(string serial, Dictionary<string, double> noise, List<Sensor> sensors)
+    {
+        var sigmas = new Dictionary<Sensor, double>();
+        foreach (var (name, sigma) in noise)
+        {
+            var sensor = ParseSensor(serial, name);
+            if (!sensors.Contains(sensor))
+            {
+                throw new SimulatorException($"Device {serial}: noise on {name}, but the Device does not carry that sensor.");
+            }
+
+            if (!double.IsFinite(sigma) || sigma < 0)
+            {
+                throw new SimulatorException($"Device {serial}: the noise sigma of {name} must be a number from 0 up.");
+            }
+
+            if (!sigmas.TryAdd(sensor, sigma))
+            {
+                throw new SimulatorException($"Device {serial}: noise on {name} is given twice.");
+            }
+        }
+
+        return sigmas;
     }
 
     private static Sensor ParseSensor(string serial, string name) =>
@@ -145,7 +174,8 @@ internal sealed partial class FleetFile
     private sealed record FleetDto(List<DeviceDto?>? Devices);
 
     private sealed record DeviceDto(
-        string? Serial, string? AssetName, string? AssetType, string? Route, PositionDto? Position, double? SpeedKph, List<string>? Sensors);
+        string? Serial, string? AssetName, string? AssetType, string? Route, PositionDto? Position, double? SpeedKph, List<string>? Sensors,
+        Dictionary<string, double>? Noise);
 
     private sealed record PositionDto(double? Lat, double? Lon);
 }
