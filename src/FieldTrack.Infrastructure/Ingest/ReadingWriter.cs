@@ -268,6 +268,7 @@ public sealed class ReadingWriter : IAsyncDisposable
         await using (var locks = new NpgsqlBatch(_connection, transaction) { BatchCommands = { new(LockDevices), new(LockAssets), new(AlertRuleRunner.ReadVersion) } })
         await using (var reader = await locks.ExecuteReaderAsync(cancellationToken))
         {
+            // Skip the two lock statements' result sets, which have no columns, to reach the version's.
             await reader.NextResultAsync(cancellationToken);
             await reader.NextResultAsync(cancellationToken);
             await reader.ReadAsync(cancellationToken);
@@ -307,6 +308,7 @@ public sealed class ReadingWriter : IAsyncDisposable
                 }
             }
 
+            // The reload's result sets follow Store's only when ReloadCommands added its statements for this version.
             if (reload.Length > 0)
             {
                 await reader.NextResultAsync(cancellationToken);

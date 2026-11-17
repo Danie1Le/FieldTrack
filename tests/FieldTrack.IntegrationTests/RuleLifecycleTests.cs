@@ -228,7 +228,7 @@ public sealed class RuleLifecycleTests(FieldTrackFixture fixture) : AlertTest(fi
 
         await publisher.PublishAsync("TRK-007", Temp(0, DateTimeOffset.UtcNow, 110));
         await LockWaitsAsync(1);
-        var edit = admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { name = "Engine hot" }, CancellationToken);
+        var edit = admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset) with { threshold = 100 }, CancellationToken);
         await LockWaitsAsync(2);
         await hold.CommitAsync(CancellationToken);
         using (var edited = await edit)
