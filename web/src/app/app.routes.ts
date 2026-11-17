@@ -36,5 +36,12 @@ export const routes: Routes = [
     canActivate: [adminGuard],
     title: 'Users · FieldTrack',
   },
+  {
+    path: 'manage',
+    // Lazy behind canMatch, which runs before the router loads children (canActivate runs after), so only Admins
+    // download the management screens.
+    loadChildren: () => import('./manage/manage').then((m) => m.manageRoutes),
+    canMatch: [adminGuard],
+  },
   { path: '**', redirectTo: '' },
 ];
