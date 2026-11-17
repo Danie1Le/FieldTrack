@@ -11,5 +11,12 @@ export const routes: Routes = [
     canActivate: [signedInGuard],
     title: 'Control room · FieldTrack',
   },
+  {
+    path: 'assets/:id',
+    // Lazy: Chart.js loads only when an Asset is opened (initial bundle budget).
+    loadComponent: () => import('./asset-detail/asset-detail').then((m) => m.AssetDetail),
+    canActivate: [signedInGuard],
+    title: 'Asset · FieldTrack',
+  },
   { path: '**', redirectTo: '' },
 ];

@@ -1,0 +1,184 @@
+:host {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  min-height: 0;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bar h1 {
+  font-size: 20px;
+}
+
+.bar a {
+  text-decoration: none;
+}
+
+.tag {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.range input {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 6px;
+  background: var(--panel);
+}
+
+.problem {
+  margin: 0;
+  color: var(--alert);
+  font-weight: 600;
+}
+
+.detail {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-height: 0;
+}
+
+.replay {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 10px;
+}
+
+.map {
+  min-height: 260px;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls input[type="range"] {
+  flex: 1 1 160px;
+  min-width: 120px;
+  accent-color: var(--accent);
+}
+
+.controls select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px;
+  background: var(--panel);
+}
+
+.empty {
+  margin: 0;
+  align-self: center;
+  justify-self: center;
+}
+
+.side {
+  overflow: auto;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+figure {
+  margin: 0;
+}
+
+figcaption,
+.side h2 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 4px;
+}
+
+app-sensor-chart {
+  height: 140px;
+}
+
+.alerts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.alerts li {
+  padding: 7px 0 7px 10px;
+  border-top: 1px solid var(--line);
+  border-left: 4px solid transparent;
+}
+
+.alerts .sev-Critical {
+  border-left-color: var(--alert);
+}
+
+.alerts .sev-Warning {
+  border-left-color: var(--offline);
+}
+
+.alerts .line {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.alerts .status {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+/* Narrow (Dashboard UX, #20): the replay map stacks above the charts and the page scrolls. */
+@media (max-width: 1000px) {
+  :host {
+    height: auto;
+  }
+
+  .detail {
+    grid-template-columns: 1fr;
+  }
+
+  .map {
+    height: 300px;
+  }
+
+  .side {
+    overflow: visible;
+  }
+}
