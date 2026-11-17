@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="FieldTrack" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Site loop</name>
+    <desc>Drawn by hand for FieldTrack demos, not taken from map data. A closed loop of about 2.5 km.</desc>
+  </metadata>
+  <trk>
+    <name>Site loop</name>
+    <trkseg>
+      <trkpt lat="45.5290" lon="-122.6830"/>
+      <trkpt lat="45.5292" lon="-122.6790"/>
+      <trkpt lat="45.5288" lon="-122.6745"/>
+      <trkpt lat="45.5262" lon="-122.6742"/>
+      <trkpt lat="45.5240" lon="-122.6750"/>
+      <trkpt lat="45.5225" lon="-122.6775"/>
+      <trkpt lat="45.5230" lon="-122.6815"/>
+      <trkpt lat="45.5252" lon="-122.6835"/>
+      <trkpt lat="45.5290" lon="-122.6830"/>
+    </trkseg>
+  </trk>
+</gpx>

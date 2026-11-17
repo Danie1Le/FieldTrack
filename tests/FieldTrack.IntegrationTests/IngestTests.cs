@@ -1,7 +1,10 @@
 using System.Globalization;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using FieldTrack.Api.Assets;
+using FieldTrack.Api.Ingest;
+using FieldTrack.Domain.Telemetry;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -260,6 +263,123 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         var history = await HistoryWhenAsync(admin, asset, count: 1, from: now.AddDays(-9), to: now.AddDays(1));
 
         history.Single().GetProperty("sequenceNumber").GetInt64().ShouldBe(5L);
+        // Stored plus rejected equals published (spec #21); the rejects were in this batch or an earlier one.
+        (await ListAsync(admin, "/rejected-messages")).Length.ShouldBe(6);
+    }
+
+    [Theory]
+    [InlineData(RejectReason.BadJson)]
+    [InlineData(RejectReason.MissingField)]
+    [InlineData(RejectReason.PositionOutOfRange)]
+    [InlineData(RejectReason.TooFarAhead)]
+    [InlineData(RejectReason.TooLate)]
+    [InlineData(RejectReason.UnknownTopicVersion)]
+    [InlineData(RejectReason.UnknownSerialNumber)]
+    [InlineData(RejectReason.ArchivedDevice)]
+    public async Task A_message_that_cannot_become_a_Reading_is_stored_as_a_Rejected_message_and_counted(RejectReason reason)
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        await AttachedDeviceAsync(admin, "TRK-007");
+        await AttachedDeviceAsync(admin, "OLD-001");
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, "UPDATE devices SET archived = true WHERE serial_number = 'OLD-001'");
+        using var rejects = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.RejectedMessagesInstrument);
+        var now = DateTimeOffset.UtcNow;
+        var (topic, payload) = reason switch
+        {
+            RejectReason.BadJson => (TelemetryPublisher.TopicOf("TRK-007"), "{\"boot\":1,"),
+            RejectReason.MissingField => (TelemetryPublisher.TopicOf("TRK-007"), """{"boot":1,"seq":0,"ts":0}"""),
+            RejectReason.PositionOutOfRange => (TelemetryPublisher.TopicOf("TRK-007"), TelemetryPublisher.Payload(1, 0, now, lon: 180.5)),
+            RejectReason.TooFarAhead => (TelemetryPublisher.TopicOf("TRK-007"), TelemetryPublisher.Payload(1, 0, now.AddMinutes(6))),
+            RejectReason.TooLate => (TelemetryPublisher.TopicOf("TRK-007"), TelemetryPublisher.Payload(1, 0, now.AddDays(-8))),
+            RejectReason.UnknownTopicVersion => ("fieldtrack/v2/devices/TRK-007/telemetry", TelemetryPublisher.Payload(1, 0, now)),
+            RejectReason.UnknownSerialNumber => (TelemetryPublisher.TopicOf("GHOST-1"), TelemetryPublisher.Payload(1, 0, now)),
+            RejectReason.ArchivedDevice => (TelemetryPublisher.TopicOf("OLD-001"), TelemetryPublisher.Payload(1, 0, now)),
+            _ => throw new ArgumentOutOfRangeException(nameof(reason)),
+        };
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        await publisher.PublishToAsync(topic, payload);
+        var rejected = (await EventuallyAsync(() => ListAsync(admin, "/rejected-messages"), listed => listed.Length > 0)).ShouldHaveSingleItem();
+
+        rejected.GetProperty("reason").GetString().ShouldBe(reason.ToString());
+        rejected.GetProperty("topic").GetString().ShouldBe(topic);
+        rejected.GetProperty("payload").GetBytesFromBase64().ShouldBe(Encoding.UTF8.GetBytes(payload));
+        rejected.GetProperty("receivedTime").GetDateTimeOffset().ShouldBeInRange(now, DateTimeOffset.UtcNow);
+        (await SqlAsync(database, "SELECT count(*) FROM readings")).ShouldBe(0L);
+        var counted = await EventuallyAsync(() => Task.FromResult(rejects.Measurements), measured => measured.Count > 0);
+        counted.ShouldHaveSingleItem().Value.ShouldBe(1L);
+        counted[0].Tags[IngestWorker.ReasonTag].ShouldBe(reason.ToString());
+    }
+
+    [Fact]
+    public async Task A_topic_longer_than_MaxTopicLength_is_stored_clipped_and_marked()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var topic = TelemetryPublisher.TopicOf(new string('X', 300));
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        await publisher.PublishToAsync(topic, TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+        var rejected = (await EventuallyAsync(() => ListAsync(admin, "/rejected-messages"), listed => listed.Length > 0)).ShouldHaveSingleItem();
+
+        rejected.GetProperty("reason").GetString().ShouldBe(nameof(RejectReason.UnknownSerialNumber));
+        rejected.GetProperty("topic").GetString().ShouldBe(topic[..RejectedMessage.MaxTopicLength]);
+        rejected.GetProperty("topicClipped").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_Rejected_message_redelivered_after_its_batch_committed_is_stored_and_counted_once()
+    {
+        var clientId = $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+        await using var api = await StartIngestAsync(clientId: clientId);
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        using var rejects = new CounterRecorder(api.Services, IngestWorker.MeterName, IngestWorker.RejectedMessagesInstrument);
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        await using var blocker = await OpenDatabaseAsync();
+
+        await using (var hold = await blocker.BeginTransactionAsync(CancellationToken))
+        {
+            // Holds the batch in its last statement, before it commits.
+            await SqlAsync(blocker, "LOCK TABLE rejected_messages IN SHARE MODE");
+            await publisher.PublishAsync("GHOST-1", TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+            await LockWaitsAsync(1);
+            // The worker loses its broker connection, so the PUBACKs after this commit are lost, as in a crash.
+            await TelemetryPublisher.TakeOverIngestSessionAsync(Fixture, clientId);
+            await hold.CommitAsync(CancellationToken);
+        }
+
+        // The worker reconnects and the broker redelivers the message, marked DUP, ahead of this one.
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, DateTimeOffset.UtcNow));
+        await HistoryWhenAsync(admin, asset, count: 1);
+
+        await using var database = await OpenDatabaseAsync();
+        (await SqlAsync(database, "SELECT count(*) FROM rejected_messages")).ShouldBe(1L);
+        rejects.Measurements.Sum(measured => measured.Value).ShouldBe(1L);
+    }
+
+    [Fact]
+    public async Task A_session_still_subscribed_to_the_retired_v1_filter_receives_each_message_once()
+    {
+        var clientId = $"fieldtrack-ingest-test-{Guid.NewGuid():N}";
+        // The filter ingest subscribed to before Rejected messages, kept by a session that outlived the upgrade.
+        await TelemetryPublisher.CreateIngestSessionAsync(Fixture, clientId, "fieldtrack/v1/devices/+/telemetry");
+        await using var api = await StartIngestAsync(clientId: clientId);
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        var now = DateTimeOffset.UtcNow;
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+        // Stored once the worker has connected, and so has unsubscribed.
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, now));
+        await HistoryWhenAsync(admin, asset, count: 1);
+
+        await publisher.PublishAsync("TRK-007", "not json");
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 1, now));
+        await HistoryWhenAsync(admin, asset, count: 2);
+
+        (await ListAsync(admin, "/rejected-messages")).ShouldHaveSingleItem();
     }
 
     [Theory]

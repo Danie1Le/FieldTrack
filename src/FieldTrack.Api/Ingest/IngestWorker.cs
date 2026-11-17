@@ -1,5 +1,5 @@
 using System.Buffers;
-using System.Security.Cryptography;
+using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using FieldTrack.Api.Messaging;
 using FieldTrack.Domain.Telemetry;
@@ -17,21 +17,35 @@ namespace FieldTrack.Api.Ingest;
 /// Subscribes to Device telemetry and stores each Reading exactly once (ADR 0004): messages are batched,
 /// each batch is written in one transaction, and PUBACKs go out only after it commits, in receive order.
 /// A crash before that leaves the messages unacknowledged in the broker session, which redelivers them
-/// on the next connect; the Reading key table drops any copy already stored (ADR 0003). The worker is a
-/// single instance (spec #21).
+/// on the next connect; the Reading key table drops any copy already stored (ADR 0003). A message that cannot
+/// become a Reading is acknowledged the same way, stored as a Rejected message in its batch's transaction, and a
+/// redelivered copy of one already stored is dropped too. The worker is a single instance (spec #21).
 /// </summary>
 public sealed partial class IngestWorker(
     IOptions<BrokerOptions> broker,
     IOptions<IngestOptions> options,
     NpgsqlDataSource dataSource,
     TimeProvider time,
+    IMeterFactory meters,
     ILogger<IngestWorker> logger) : BackgroundService
 {
-    private const string TopicPrefix = "fieldtrack/v1/devices/";
-    private const string TopicSuffix = "/telemetry";
+    /// <summary>
+    /// Every Device's telemetry topic, <c>fieldtrack/{version}/devices/{serialNumber}/telemetry</c>, in every
+    /// version, so a message on a version other than <see cref="ContractVersion"/> is rejected instead of left unread.
+    /// </summary>
+    public const string TopicFilter = "fieldtrack/+/devices/+/telemetry";
 
-    /// <summary>Every Device's telemetry topic, version 1 of the contract (spec #21).</summary>
-    public const string TopicFilter = TopicPrefix + "+" + TopicSuffix;
+    /// <summary>The tag on <see cref="RejectedMessagesInstrument"/> holding the <see cref="RejectReason"/> name.</summary>
+    public const string ReasonTag = "reason";
+
+    /// <summary>The one version of the telemetry contract ingest reads (spec #21).</summary>
+    public const string ContractVersion = "v1";
+
+    /// <summary>The meter ingest reports on.</summary>
+    public const string MeterName = "FieldTrack.Ingest";
+
+    /// <summary>The counter of Rejected messages stored, tagged with their <c>reason</c>.</summary>
+    public const string RejectedMessagesInstrument = "fieldtrack.ingest.rejected_messages";
 
     /// <summary>How long the broker keeps the session, and its queued messages, while the worker is away.</summary>
     public const uint SessionExpirySeconds = 3_600;
@@ -44,8 +58,12 @@ public sealed partial class IngestWorker(
 
     private static readonly TimeSpan _retryAfter = TimeSpan.FromSeconds(2);
 
-    /// <summary>The Device serial number in a topic that matches <see cref="TopicFilter"/>.</summary>
-    public static string SerialNumberOf(string topic) => topic[TopicPrefix.Length..^TopicSuffix.Length];
+    // Filters earlier versions subscribed to. A resumed session keeps them beside TopicFilter, and a message
+    // matching both would be delivered, and so rejected, twice.
+    private static readonly string[] _retiredTopicFilters = ["fieldtrack/v1/devices/+/telemetry"];
+
+    private readonly Counter<long> _rejectedMessages = meters.Create(MeterName).CreateCounter<long>(
+        RejectedMessagesInstrument, "{message}", "Telemetry messages stored as Rejected messages, by reason.");
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -120,6 +138,12 @@ public sealed partial class IngestWorker(
         await client.SubscribeAsync(
             new MqttClientSubscribeOptionsBuilder().WithTopicFilter(TopicFilter, MqttQualityOfServiceLevel.AtLeastOnce).Build(),
             stoppingToken);
+        // Harmless when the session never had them: the broker answers NoSubscriptionExisted.
+        foreach (var retired in _retiredTopicFilters)
+        {
+            await client.UnsubscribeAsync(retired, stoppingToken);
+        }
+
         LogConnected(options.Value.ClientId, connected.IsSessionPresent);
 
         try
@@ -127,9 +151,14 @@ public sealed partial class IngestWorker(
             while (true)
             {
                 var batch = await NextBatchAsync(received.Reader, stoppingToken);
-                await writer.WriteAsync(ToReceivedReadings(batch), stoppingToken);
-                // Committed: from here a crash only causes redelivery of stored Readings, which the key
-                // table drops, so finish acknowledging even while stopping.
+                var (readings, rejected) = Parse(batch);
+                foreach (var reason in await writer.WriteAsync(readings, rejected, stoppingToken))
+                {
+                    _rejectedMessages.Add(1, new KeyValuePair<string, object?>(ReasonTag, reason.ToString()));
+                }
+
+                // Committed: from here a crash only causes redelivery of what is stored, which the Reading key
+                // table and the redelivered Rejected message check drop, so finish acknowledging even while stopping.
                 foreach (var message in batch)
                 {
                     await message.Args.AcknowledgeAsync(CancellationToken.None);
@@ -186,29 +215,46 @@ public sealed partial class IngestWorker(
         return batch;
     }
 
-    /// <summary>Parses and hashes each message, keeping those that are Readings and logging the rest.</summary>
-    private List<ReceivedReading> ToReceivedReadings(List<ReceivedMessage> batch)
+    /// <summary>
+    /// Reads each message as a Reading, or as a Rejected message when its topic version or payload breaks the
+    /// contract. Whether its Device is known and not Archived is decided when the batch is stored. A message gets
+    /// the first reason in this order: topic version, then payload, then Device. So a malformed payload from an
+    /// unknown or Archived Device is rejected for its payload: the Device check needs a parsed Reading.
+    /// </summary>
+    private static (List<ReceivedReading> Readings, List<ReceivedRejectedMessage> Rejected) Parse(List<ReceivedMessage> batch)
     {
         var readings = new List<ReceivedReading>(batch.Count);
+        var rejected = new List<ReceivedRejectedMessage>();
         foreach (var (args, receivedTime) in batch)
         {
-            var applicationMessage = args.ApplicationMessage;
-            var serialNumber = SerialNumberOf(applicationMessage.Topic);
-            var payload = applicationMessage.Payload.ToArray();
-            if (TelemetryPayload.TryParse(payload, receivedTime, out var reading, out var reason))
+            var message = args.ApplicationMessage;
+            var payload = message.Payload.ToArray();
+            void Reject(RejectReason reason) => rejected.Add(new(message.Topic, payload, reason, receivedTime, message.Dup));
+
+            var (version, serialNumber) = TopicLevels(message.Topic);
+            if (version != ContractVersion)
             {
-                // Over the raw bytes: a Device resends a Reading byte for byte, so "identical duplicate"
-                // (ADR 0003) means an identical payload, and any other copy is conflicting.
-                readings.Add(new ReceivedReading(serialNumber, reading, receivedTime, SHA256.HashData(payload)));
+                Reject(RejectReason.UnknownTopicVersion);
+            }
+            else if (TelemetryPayload.TryParse(payload, receivedTime, out var reading, out var reason))
+            {
+                readings.Add(new ReceivedReading(message.Topic, serialNumber, reading, receivedTime, payload, message.Dup));
             }
             else
             {
-                // shortcut: refused messages are only logged and acknowledged; #27 stores them as Rejected messages.
-                LogRefused(serialNumber, reason);
+                Reject(reason);
             }
         }
 
-        return readings;
+        return (readings, rejected);
+    }
+
+    /// <summary>The version and serial number levels of a topic that <see cref="TopicFilter"/> matched.</summary>
+    private static (string Version, string SerialNumber) TopicLevels(string topic)
+    {
+        // fieldtrack/{version}/devices/{serialNumber}/telemetry
+        var levels = topic.Split('/');
+        return (levels[1], levels[3]);
     }
 
     [LoggerMessage(LogLevel.Information, "Ingest connected as {ClientId}, session resumed: {SessionPresent}.")]
@@ -216,9 +262,6 @@ public sealed partial class IngestWorker(
 
     [LoggerMessage(LogLevel.Error, "Ingest session failed; reconnecting in {RetryAfter}.")]
     private partial void LogSessionFailed(Exception exception, TimeSpan retryAfter);
-
-    [LoggerMessage(LogLevel.Warning, "Refused telemetry from {SerialNumber}: {Reason}.")]
-    private partial void LogRefused(string serialNumber, RejectReason reason);
 
     private sealed record ReceivedMessage(MqttApplicationMessageReceivedEventArgs Args, DateTimeOffset ReceivedTime);
 }

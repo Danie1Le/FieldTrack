@@ -13,6 +13,7 @@ Measured in a spike (branch `prototype/ingest-spike`, see `spikes/ingest-PROTOTY
 
 ## Consequences
 
-- The ingest write is hand-written SQL, outside EF Core migrations' view; schema changes to the Reading or Reading key tables must update it too.
+- The ingest write is hand-written SQL, outside EF Core migrations' view; schema changes to the Reading, Reading key or Rejected message tables must update it too.
+- Rejected messages have no key a resend repeats, so a crash between commit and PUBACK would store them twice. Ingest drops a redelivered message (MQTT DUP set) whose topic and payload were rejected in the last hour, the broker session's expiry, so stored plus rejected still equals published. A Device that publishes the same rejected message again, without DUP, is counted again.
 - Broker memory grows with any worker outage, so Mosquitto's container needs headroom for the longest expected outage.
 - Postgres needs enough memory to keep the Reading key primary-key index cached; the spike's slowdown came from cache misses on 128 MB `shared_buffers`.
