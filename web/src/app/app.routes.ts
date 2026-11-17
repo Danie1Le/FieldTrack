@@ -30,5 +30,11 @@ export const routes: Routes = [
     canActivate: [adminGuard],
     title: 'Geofences · FieldTrack',
   },
+  {
+    path: 'manage',
+    // Lazy, so only Admins download the management screens.
+    loadChildren: () => import('./manage/manage').then((m) => m.manageRoutes),
+    canActivate: [adminGuard],
+  },
   { path: '**', redirectTo: '' },
 ];

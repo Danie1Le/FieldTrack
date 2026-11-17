@@ -1,0 +1,130 @@
+/* Shared by the management pages (assets-page, devices-page, alert-rules-page). */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.panel > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel > header .btn {
+  margin-left: auto;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+h3 {
+  font-size: 15px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+th,
+td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.num {
+  text-align: right;
+}
+
+.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.actions > * + * {
+  margin-left: 6px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+input:not([type='checkbox'], [type='radio']),
+select {
+  font: inherit;
+  font-weight: 400;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: var(--panel);
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.problems {
+  margin: 0;
+  padding: 8px 12px 8px 28px;
+  border-radius: 7px;
+  color: var(--alert);
+  background: color-mix(in srgb, var(--alert) 10%, transparent);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
