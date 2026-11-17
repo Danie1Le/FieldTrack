@@ -118,6 +118,10 @@ _Avoid_: Outage, shutdown, dropout
 A simulated period when a Device keeps taking Readings but cannot send them, then sends them late in the same Boot when it reconnects.
 _Avoid_: Dropout, signal loss, buffering
 
+**Injection**:
+One Fault, Power off, Coverage gap or clock problem that a simulator run applies to one Device for a window of time, scripted by a Scenario or drawn at random. The Manifest lists every one with its start and end.
+_Avoid_: Event, incident, chaos
+
 **Manifest**:
 The simulator's record of what one run actually published and injected, used as ground truth to score lost Readings, offline detection and false Alerts.
 _Avoid_: Log, report, expected results

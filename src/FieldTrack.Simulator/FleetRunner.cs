@@ -84,9 +84,12 @@ internal static class FleetRunner
         using var timer = new PeriodicTimer(pacing.Interval, time);
         do
         {
-            var payload = device.NextPayload(time.GetUtcNow(), time.GetElapsedTime(startTimestamp));
-            await publisher.PublishAsync(device.Topic, payload, drain);
-            device.Published();
+            device.Step(time.GetUtcNow(), time.GetElapsedTime(startTimestamp));
+            while (device.NextToSend is { } payload)
+            {
+                await publisher.PublishAsync(device.Topic, payload, drain);
+                device.Published();
+            }
         }
         while (await timer.WaitForNextTickAsync(stop));
     }

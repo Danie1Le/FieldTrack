@@ -29,7 +29,7 @@ internal sealed record RunManifest(DateTimeOffset StartedAt, DateTimeOffset Ende
     public static RunManifest Of(DateTimeOffset startedAt, DateTimeOffset endedAt, double ratePerSecond, IEnumerable<SimulatedDevice> devices) =>
         new(startedAt, endedAt, ratePerSecond, [.. devices.Select(device => new ManifestDevice(
             device.Serial,
-            device.NextSequence == 0 ? [] : [new PublishedRange(device.Boot, 0, device.NextSequence - 1)]))]);
+            device.Ranges))]);
 
     /// <summary>Saves the Manifest as JSON at <paramref name="path"/>, creating its directory.</summary>
     public void Write(string path)

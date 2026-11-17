@@ -19,12 +19,12 @@ public sealed class RunManifestTests : IDisposable
         var busy = Device("TRK-001", boot: 3);
         for (var i = 0; i < 5; i++)
         {
-            busy.NextPayload(Start, TimeSpan.Zero);
+            busy.Step(Start, TimeSpan.Zero);
             busy.Published();
         }
 
         var quiet = Device("GEN-001", boot: 1);
-        quiet.NextPayload(Start, TimeSpan.Zero);
+        quiet.Step(Start, TimeSpan.Zero);
 
         var manifest = RunManifest.Of(Start, Start.AddMinutes(1), ratePerSecond: 20, [busy, quiet]);
 
@@ -36,7 +36,7 @@ public sealed class RunManifestTests : IDisposable
     public void The_file_is_JSON_a_benchmark_can_read_back()
     {
         var device = Device("TRK-001", boot: 2);
-        device.NextPayload(Start, TimeSpan.Zero);
+        device.Step(Start, TimeSpan.Zero);
         device.Published();
         var path = Path.Combine(_directory, "nested", "manifest.json");
 
