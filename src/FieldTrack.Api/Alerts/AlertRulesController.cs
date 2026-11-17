@@ -35,7 +35,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
         await db.AlertRules.FindAsync([id], cancellationToken) is { } rule ? ToResponse(rule) : NotFound();
 
     /// <summary>Creates an Alert Rule; ingest evaluates it from the next batch on.</summary>
-    /// <response code="400">Not exactly one known target, an Archived Asset, or a Threshold rule missing a setting.</response>
+    /// <response code="400">Not exactly one known target, an Archived Asset, a Threshold rule missing a setting, or a Geofence rule without a known Geofence.</response>
     [HttpPost]
     [Authorize(Policy = Policies.Manage)]
     [ProducesResponseType<AlertRuleResponse>(StatusCodes.Status201Created)]
@@ -44,12 +44,13 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await LockTargetAssetAsync(request, cancellationToken);
+        // Bumped before the checks, so a Geofence delete that got there first has committed and is seen (ADR 0005).
+        await db.BumpAlertRuleVersionAsync(cancellationToken);
         if (await RefusalAsync(request, currentAssetId: null, cancellationToken) is { } refusal)
         {
             return refusal;
         }
 
-        await db.BumpAlertRuleVersionAsync(cancellationToken);
         var rule = new AlertRule { Name = request.Name };
         Apply(request, rule);
         db.AlertRules.Add(rule);
@@ -63,11 +64,11 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
     /// only moving a rule onto an Archived Asset is refused.
     /// </summary>
     /// <remarks>
-    /// An edit of the rule's condition (kind, target, threshold settings, enabled) resolves its Active Alerts, as Rule
+    /// An edit of the rule's condition (kind, target, threshold settings, Geofence, enabled) resolves its Active Alerts, as Rule
     /// disabled when it disables the rule and Rule changed otherwise, and drops its rule state, so the rule starts afresh
     /// on the next Reading (#10). A rename or a new severity leaves both as they are.
     /// </remarks>
-    /// <response code="400">Not exactly one known target, a move to an Archived Asset, or a Threshold rule missing a setting.</response>
+    /// <response code="400">Not exactly one known target, a move to an Archived Asset, a Threshold rule missing a setting, or a Geofence rule without a known Geofence.</response>
     /// <response code="404">No Alert Rule has this id.</response>
     [HttpPut("{id:guid}")]
     [Authorize(Policy = Policies.Manage)]
@@ -172,6 +173,11 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
             ModelState.AddModelError(nameof(AlertRuleRequest.Threshold), "A Threshold rule needs sensor, operator, threshold and hysteresis.");
         }
 
+        if (IsGeofenceRule(request.Kind) && (request.GeofenceId is not { } geofenceId || !await db.Geofences.AnyAsync(geofence => geofence.Id == geofenceId, cancellationToken)))
+        {
+            ModelState.AddModelError(nameof(AlertRuleRequest.GeofenceId), "A Geofence rule needs the id of a Geofence.");
+        }
+
         // The JSON options read "NaN" and "Infinity" from strings; such a threshold would never breach.
         if (request.Threshold is { } threshold && !double.IsFinite(threshold))
         {
@@ -193,14 +199,18 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
         rule.ThresholdSettings = rule.Kind == AlertRuleKind.Threshold
             ? new ThresholdSettings(request.Sensor!.Value, request.Operator!.Value, request.Threshold!.Value, request.Hysteresis!.Value)
             : null;
+        rule.GeofenceId = IsGeofenceRule(rule.Kind) ? request.GeofenceId : null;
     }
 
+    private static bool IsGeofenceRule(AlertRuleKind? kind) => kind is AlertRuleKind.GeofenceExit or AlertRuleKind.GeofenceEnter;
+
     // What decides when the rule raises and resolves; editing any of it starts the rule afresh. Name and severity only
-    // change how its Alerts read.
-    private static (AlertRuleKind, Guid?, Guid?, ThresholdSettings?, bool) Condition(AlertRule rule) =>
-        (rule.Kind, rule.AssetId, rule.AssetGroupId, rule.ThresholdSettings, rule.Enabled);
+    // change how its Alerts read. A Geofence's own area is part of the condition too; GeofencesController handles that.
+    private static (AlertRuleKind, Guid?, Guid?, ThresholdSettings?, Guid?, bool) Condition(AlertRule rule) =>
+        (rule.Kind, rule.AssetId, rule.AssetGroupId, rule.ThresholdSettings, rule.GeofenceId, rule.Enabled);
 
     private static AlertRuleResponse ToResponse(AlertRule rule) =>
         new(rule.Id, rule.Name, rule.Kind, rule.AssetId, rule.AssetGroupId, rule.Severity, rule.Enabled,
-            rule.ThresholdSettings?.Sensor, rule.ThresholdSettings?.Operator, rule.ThresholdSettings?.Threshold, rule.ThresholdSettings?.Hysteresis);
+            rule.ThresholdSettings?.Sensor, rule.ThresholdSettings?.Operator, rule.ThresholdSettings?.Threshold, rule.ThresholdSettings?.Hysteresis,
+            rule.GeofenceId);
 }
