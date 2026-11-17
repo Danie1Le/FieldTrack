@@ -27,17 +27,8 @@ public sealed class AlertRule
     /// <summary>Only enabled rules are evaluated, so an Admin can pause a rule without deleting it.</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>Threshold rules: the sensor watched.</summary>
-    public Sensor? Sensor { get; set; }
-
-    /// <summary>Threshold rules: which side of <see cref="Threshold"/> breaches.</summary>
-    public ThresholdOperator? Operator { get; set; }
-
-    /// <summary>Threshold rules: the value the sensor must pass to breach, in the sensor's unit.</summary>
-    public double? Threshold { get; set; }
-
-    /// <summary>Threshold rules: how far back past <see cref="Threshold"/> the value must move to clear (0 or more).</summary>
-    public double? Hysteresis { get; set; }
+    /// <summary>Threshold rules: what the rule watches and where it breaches and clears; null for other kinds.</summary>
+    public ThresholdSettings? ThresholdSettings { get; set; }
 
     /// <summary>Whether the rule covers the Asset <paramref name="assetId"/>, which is in Asset Group <paramref name="assetGroupId"/> (or none).</summary>
     public bool Targets(Guid assetId, Guid? assetGroupId) =>

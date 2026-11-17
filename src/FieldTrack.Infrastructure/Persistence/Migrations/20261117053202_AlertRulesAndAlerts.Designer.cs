@@ -13,7 +13,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FieldTrack.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(FieldTrackDbContext))]
-    [Migration("20261117045239_AlertRulesAndAlerts")]
+    [Migration("20261117053202_AlertRulesAndAlerts")]
     partial class AlertRulesAndAlerts
     {
         /// <inheritdoc />
@@ -97,6 +97,9 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_alerts");
 
+                    b.HasIndex("AlertRuleId")
+                        .HasDatabaseName("ix_alerts_alert_rule_id");
+
                     b.HasIndex("RaisedAt")
                         .HasDatabaseName("ix_alerts_raised_at");
 
@@ -110,6 +113,8 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
 
                     b.ToTable("alerts", null, t =>
                         {
+                            t.HasCheckConstraint("ck_alerts_resolution", "(status = 'Resolved') = (resolved_at IS NOT NULL) AND (resolved_at IS NULL) = (resolve_reason IS NULL) AND (NOT from_backlog OR resolve_reason IS NOT DISTINCT FROM 'Cleared')");
+
                             t.HasCheckConstraint("ck_alerts_resolve_reason", "resolve_reason IN ('Cleared', 'Manual', 'RuleChanged', 'RuleDisabled', 'AssetArchived', 'DeviceDetached')");
 
                             t.HasCheckConstraint("ck_alerts_severity", "severity IN ('Warning', 'Critical')");
@@ -137,10 +142,6 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("enabled");
 
-                    b.Property<double?>("Hysteresis")
-                        .HasColumnType("double precision")
-                        .HasColumnName("hysteresis");
-
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasColumnType("text")
@@ -151,22 +152,31 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("name");
 
-                    b.Property<string>("Operator")
-                        .HasColumnType("text")
-                        .HasColumnName("operator");
-
-                    b.Property<string>("Sensor")
-                        .HasColumnType("text")
-                        .HasColumnName("sensor");
-
                     b.Property<string>("Severity")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("severity");
 
-                    b.Property<double?>("Threshold")
-                        .HasColumnType("double precision")
-                        .HasColumnName("threshold");
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "ThresholdSettings", "FieldTrack.Domain.Alerts.AlertRule.ThresholdSettings#ThresholdSettings", b1 =>
+                        {
+                            b1.Property<double>("Hysteresis")
+                                .HasColumnType("double precision")
+                                .HasColumnName("hysteresis");
+
+                            b1.Property<string>("Operator")
+                                .IsRequired()
+                                .HasColumnType("text")
+                                .HasColumnName("operator");
+
+                            b1.Property<string>("Sensor")
+                                .IsRequired()
+                                .HasColumnType("text")
+                                .HasColumnName("sensor");
+
+                            b1.Property<double>("Threshold")
+                                .HasColumnType("double precision")
+                                .HasColumnName("threshold");
+                        });
 
                     b.HasKey("Id")
                         .HasName("pk_alert_rules");
@@ -189,7 +199,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_alert_rules_target", "(asset_id IS NULL) <> (asset_group_id IS NULL)");
 
-                            t.HasCheckConstraint("ck_alert_rules_threshold", "kind <> 'Threshold' OR (sensor IS NOT NULL AND operator IS NOT NULL AND threshold IS NOT NULL AND hysteresis IS NOT NULL AND hysteresis >= 0)");
+                            t.HasCheckConstraint("ck_alert_rules_threshold", "kind <> 'Threshold' OR (sensor IS NOT NULL AND operator IS NOT NULL AND threshold IS NOT NULL AND threshold NOT IN ('NaN', 'Infinity', '-Infinity') AND hysteresis IS NOT NULL AND hysteresis >= 0 AND hysteresis < 'Infinity')");
                         });
                 });
 

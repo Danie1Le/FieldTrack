@@ -48,7 +48,7 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Fact]
-    public async Task Create_refuses_a_rule_without_exactly_one_known_target_or_without_its_Threshold_settings()
+    public async Task Create_refuses_a_rule_without_exactly_one_known_target_or_valid_Threshold_settings_or_with_a_value_that_is_not_one_enum_name()
     {
         using var admin = await AdminClientAsync();
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
@@ -68,6 +68,13 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
             Overheat(assetId: asset) with { kind = null },
             Overheat(assetId: asset) with { severity = null },
             Overheat(assetId: asset) with { name = "" },
+            Overheat(assetId: asset) with { threshold = "NaN" },
+            Overheat(assetId: asset) with { threshold = "-Infinity" },
+            Overheat(assetId: asset) with { sensor = "FuelPct, BatteryV" },
+            Overheat(assetId: asset) with { @operator = "GreaterThan, LessThan" },
+            Overheat(assetId: asset) with { severity = "Warning, Critical" },
+            Overheat(assetId: asset) with { kind = "Threshold, Threshold" },
+            Overheat(assetId: asset) with { sensor = "1" },
         ];
         foreach (var request in invalid)
         {
@@ -79,7 +86,27 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Fact]
-    public async Task Edit_and_delete_answer_404_for_an_unknown_rule()
+    public async Task A_rule_on_an_Archived_Asset_can_still_be_disabled_but_no_rule_can_move_onto_one()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        var other = await CreateAsync(admin, "/assets", new { name = "Haul truck 8", type = "Truck" });
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(assetId: asset));
+        var moved = await CreateAsync(admin, "/alert-rules", Overheat(assetId: other));
+        await using (var database = await OpenDatabaseAsync())
+        {
+            await SqlAsync(database, "UPDATE assets SET archived = true WHERE id = @p0", Guid.Parse(asset));
+        }
+
+        using var disabled = await admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(assetId: asset) with { enabled = false }, CancellationToken);
+        using var move = await admin.PutAsJsonAsync($"/alert-rules/{moved}", Overheat(assetId: asset), CancellationToken);
+
+        disabled.StatusCode.ShouldBe(HttpStatusCode.OK);
+        move.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Read_edit_and_delete_answer_404_for_an_unknown_rule()
     {
         using var admin = await AdminClientAsync();
         var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
@@ -161,7 +188,7 @@ public sealed class AlertRuleTests(FieldTrackFixture fixture) : IntegrationTest(
 #pragma warning disable IDE1006 // JSON property names
     private sealed record RuleRequest(
         string name, string? kind, string? assetId, string? assetGroupId, string? severity, bool enabled,
-        string? sensor, string? @operator, double? threshold, double? hysteresis);
+        string? sensor, string? @operator, object? threshold, double? hysteresis);
 #pragma warning restore IDE1006
 
     private static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>

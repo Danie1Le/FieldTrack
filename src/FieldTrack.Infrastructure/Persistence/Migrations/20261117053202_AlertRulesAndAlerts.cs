@@ -22,10 +22,10 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     asset_group_id = table.Column<Guid>(type: "uuid", nullable: true),
                     severity = table.Column<string>(type: "text", nullable: false),
                     enabled = table.Column<bool>(type: "boolean", nullable: false),
-                    sensor = table.Column<string>(type: "text", nullable: true),
+                    hysteresis = table.Column<double>(type: "double precision", nullable: true),
                     @operator = table.Column<string>(name: "operator", type: "text", nullable: true),
-                    threshold = table.Column<double>(type: "double precision", nullable: true),
-                    hysteresis = table.Column<double>(type: "double precision", nullable: true)
+                    sensor = table.Column<string>(type: "text", nullable: true),
+                    threshold = table.Column<double>(type: "double precision", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -35,7 +35,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                     table.CheckConstraint("ck_alert_rules_sensor", "sensor IN ('SpeedKph', 'EngineTempC', 'FuelPct', 'VibrationMmS', 'BatteryV')");
                     table.CheckConstraint("ck_alert_rules_severity", "severity IN ('Warning', 'Critical')");
                     table.CheckConstraint("ck_alert_rules_target", "(asset_id IS NULL) <> (asset_group_id IS NULL)");
-                    table.CheckConstraint("ck_alert_rules_threshold", "kind <> 'Threshold' OR (sensor IS NOT NULL AND operator IS NOT NULL AND threshold IS NOT NULL AND hysteresis IS NOT NULL AND hysteresis >= 0)");
+                    table.CheckConstraint("ck_alert_rules_threshold", "kind <> 'Threshold' OR (sensor IS NOT NULL AND operator IS NOT NULL AND threshold IS NOT NULL AND threshold NOT IN ('NaN', 'Infinity', '-Infinity') AND hysteresis IS NOT NULL AND hysteresis >= 0 AND hysteresis < 'Infinity')");
                     table.ForeignKey(
                         name: "fk_alert_rules_asset_groups_asset_group_id",
                         column: x => x.asset_group_id,
@@ -100,6 +100,7 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_alerts", x => x.id);
+                    table.CheckConstraint("ck_alerts_resolution", "(status = 'Resolved') = (resolved_at IS NOT NULL) AND (resolved_at IS NULL) = (resolve_reason IS NULL) AND (NOT from_backlog OR resolve_reason IS NOT DISTINCT FROM 'Cleared')");
                     table.CheckConstraint("ck_alerts_resolve_reason", "resolve_reason IN ('Cleared', 'Manual', 'RuleChanged', 'RuleDisabled', 'AssetArchived', 'DeviceDetached')");
                     table.CheckConstraint("ck_alerts_severity", "severity IN ('Warning', 'Critical')");
                     table.CheckConstraint("ck_alerts_status", "status IN ('Open', 'Acknowledged', 'Resolved')");
@@ -131,6 +132,11 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                 name: "ix_alert_rules_asset_id",
                 table: "alert_rules",
                 column: "asset_id");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_alerts_alert_rule_id",
+                table: "alerts",
+                column: "alert_rule_id");
 
             migrationBuilder.CreateIndex(
                 name: "ix_alerts_alert_rule_id_asset_id_active",

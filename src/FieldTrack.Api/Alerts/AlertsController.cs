@@ -13,9 +13,9 @@ namespace FieldTrack.Api.Alerts;
 [Authorize(Policy = Policies.Read)]
 public sealed class AlertsController(FieldTrackDbContext db) : ControllerBase
 {
-    /// <summary>The most Alerts one list returns.</summary>
+    // The most Alerts one list returns.
     // shortcut: newest only, no paging; add paging when the Alert feed (#37) pages back through history.
-    public const int MaxAlerts = 500;
+    private const int MaxAlerts = 500;
 
     /// <summary>
     /// Lists the newest Alerts by Device time raised, newest first: only Active ones when <paramref name="active"/> is
