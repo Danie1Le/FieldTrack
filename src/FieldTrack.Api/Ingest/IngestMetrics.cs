@@ -47,6 +47,9 @@ public sealed class IngestMetrics
     /// <summary>The histogram of how long evaluating the Alert Rules took within each batch's transaction.</summary>
     public const string RuleEvaluationDurationInstrument = "fieldtrack.ingest.rule_evaluation_duration";
 
+    /// <summary>The counter of Offline sweeps run (ADR 0005), so a stalled sweep shows.</summary>
+    public const string SweepsInstrument = "fieldtrack.ingest.sweeps";
+
     /// <summary>The counter of Alerts raised by ingest.</summary>
     public const string AlertsRaisedInstrument = "fieldtrack.ingest.alerts_raised";
 
@@ -69,6 +72,7 @@ public sealed class IngestMetrics
     private readonly Histogram<double> _ruleEvaluationDuration;
     private readonly Histogram<double> _alertPushDuration;
     private readonly Counter<long> _alertsRaised;
+    private readonly Counter<long> _sweeps;
     private readonly Counter<long> _rejectedMessages;
     private readonly Counter<long> _identicalDuplicates;
     private readonly Counter<long> _conflictingDuplicates;
@@ -90,6 +94,7 @@ public sealed class IngestMetrics
         _alertPushDuration = meter.CreateHistogram(
             AlertPushDurationInstrument, "s", "Time from an Alert's creation to its push being sent.", advice: _durationBuckets);
         _alertsRaised = meter.CreateCounter<long>(AlertsRaisedInstrument, "{alert}", "Alerts raised by ingest.");
+        _sweeps = meter.CreateCounter<long>(SweepsInstrument, "{sweep}", "Offline sweeps run.");
         _rejectedMessages = meter.CreateCounter<long>(
             RejectedMessagesInstrument, "{message}", "Telemetry messages stored as Rejected messages, by reason.");
         _identicalDuplicates = meter.CreateCounter<long>(
@@ -123,6 +128,13 @@ public sealed class IngestMetrics
         _identicalDuplicates.Add(written.IdenticalDuplicates);
         _conflictingDuplicates.Add(written.ConflictingDuplicates);
         _messages.Add(receivedTimes.Count);
+    }
+
+    /// <summary>Records a committed sweep and the Offline Alerts it raised; the sweep counter goes last, as in <see cref="RecordBatch"/>.</summary>
+    public void RecordSweep(WrittenBatch written)
+    {
+        _alertsRaised.Add(written.RaisedAlertIds.Count);
+        _sweeps.Add(1);
     }
 
     /// <summary>Records that an Alert's push went out <paramref name="sinceCreated"/> after the platform created it.</summary>
