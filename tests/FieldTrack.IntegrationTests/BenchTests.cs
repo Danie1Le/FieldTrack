@@ -79,6 +79,55 @@ public sealed class BenchTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     }
 
     [Fact]
+    public async Task Restarting_ingest_during_a_run_loses_nothing_and_stores_nothing_twice()
+    {
+        await SeedAsync();
+        var clientId = NewIngestClientId();
+        var ingest = await StartIngestAsync(clientId: clientId);
+
+        // A new worker on the same broker session takes over what the old one had not acknowledged. The compose bench SIGKILLs a container instead.
+        async Task<KillResult> RestartAsync(CancellationToken stop)
+        {
+            await ingest.DisposeAsync();
+            ingest = await StartIngestAsync(clientId: clientId);
+            return new KillResult("test-worker", WentDown: true, TimeSpan.Zero);
+        }
+
+        var outcome = await CrashBench.RunAsync(
+            Fleet, Target, rate: 60, TimeSpan.FromSeconds(9), [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)], RestartAsync, TextWriter.Null, CancellationToken);
+        await ingest.DisposeAsync();
+
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("kills").GetArrayLength().ShouldBe(2);
+        results.GetProperty("published").GetInt64().ShouldBeGreaterThan(300);
+        results.GetProperty("missing").GetInt64().ShouldBe(0);
+        results.GetProperty("storedDuplicates").GetInt64().ShouldBe(0);
+        results.GetProperty("publisherRetryCopies").GetInt64().ShouldBeGreaterThanOrEqualTo(0);
+        results.GetProperty("kills")[0].GetProperty("healthWentDown").GetBoolean().ShouldBeTrue();
+        outcome.Pass.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_kill_that_does_not_take_the_measured_stack_down_ends_the_run_with_a_failing_result()
+    {
+        await SeedAsync();
+        await using var ingest = await StartIngestAsync();
+
+        // The stack stays up, as when --compose-project names another stack's container.
+        var outcome = await CrashBench.RunAsync(
+            Fleet, Target, rate: 60, TimeSpan.FromSeconds(30), [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10)],
+            _ => Task.FromResult(new KillResult("someone-elses", WentDown: false, TimeSpan.Zero)), TextWriter.Null, CancellationToken);
+
+        File.Exists(outcome.Path).ShouldBeTrue();
+        outcome.Pass.ShouldBeFalse();
+        var results = JsonDocument.Parse(outcome.Json).RootElement.GetProperty("results");
+        results.GetProperty("killFailure").GetString()!.ShouldContain("not the stack being measured");
+        results.GetProperty("kills").GetArrayLength().ShouldBe(1, "the run stops at the first kill that did not crash anything");
+        results.GetProperty("published").GetInt64().ShouldBeLessThan(900, "publishing stopped early instead of running the remaining time");
+        results.GetProperty("missing").GetInt64().ShouldBe(0);
+    }
+
+    [Fact]
     public async Task A_database_clock_ahead_of_ours_lowers_the_latency_by_that_much()
     {
         await SeedAsync();
