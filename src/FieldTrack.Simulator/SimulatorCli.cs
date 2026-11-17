@@ -1,3 +1,4 @@
+using FieldTrack.Simulator.Bench;
 using System.Text.Json;
 
 namespace FieldTrack.Simulator;
@@ -29,6 +30,14 @@ internal static class SimulatorCli
               runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP without credentials: point it only at a local or
               trusted-network broker.
 
+          bench throughput|flood --fleet <file> [--rate <readings per second>] [--duration <seconds>]
+              Seeds the fleet, then measures telemetry ingest against the running compose stack and writes JSON (metrics plus git SHA,
+              CPU, RAM, OS, Docker limits, Postgres settings and image tags) to --out (bench/results). `throughput` holds --rate
+              (default 2000) for --duration (default 600) and passes when ingest latency p95 < 200 ms, the broker backlog stays flat and
+              nothing is lost; `flood` publishes flat out for --duration (default 60) and reports the rate ingest absorbed.
+              Also: [--db <connection string>] [--compose-project fieldtrack] [--mqtt-host --mqtt-port --api --email --state --out]
+              Start the stack with bench/docker-compose.bench.yml. Exit code 3 means the run finished but missed its bar.
+
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
         FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password.
         """;
@@ -52,6 +61,8 @@ internal static class SimulatorCli
                 case ["run", .. var rest]:
                     await RunAsync(Options.Parse(rest), cancellation.Token);
                     return 0;
+                case ["bench", var kind, .. var rest]:
+                    return await BenchCli.RunAsync(kind, Options.Parse(rest), cancellation.Token) ? 0 : 3;
                 default:
                     Console.WriteLine(Usage);
                     return args.Length == 0 ? 0 : 1;
@@ -151,7 +162,7 @@ internal static class SimulatorCli
         : uri;
 
     // The password only comes from the environment: a command-line argument lands in shell history and process lists.
-    private static string Credential(string? option, string variable, Options options) =>
+    internal static string Credential(string? option, string variable, Options options) =>
         (option is null ? null : options.Get(option)) ?? Environment.GetEnvironmentVariable(variable)
             ?? throw new SimulatorException($"Set {variable}{(option is null ? string.Empty : $" or pass --{option}")}.");
 }

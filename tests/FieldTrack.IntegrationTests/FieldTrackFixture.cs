@@ -36,6 +36,8 @@ public sealed class FieldTrackFixture : IAsyncLifetime
         // Same split as docker-compose: the image's init scripts load extensions into the
         // maintenance database, and the API creates and migrates the fieldtrack database itself.
         .WithDatabase("postgres")
+        // The bench reads each batch's commit time (bench/docker-compose.bench.yml sets the same).
+        .WithCommand("-c", "track_commit_timestamp=on")
         .Build();
 
     private readonly IContainer _broker = new ContainerBuilder(TestImages.Mosquitto)
