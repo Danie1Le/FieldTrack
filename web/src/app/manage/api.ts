@@ -11,8 +11,6 @@ export interface Asset {
   archived: boolean;
 }
 
-export const assetTypes: AssetType[] = ['Truck', 'Excavator', 'Generator', 'Sensor'];
-
 /** A Device (`DeviceResponse`). Lists leave out Archived ones unless asked. */
 export interface Device {
   id: string;

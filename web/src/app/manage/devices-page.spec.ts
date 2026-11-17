@@ -79,6 +79,26 @@ describe('DevicesPage', () => {
     await serve([device('trk9', 'TRK-009')]);
   });
 
+  it('builds the attach form afresh for each Device, so an unsaved choice never attaches another Device', async () => {
+    view.button('Detach', 'TRK-007').click();
+    await view.settle();
+    view.button('Yes, detach').click();
+    api.expectOne({ method: 'POST', url: '/api/attachments/now/detach' }).flush(null);
+    await serve([device('trk7', 'TRK-007'), device('trk9', 'TRK-009')], []);
+
+    view.button('Attach', 'TRK-007').click();
+    await view.settle();
+    view.fill('assetId', 'truck8');
+    view.button('Attach', 'TRK-009').click();
+    await view.settle();
+    view.button('Save').click();
+
+    const attach = api.expectOne({ method: 'POST', url: '/api/attachments' });
+    expect(attach.request.body).toEqual({ deviceId: 'trk9', assetId: 'truck7' });
+    attach.flush(attachment('new', 'trk9', 'truck7', '2026-11-17T11:00:00Z'));
+    await serve([device('trk9', 'TRK-009')]);
+  });
+
   it('detaches a Device only once the Admin confirms it in the page', async () => {
     view.button('Detach', 'TRK-007').click();
     await view.settle();
@@ -99,15 +119,20 @@ describe('DevicesPage', () => {
     expect(rows[0][2]).toBe('Still attached');
   });
 
-  it('deletes a Device only once the Admin confirms it in the page', async () => {
+  it('deletes a Device only once the Admin confirms it in the page, closing its Attachment history', async () => {
+    view.button('History', 'TRK-009').click();
     view.button('Delete', 'TRK-009').click();
     await view.settle();
     api.expectNone({ method: 'DELETE' });
-    expect(view.text(view.root.querySelector('[role="group"]'))).toContain('Archived instead');
+    const question = view.text(view.root.querySelector('[role="group"]'));
+    expect(question).toContain('Archived instead');
+    expect(question).toContain("its Asset's Active Alerts resolve as Device detached");
 
     view.button('Yes, delete').click();
     api.expectOne({ method: 'DELETE', url: '/api/devices/trk9' }).flush(null, { status: 204, statusText: 'No Content' });
     await serve([device('trk7', 'TRK-007')]);
+
+    expect(view.root.querySelector('[aria-label="Attachment history"]')).toBeNull();
   });
 
   it('shows why the API refused a change, as text', async () => {
@@ -119,8 +144,24 @@ describe('DevicesPage', () => {
       { detail: 'A Device with serial number TRK-007 is already registered.' },
       { status: 409, statusText: 'Conflict' },
     );
-    await view.settle();
+    await serve([device('trk7', 'TRK-007', '2026-11-17T10:00:00Z'), device('trk9', 'TRK-009')]);
 
     expect(view.text(view.root.querySelector('[role="alert"]'))).toBe('A Device with serial number TRK-007 is already registered.');
+    expect(view.root.querySelector<HTMLInputElement>('[name="serialNumber"]')!.value).toBe('TRK-007');
+  });
+
+  it('reads its data again when the API says an Attachment has already ended, so Detach is no longer offered', async () => {
+    view.button('Detach', 'TRK-007').click();
+    await view.settle();
+    view.button('Yes, detach').click();
+    api.expectOne({ method: 'POST', url: '/api/attachments/now/detach' }).flush(
+      { detail: 'The Attachment has already ended.' },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await serve([device('trk7', 'TRK-007')], [attachment('now', 'trk7', 'truck7', '2026-11-17T09:00:00Z', '2026-11-17T10:30:00Z')]);
+
+    expect(view.text(view.root.querySelector('[role="alert"]'))).toBe('The Attachment has already ended.');
+    expect(() => view.button('Detach', 'TRK-007')).toThrow();
+    expect(view.button('Attach', 'TRK-007')).toBeTruthy();
   });
 });

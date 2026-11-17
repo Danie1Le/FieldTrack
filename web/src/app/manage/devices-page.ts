@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { Asset, Attachment, Device } from './api';
 import { Changes } from './changes';
 import { ConfirmAction } from './confirm-action';
+import { Editing } from './editing';
 
 /**
  * Devices and their Attachments (Admins only, spec #21 stories 18-20, 22, 23, 53): register, attach to and detach
@@ -18,7 +19,7 @@ import { ConfirmAction } from './confirm-action';
 })
 export class DevicesPage {
   private readonly http = inject(HttpClient);
-  protected readonly changes = new Changes();
+  protected readonly changes = new Changes(() => this.load());
 
   protected readonly devices = signal<Device[] | null>(null);
   /** Archived ones too, so history still names them. */
@@ -27,7 +28,7 @@ export class DevicesPage {
   private readonly attachments = signal<Attachment[]>([]);
   protected readonly registering = signal(false);
   /** The Device being attached. */
-  protected readonly attaching = signal<Device | null>(null);
+  protected readonly attaching = new Editing<Device>();
   /** The Device whose Attachment history is shown. */
   protected readonly history = signal<Device | null>(null);
 
@@ -58,7 +59,7 @@ export class DevicesPage {
   }
 
   protected attach(form: HTMLFormElement): Promise<void> {
-    const body = { deviceId: this.attaching()!.id, assetId: new FormData(form).get('assetId') };
+    const body = { deviceId: this.attaching.item()!.id, assetId: new FormData(form).get('assetId') };
     return this.changes.send(this.http.post('/api/attachments', body), () => this.done());
   }
 
@@ -67,18 +68,25 @@ export class DevicesPage {
   }
 
   protected remove(device: Device): Promise<void> {
-    return this.changes.send(this.http.delete(`/api/devices/${encodeURIComponent(device.id)}`), () => this.done());
+    return this.changes.send(this.http.delete(`/api/devices/${encodeURIComponent(device.id)}`), () => {
+      // Deleted or Archived, the Device leaves the list, so its history panel goes too.
+      if (this.history()?.id === device.id) {
+        this.history.set(null);
+      }
+
+      return this.done();
+    });
   }
 
   protected cancel(): void {
     this.registering.set(false);
-    this.attaching.set(null);
+    this.attaching.close();
     this.changes.problems.set([]);
   }
 
   private done(): Promise<void> {
     this.registering.set(false);
-    this.attaching.set(null);
+    this.attaching.close();
     return this.load();
   }
 

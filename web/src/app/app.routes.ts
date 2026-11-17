@@ -31,10 +31,17 @@ export const routes: Routes = [
     title: 'Geofences · FieldTrack',
   },
   {
-    path: 'manage',
-    // Lazy, so only Admins download the management screens.
-    loadChildren: () => import('./manage/manage').then((m) => m.manageRoutes),
+    path: 'users',
+    loadComponent: () => import('./users/users-page').then((m) => m.UsersPage),
     canActivate: [adminGuard],
+    title: 'Users · FieldTrack',
+  },
+  {
+    path: 'manage',
+    // Lazy behind canMatch, which runs before the router loads children (canActivate runs after), so only Admins
+    // download the management screens.
+    loadChildren: () => import('./manage/manage').then((m) => m.manageRoutes),
+    canMatch: [adminGuard],
   },
   { path: '**', redirectTo: '' },
 ];

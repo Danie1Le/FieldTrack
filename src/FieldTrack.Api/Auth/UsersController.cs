@@ -45,7 +45,11 @@ public sealed class UsersController(FieldTrackDbContext db, UserManager<FieldTra
 
         if (!result.Succeeded)
         {
-            return this.IdentityValidationProblem(result);
+            // The username is the email: Identity reports a taken one twice; the Admin sees no username, so keep one message.
+            var errors = result.Errors.Any(error => error.Code == nameof(IdentityErrorDescriber.DuplicateEmail))
+                ? result.Errors.Where(error => error.Code != nameof(IdentityErrorDescriber.DuplicateUserName))
+                : result.Errors;
+            return this.IdentityValidationProblem(IdentityResult.Failed(errors.ToArray()));
         }
 
         await transaction.CommitAsync(cancellationToken);
