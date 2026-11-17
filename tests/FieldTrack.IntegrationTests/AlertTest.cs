@@ -24,15 +24,6 @@ public abstract class AlertTest(FieldTrackFixture fixture) : IntegrationTest(fix
 
     protected static DateTimeOffset Millis(DateTimeOffset time) => DateTimeOffset.FromUnixTimeMilliseconds(time.ToUnixTimeMilliseconds());
 
-#pragma warning disable IDE1006 // JSON property names
-    protected sealed record RuleRequest(
-        string name, string kind, string? assetId, string? assetGroupId, string severity, bool enabled,
-        string sensor, string @operator, double threshold, double hysteresis);
-#pragma warning restore IDE1006
-
-    protected static RuleRequest Overheat(string? assetId = null, string? assetGroupId = null) =>
-        new("Engine overheat", "Threshold", assetId, assetGroupId, "Critical", true, "EngineTempC", "GreaterThan", 105, 5);
-
     protected static async Task<(string Device, string Asset)> AttachedDeviceAsync(HttpClient admin, string serialNumber = "TRK-007", string? assetGroupId = null)
     {
         var device = await CreateAsync(admin, "/devices", new { serialNumber });

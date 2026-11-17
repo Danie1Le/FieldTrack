@@ -111,15 +111,9 @@ public sealed class AssetTests(FieldTrackFixture fixture) : IntegrationTest(fixt
     {
         using var admin = await AdminClientAsync();
         var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
-        var rule = await CreateAsync(admin, "/alert-rules", new { name = "Generator silent", kind = "Offline", assetId = asset, severity = "Warning", offlineSeconds = 60 });
+        var rule = await CreateAsync(admin, "/alert-rules", Silent(asset));
         // A Device that never reported raises an Offline Alert without any Reading; ingest's sweep writes it.
-        await using (var database = await OpenDatabaseAsync())
-        {
-            await SqlAsync(database, """
-                INSERT INTO alerts (id, alert_rule_id, asset_id, severity, message, status, raised_at, created_at, from_backlog)
-                VALUES (gen_random_uuid(), @p0, @p1, 'Warning', 'No Reading received for 60 s', 'Open', now(), now(), false)
-                """, Guid.Parse(rule), Guid.Parse(asset));
-        }
+        await InsertAlertAsync(rule, asset, offline: true);
 
         using var deleted = await admin.DeleteAsync($"/assets/{asset}", CancellationToken);
         var withArchived = await ListAsync(admin, "/assets?includeArchived=true");
