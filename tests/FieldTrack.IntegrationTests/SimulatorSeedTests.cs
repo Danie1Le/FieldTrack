@@ -97,6 +97,23 @@ public sealed class SimulatorSeedTests(FieldTrackFixture fixture) : IntegrationT
         exception.Message.ShouldContain("Truck");
     }
 
+    [Theory]
+    [InlineData("Excavator", "exists as a Truck")]
+    [InlineData("Truck", "already has Device TRK-001")]
+    public async Task A_new_Device_whose_Asset_conflicts_is_refused_and_not_created(string assetType, string reason)
+    {
+        var api = await SignInAsync();
+        await Seeder.SeedAsync(api, Fleet(), TextWriter.Null, CancellationToken);
+
+        var exception = await Should.ThrowAsync<SimulatorException>(() => Seeder.SeedAsync(api, Fleet($$"""
+            { "devices": [ { "serial": "TRK-002", "assetName": "Haul truck 1", "assetType": "{{assetType}}" } ] }
+            """), TextWriter.Null, CancellationToken));
+
+        exception.Message.ShouldContain(reason);
+        using var admin = await AdminClientAsync();
+        (await ListAsync(admin, "/devices")).Select(device => device.GetProperty("serialNumber").GetString()).ShouldBe(["GEN-001", "TRK-001"]);
+    }
+
     [Fact]
     public async Task Signing_in_with_a_temporary_password_tells_the_developer_to_change_it()
     {

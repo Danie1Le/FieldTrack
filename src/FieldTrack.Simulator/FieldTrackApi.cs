@@ -54,9 +54,9 @@ internal sealed class FieldTrackApi
     public Task<ApiDevice[]> ListDevicesAsync(CancellationToken cancellationToken) =>
         GetAsync<ApiDevice[]>("/devices?includeArchived=true", cancellationToken);
 
-    /// <summary>Lists one Device's Attachments, newest first.</summary>
-    public Task<ApiAttachment[]> ListAttachmentsAsync(Guid deviceId, CancellationToken cancellationToken) =>
-        GetAsync<ApiAttachment[]>($"/attachments?deviceId={deviceId}", cancellationToken);
+    /// <summary>Lists every Attachment, newest first: one call however large the fleet.</summary>
+    public Task<ApiAttachment[]> ListAttachmentsAsync(CancellationToken cancellationToken) =>
+        GetAsync<ApiAttachment[]>("/attachments", cancellationToken);
 
     /// <summary>Creates an Asset.</summary>
     public Task<ApiAsset> CreateAssetAsync(string name, AssetType type, CancellationToken cancellationToken) =>

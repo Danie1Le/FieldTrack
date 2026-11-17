@@ -1,8 +1,10 @@
+using System.Text.Json;
+
 namespace FieldTrack.Simulator;
 
 /// <summary>
 /// The simulator's command line. It drives demos and benchmarks: <c>seed</c> prepares the platform from a fleet file
-/// and <c>run</c> publishes Readings for it (spec #21, Simulator and bench).
+/// (spec #21, Simulator and bench).
 /// </summary>
 internal static class SimulatorCli
 {
@@ -42,6 +44,21 @@ internal static class SimulatorCli
             await Console.Error.WriteLineAsync(exception.Message);
             return 1;
         }
+        catch (HttpRequestException exception)
+        {
+            await Console.Error.WriteLineAsync($"Cannot reach the API: {exception.Message}");
+            return 1;
+        }
+        catch (JsonException exception)
+        {
+            await Console.Error.WriteLineAsync($"The API answered with something that is not the expected JSON: {exception.Message}");
+            return 1;
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            await Console.Error.WriteLineAsync("The API did not answer in time.");
+            return 1;
+        }
         catch (OperationCanceledException)
         {
             return 1;
@@ -51,10 +68,18 @@ internal static class SimulatorCli
     private static async Task SeedAsync(Options options, CancellationToken cancellationToken)
     {
         var fleet = FleetFile.Load(options.Require("fleet"));
-        using var http = new HttpClient { BaseAddress = new Uri(options.Get("api") ?? "http://localhost:8080") };
+        using var http = new HttpClient { BaseAddress = ApiAddress(options.Get("api") ?? "http://localhost:8080") };
         var api = await FieldTrackApi.SignInAsync(http, Credential("email", "FIELDTRACK_ADMIN_EMAIL", options), Credential(null, "FIELDTRACK_ADMIN_PASSWORD", options), cancellationToken);
         await Seeder.SeedAsync(api, fleet, Console.Out, cancellationToken);
     }
+
+    /// <summary>The API's base address: https anywhere, plain http only on this machine (the Admin's password and token cross it).</summary>
+    internal static Uri ApiAddress(string text) =>
+        !Uri.TryCreate(text, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            ? throw new SimulatorException($"--api must be an absolute http or https URL, got '{text}'.")
+        : uri.Scheme == Uri.UriSchemeHttp && !uri.IsLoopback
+            ? throw new SimulatorException($"--api {text} would send the Admin's password in cleartext; use https for a host other than this machine.")
+        : uri;
 
     // The password only comes from the environment: a command-line argument lands in shell history and process lists.
     private static string Credential(string? option, string variable, Options options) =>
