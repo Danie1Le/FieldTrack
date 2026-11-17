@@ -1,4 +1,5 @@
 import { Component, DestroyRef, ElementRef, afterRenderEffect, inject, input, output } from '@angular/core';
+import type {} from '@geoman-io/leaflet-geoman-free';
 import * as L from 'leaflet';
 import { GeoJsonPolygon, Geofence } from '../control-room/live';
 import { geofenceLayer } from './geofence-layer';
