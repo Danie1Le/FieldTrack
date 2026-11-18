@@ -1,0 +1,112 @@
+name: Terraform plan
+
+# terraform plan for both stacks on pull requests that touch infra/, as the read-only plan identity
+# (infra/terraform/bootstrap README: Who can sign in). It never applies: that identity can change nothing.
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-plan.yml"
+
+permissions:
+  contents: read
+  # The OIDC token azurerm exchanges for the plan identity's Azure token; no Azure secret is stored.
+  id-token: write
+
+concurrency:
+  group: terraform-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  # azurerm and its backend sign in with the job's GitHub OIDC token (federated credential github-pull-request).
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  # Reader cannot register resource providers; Apply demo's identity does that.
+  ARM_RESOURCE_PROVIDER_REGISTRATIONS: none
+
+jobs:
+  # The bootstrap's real state is a local file on the owner's laptop, so this plans the stack from empty: it checks
+  # the configuration against the subscription, not a diff against what is deployed.
+  plan-bootstrap:
+    # Fork pull requests get no OIDC token; without the repository variables (bootstrap not applied, or torn down)
+    # there is no identity to sign in as. Either way the job is skipped, not failed.
+    if: github.event.pull_request.head.repo.full_name == github.repository && vars.AZURE_PLAN_CLIENT_ID != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/terraform/bootstrap
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      # A placeholder budget address: the plan never reaches Azure, and the real one stays in the laptop's tfvars.
+      - name: Plan
+        env:
+          TF_VAR_state_storage_account_name: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+          TF_VAR_budget_alert_email: budget@example.invalid
+        run: |
+          terraform init
+          terraform plan -lock=false -refresh=false
+
+  plan-demo:
+    if: github.event.pull_request.head.repo.full_name == github.repository && vars.AZURE_PLAN_CLIENT_ID != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/terraform/demo
+    env:
+      TF_VAR_admin_email: ${{ vars.DEMO_ADMIN_EMAIL }}
+      TF_VAR_resource_group_name: ${{ vars.DEMO_RESOURCE_GROUP }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      # Storage Blob Data Reader on the state container is enough to initialise and read state.
+      - name: Init
+        env:
+          TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+          TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=$TF_STATE_RESOURCE_GROUP" \
+            -backend-config="storage_account_name=$TF_STATE_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TF_STATE_CONTAINER"
+
+      # A session is applied when state holds any managed resource (destroy leaves the state file, empty). Planning
+      # it then opens the ephemeral db-password read, which needs Key Vault data access the plan identity must not
+      # have (infra/terraform/demo README: Checks), so the plan is skipped rather than failed.
+      - name: Check for an applied session
+        id: session
+        run: |
+          terraform state list > "$RUNNER_TEMP/state.txt"
+          echo "resources=$(grep -vc '^data\.' "$RUNNER_TEMP/state.txt" || true)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip while a session is applied
+        if: steps.session.outputs.resources != '0'
+        run: |
+          message="Demo plan skipped: a session is applied (${{ steps.session.outputs.resources }} resources in state)."
+          echo "::notice::$message"
+          echo "$message" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Plan
+        if: steps.session.outputs.resources == '0'
+        run: terraform plan -lock=false -refresh=false
