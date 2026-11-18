@@ -8,7 +8,8 @@ public sealed class GeofenceRuleTests
     private static readonly Guid _asset = Guid.NewGuid();
     private static readonly Guid _device = Guid.NewGuid();
     private static readonly DateTimeOffset _t0 = new(2026, 11, 16, 12, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset _now = new(2026, 11, 16, 12, 5, 0, TimeSpan.Zero);
+    // Hours after every Reading here, so a breach that clears inside a batch is From backlog (Alert.BacklogMargin).
+    private static readonly DateTimeOffset _now = new(2026, 11, 16, 18, 0, 0, TimeSpan.Zero);
 
     // Inside means north of the equator, so a Reading's latitude says which side it is on.
     private const double Inside = 10;

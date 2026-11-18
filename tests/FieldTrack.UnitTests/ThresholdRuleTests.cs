@@ -8,7 +8,8 @@ public sealed class ThresholdRuleTests
     private static readonly Guid _asset = Guid.NewGuid();
     private static readonly Guid _device = Guid.NewGuid();
     private static readonly DateTimeOffset _t0 = new(2026, 11, 16, 12, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset _now = new(2026, 11, 16, 12, 5, 0, TimeSpan.Zero);
+    // Hours after every Reading here, so a breach that clears inside a batch is From backlog (Alert.BacklogMargin).
+    private static readonly DateTimeOffset _now = new(2026, 11, 16, 18, 0, 0, TimeSpan.Zero);
 
     // ADR 0005's example: raise above 105 °C, clear below 100 °C.
     private static readonly AlertRule _overheat = new()
@@ -189,6 +190,22 @@ public sealed class ThresholdRuleTests
         alert.FromBacklog.ShouldBeTrue();
         evaluation.ResolveActiveAlertAt.ShouldBeNull();
         evaluation.State.ShouldBe(new RuleState(false, new ReadingId(_device, 1, 4)));
+    }
+
+    [Theory]
+    [InlineData(10, false)]
+    [InlineData(10.001, true)]
+    public void A_breach_that_clears_inside_the_batch_is_From_backlog_only_if_it_cleared_more_than_10_s_before_the_Alert_was_created(
+        double secondsBeforeCreated, bool fromBacklog)
+    {
+        var cleared = _now.AddSeconds(-secondsBeforeCreated);
+        var evaluation = Evaluate(_overheat, null,
+            new StoredReading(_device, Reading(1, 0) with { EngineTempC = 110f, DeviceTime = cleared.AddSeconds(-1) }),
+            new StoredReading(_device, Reading(1, 1) with { EngineTempC = 95f, DeviceTime = cleared }));
+
+        var alert = evaluation.Raised.ShouldHaveSingleItem();
+        alert.Status.ShouldBe(AlertStatus.Resolved);
+        alert.FromBacklog.ShouldBe(fromBacklog);
     }
 
     [Fact]
