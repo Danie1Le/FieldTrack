@@ -82,6 +82,56 @@ public sealed class ExportTests(FieldTrackFixture fixture) : IntegrationTest(fix
     }
 
     [Fact]
+    public async Task Export_of_a_range_ending_near_the_last_representable_time_downloads_without_error()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+        var from = new DateTimeOffset(9999, 12, 31, 0, 0, 0, TimeSpan.Zero);
+        var ticket = await PostExportAsync(admin, asset, from, from.AddHours(12));
+        using var anonymous = Fixture.Api.CreateClient();
+
+        using var response = await anonymous.GetAsync(ticket, CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(CancellationToken)).ShouldBe(Header + "\n");
+    }
+
+    [Fact]
+    public async Task Export_leaves_out_another_Assets_Readings_in_the_same_range()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+        var other = await CreateAsync(admin, "/assets", new { name = "Generator 2", type = "Generator" });
+        var device = await CreateAsync(admin, "/devices", new { serialNumber = "GEN-1" });
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, """
+            INSERT INTO readings (device_id, boot, seq, asset_id, device_time, received_time, location)
+            VALUES (@p0, 1, 1, @p1, @p3 + interval '1 hour', now(), ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography),
+                   (@p0, 1, 2, @p2, @p3 + interval '2 hours', now(), ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography)
+            """, Guid.Parse(device), Guid.Parse(asset), Guid.Parse(other), Yesterday);
+
+        var ticket = await PostExportAsync(admin, asset, Yesterday, Yesterday.AddDays(1));
+        using var anonymous = Fixture.Api.CreateClient();
+        var lines = (await anonymous.GetStringAsync(ticket, CancellationToken)).Split('\n');
+
+        lines.Length.ShouldBe(3);
+        lines[1].Split(',')[2].ShouldBe("1");
+    }
+
+    [Fact]
+    public async Task An_export_download_asks_nginx_not_to_buffer_it()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+        var ticket = await PostExportAsync(admin, asset, Yesterday, Yesterday.AddDays(1));
+        using var anonymous = Fixture.Api.CreateClient();
+
+        using var response = await anonymous.GetAsync(ticket, CancellationToken);
+
+        response.Headers.GetValues("X-Accel-Buffering").ShouldBe(["no"]);
+    }
+
+    [Fact]
     public async Task An_export_URL_downloads_once()
     {
         using var admin = await AdminClientAsync();

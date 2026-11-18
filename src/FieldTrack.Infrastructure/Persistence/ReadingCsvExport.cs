@@ -17,6 +17,9 @@ public static class ReadingCsvExport
     /// <summary>The most exports one user runs at once (spec #21).</summary>
     public const int MaxRunningPerUser = 2;
 
+    /// <summary>The longest Device-time range one export covers (#19: 31 days, no row cap).</summary>
+    public static readonly TimeSpan MaxRange = TimeSpan.FromDays(31);
+
     private const int BufferSize = 64 * 1024;
 
     // Every time is UTC in ISO 8601 with a Z (spec #21).
@@ -69,9 +72,10 @@ public static class ReadingCsvExport
     {
         await using var writer = new StreamWriter(destination, new UTF8Encoding(false), BufferSize, leaveOpen: true);
         var buffer = new char[BufferSize];
-        for (var start = from; start < to; start += Chunk)
+        // Compares before adding: start + Chunk overflows for a range ending near DateTimeOffset.MaxValue.
+        for (var start = from; start < to;)
         {
-            var end = start + Chunk < to ? start + Chunk : to;
+            var end = to - start > Chunk ? start + Chunk : to;
             // Npgsql's raw copy is binary only; a text export decodes and the writer encodes again, one buffer at a time.
             using var csv = await connection.BeginTextExportAsync(CopyCommand(assetId, start, end, header: start == from), cancellationToken);
             int read;
@@ -79,12 +83,15 @@ public static class ReadingCsvExport
             {
                 await writer.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             }
+
+            start = end;
         }
     }
 
     // COPY takes no parameters. Only a Guid and UTC times formatted here reach the SQL, never text a user typed.
     // A serial starting with - (the only formula character a serial may hold) is prefixed with ' so a spreadsheet
-    // reads it as text (CSV injection); Asset names are not in the file.
+    // reads it as text (CSV injection); Asset names are not in the file. The ' is part of the exported value and
+    // consumers strip it (documented on ExportRequest).
     private static string CopyCommand(Guid assetId, DateTimeOffset from, DateTimeOffset to, bool header) =>
         string.Create(CultureInfo.InvariantCulture, $"""
             COPY (
