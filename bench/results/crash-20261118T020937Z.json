@@ -1,0 +1,155 @@
+{
+  "bench": "crash",
+  "startedAt": "2026-11-18T02:09:37.3673783+00:00",
+  "pass": true,
+  "parameters": {
+    "devices": 200,
+    "ratePerSecond": 500,
+    "durationSeconds": 600,
+    "kills": 10,
+    "killSignal": "SIGKILL"
+  },
+  "results": {
+    "readingsInDatabaseAtStart": 0,
+    "published": 300004,
+    "brokerReceived": 300014,
+    "stored": 300004,
+    "missing": 0,
+    "storedDuplicates": 0,
+    "publisherRetryCopies": 10,
+    "redeliveriesCounted": false,
+    "drainSeconds": 0.0266876,
+    "peakBacklog": 3941,
+    "allKillsCrashedTheStack": true,
+    "killFailure": null,
+    "kills": [
+      {
+        "plannedSeconds": 53.5772647,
+        "killedAtSeconds": 53.5910955,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 8.5309236
+      },
+      {
+        "plannedSeconds": 119.7708167,
+        "killedAtSeconds": 119.7744511,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 7.5215953
+      },
+      {
+        "plannedSeconds": 170.0239662,
+        "killedAtSeconds": 170.0349703,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 9.96081
+      },
+      {
+        "plannedSeconds": 206.3858822,
+        "killedAtSeconds": 206.3865837,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 5.8746517
+      },
+      {
+        "plannedSeconds": 285.178063,
+        "killedAtSeconds": 285.1909872,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 7.6798433
+      },
+      {
+        "plannedSeconds": 333.9171531,
+        "killedAtSeconds": 333.9176053,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 8.8311091
+      },
+      {
+        "plannedSeconds": 392.1068553,
+        "killedAtSeconds": 392.1152482,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 8.1954076
+      },
+      {
+        "plannedSeconds": 428.5316553,
+        "killedAtSeconds": 428.5329415,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 6.3319924
+      },
+      {
+        "plannedSeconds": 475.7057421,
+        "killedAtSeconds": 475.7087048,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 5.4184761
+      },
+      {
+        "plannedSeconds": 546.4862024,
+        "killedAtSeconds": 546.4976451,
+        "container": "20fc96587921",
+        "healthWentDown": true,
+        "backUpAfterSeconds": 7.6119385
+      }
+    ]
+  },
+  "environment": {
+    "gitSha": "8826c901f1f27770aca7d077aab8345e2c61f3e3",
+    "gitDirty": false,
+    "os": "Microsoft Windows 10.0.26300",
+    "cpu": {
+      "model": "Intel64 Family 6 Model 158 Stepping 13, GenuineIntel",
+      "logicalCores": 8
+    },
+    "ramBytes": 17118646272,
+    "dotnet": ".NET 10.0.2",
+    "docker": {
+      "engineVersion": "29.9.2",
+      "cpus": 8,
+      "memoryBytes": 8298065920,
+      "operatingSystem": "Docker Desktop"
+    },
+    "containers": [
+      {
+        "service": "api",
+        "image": "ft50-api",
+        "imageId": "sha256:372354d6ef681102f0b28d9927fc34c50e4a8b5dacbfc1a9a5c2bc916b3617b0",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      },
+      {
+        "service": "postgres",
+        "image": "postgis/postgis:16-3.6",
+        "imageId": "sha256:d07ce3f06f657b6516c7511412232e97174d7e9dcf4c9fe520109b682b44a201",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      },
+      {
+        "service": "mosquitto",
+        "image": "eclipse-mosquitto:2.1.2-alpine",
+        "imageId": "sha256:75d6662dee52c947dc9dd9c29f1d8d7ffef78ddaf38001caa09755681e8bbc98",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      }
+    ],
+    "postgres": {
+      "checkpoint_timeout": "5min",
+      "effective_cache_size": "4GB",
+      "fsync": "on",
+      "jit": "on",
+      "maintenance_work_mem": "64MB",
+      "max_connections": "100",
+      "max_parallel_workers_per_gather": "2",
+      "max_wal_size": "4GB",
+      "random_page_cost": "4",
+      "server_version": "16.15 (Debian 16.15-1.pgdg13\u002B2)",
+      "shared_buffers": "1GB",
+      "synchronous_commit": "on",
+      "track_commit_timestamp": "on",
+      "wal_level": "replica",
+      "work_mem": "4MB"
+    }
+  }
+}
