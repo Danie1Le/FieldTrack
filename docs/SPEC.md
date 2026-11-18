@@ -122,16 +122,17 @@ Observability: OpenTelemetry -> Azure Monitor / App Insights (Grafana locally)
 
 | Component | Azure service |
 |---|---|
-| API + ingest worker | Azure Container Apps (consumption plan, scale to zero) |
-| MQTT broker | Mosquitto everywhere: a container locally, a Container App reached over MQTT over WebSockets (`wss://…:443`) in Azure (spec #21) |
-| Database | Azure Database for PostgreSQL Flexible Server, Burstable B1ms (PostGIS extension enabled), only while demoing |
-| Angular dashboard | Azure Static Web Apps (Free plan) |
+| API + ingest worker | Azure Container Apps, Consumption profile, exactly 1 replica while deployed (the ingest worker is a single instance, so SignalR needs no backplane) |
+| Device simulator | A second Container App at demo rate |
+| MQTT broker | Mosquitto everywhere: a container locally, a Container App reached over MQTT over WebSockets (`wss://…:443`) in Azure (spec #21, ADR 0006) |
+| Database | Azure Database for PostgreSQL Flexible Server, Burstable B1ms (PostgreSQL 16, PostGIS extension enabled), only while demoing |
+| Angular dashboard | The nginx dashboard container as a Container App, proxying `/api` and `/hubs` to the API (one HTTPS address, no CORS) |
 | Images | GitHub Container Registry (free for public repos) instead of Azure Container Registry |
 | Secrets | Azure Key Vault (managed identity access) |
 | Monitoring | Application Insights + Log Analytics (stay under the free monthly data allowance) |
 | Terraform state | Azure Storage account backend |
 
-See section 11 for the $0 budget rules.
+The demo runs on the developer's Azure free account and is created and destroyed per session (ADR 0006). See section 11 for the $0 budget rules.
 
 ### Repository layout
 
@@ -236,7 +237,7 @@ Fill these in only with your own measured numbers once the project is built and 
 
 ## 11. Budget: $0
 
-Hard rule: the project must never cost real money. Everything is built and benchmarked locally for free, and Azure is used only through credits that cannot charge a card.
+Hard rule: the project must never cost real money. Everything is built and benchmarked locally for free, and Azure is used only through the free account's $200 credit (valid 2026-11-18 to 2026-12-18), never upgraded, so it cannot charge the card.
 
 ### 11.1 Free by default (local development)
 
@@ -246,24 +247,24 @@ The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquit
 
 ### 11.2 Azure without spending money
 
-1. **Sign up for Azure for Students** with the university email. It needs no credit card, so nothing can ever be billed to you. It gives a yearly credit, renewable while you are a student. When the credit runs out, services stop instead of charging.
-2. **Never upgrade to Pay-As-You-Go.** Do not add a credit card to the Azure account.
-3. **Set a budget of $0 with alerts** (Cost Management > Budgets) at 50%, 80%, and 100% of a small amount (e.g. $1 of credit) so any unexpected usage is visible right away.
-4. **Deploy only to demo.** Run `terraform apply` before a demo or recording, then `terraform destroy` right after. Nothing stays running between demos.
+1. **Use the Azure free account** ($200 credit for 30 days, 2026-11-18 to 2026-12-18, in the developer's own billing account). Azure for Students could not verify the school account (#8). The card on file is for identity only, and nothing is charged unless the account is upgraded. When the credit runs out or expires, services stop and the cloud demo is over (ADR 0006).
+2. **Never upgrade to Pay-As-You-Go.** Check the account plan (free) and the remaining credit before every apply.
+3. **Set budget alerts** (Cost Management > Budgets): an email at $1 of usage and another near the end of the credit, so any unexpected usage is visible right away. The budget lives in the `bootstrap` Terraform stack.
+4. **Deploy only to demo.** Run the `demo` stack's apply from GitHub Actions before a demo or recording, then destroy it right after. Only the `bootstrap` stack (state, identity, budget) stays.
 5. **Pick free tiers in Terraform:**
 
 | Component | $0 choice |
 |---|---|
-| Angular dashboard | Azure Static Web Apps, Free plan |
-| API + ingest worker | Azure Container Apps consumption plan, `min_replicas = 0` for the API so it scales to zero (covered by the monthly free grant at demo traffic) |
-| MQTT broker | Mosquitto as a Container App on the Consumption profile, reached over MQTT over WebSockets (spec #21; replaces the HiveMQ Cloud plan) |
-| Database | Azure PostgreSQL Flexible Server Burstable B1ms only while deployed (covered by free/student hours); destroyed after each demo. Free fallback: a free-tier hosted Postgres that supports PostGIS (Neon or Supabase) |
+| Angular dashboard | nginx dashboard Container App, Consumption profile (no Static Web Apps) |
+| API + ingest worker | Azure Container Apps consumption plan, the API with the ingest worker at exactly 1 replica while deployed (the worker must stay connected to the broker), covered by the credit at demo traffic |
+| MQTT broker | Mosquitto as a Container App on the Consumption profile, reached over MQTT over WebSockets with password auth (spec #21, ADR 0006; replaces the HiveMQ Cloud plan) |
+| Database | Azure PostgreSQL Flexible Server Burstable B1ms only while deployed PostgreSQL 16 with PostGIS (covered by the free account's 12-month hours); destroyed after each demo. Free fallback: a free-tier hosted Postgres that supports PostGIS (Neon or Supabase) |
 | Container images | GitHub Container Registry (free), not Azure Container Registry |
-| Monitoring | Application Insights with sampling turned on to stay inside the free monthly data allowance; Grafana locally for benchmarks |
-| Secrets | Azure Key Vault (fractions of a cent, covered by credit) or GitHub Actions secrets |
-| Terraform state | One small Azure Storage account (cents, covered by credit) or Terraform Cloud free tier |
+| Monitoring | Application Insights through the Azure Monitor OpenTelemetry Distro, with sampling and a daily cap on; Grafana locally for benchmarks |
+| Secrets | Azure Key Vault, read by managed identity (fractions of a cent, covered by credit) |
+| Terraform state | One small Azure Storage account in the `bootstrap` stack (cents, covered by credit), with a user-assigned managed identity for GitHub OIDC |
 
-6. **Check `terraform plan` output before every apply** and confirm no paid SKUs (no Standard/Premium tiers, no extra replicas, no NAT gateways or public IPs beyond the defaults).
+6. **Check `terraform plan` output before every apply** and confirm no paid SKUs (no Standard/Premium tiers, no extra replicas, no NAT gateways or public IPs beyond the defaults, and none of: VNet, private endpoint, dedicated workload profile, maintenance window, HA, geo-redundant backup).
 
 ### 11.3 Showing the project without paying to host it
 
@@ -271,4 +272,4 @@ The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquit
 - Publish `docs/RESULTS.md` with the local benchmark numbers.
 - In interviews, say the whole environment is created and destroyed with Terraform in minutes. That is a real skill and explains why it is not always online.
 
-Free-tier limits change. Before deploying, confirm the current limits on the Azure for Students, Container Apps, Static Web Apps, and PostgreSQL Flexible Server pricing pages.
+Free-tier limits change. Before deploying, confirm the current limits on the Azure free account, Container Apps, and PostgreSQL Flexible Server pricing pages.
