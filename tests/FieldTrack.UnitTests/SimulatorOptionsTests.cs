@@ -43,6 +43,19 @@ public sealed class SimulatorOptionsTests
     }
 
     [Fact]
+    public void A_run_starts_new_Devices_at_Boot_1_or_with_first_boot_clock_at_the_clock_Boot()
+    {
+        var before = BootState.ClockBoot(DateTimeOffset.UtcNow);
+        var clock = SimulatorCli.RunOptionsFrom(Options.Parse(["--rate", "1", "--first-boot", "clock"]), Fleet);
+        var after = BootState.ClockBoot(DateTimeOffset.UtcNow);
+
+        SimulatorCli.RunOptionsFrom(Options.Parse(["--rate", "1"]), Fleet).FirstBoot.ShouldBe(1);
+        clock.FirstBoot.ShouldBeInRange(before, after);
+        Should.Throw<SimulatorException>(() => SimulatorCli.RunOptionsFrom(Options.Parse(["--rate", "1", "--first-boot", "7"]), Fleet))
+            .Message.ShouldContain("--first-boot");
+    }
+
+    [Fact]
     public void A_Scenario_file_is_loaded_against_the_fleet()
     {
         var path = Path.GetTempFileName();

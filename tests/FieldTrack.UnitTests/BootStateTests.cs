@@ -32,6 +32,25 @@ public sealed class BootStateTests : IDisposable
     }
 
     [Fact]
+    public void A_Device_not_in_the_file_starts_at_the_first_Boot_given_and_one_in_it_at_its_next()
+    {
+        BootState.Raise(StatePath, ["TRK-001"]);
+
+        var boots = BootState.Raise(StatePath, ["TRK-001", "GEN-001"], firstBoot: 500);
+
+        boots.ShouldBe(new Dictionary<string, int> { ["TRK-001"] = 2, ["GEN-001"] = 500 });
+    }
+
+    [Fact]
+    public void A_clock_Boot_counts_the_seconds_since_2026_so_a_later_start_gets_a_higher_one()
+    {
+        var start = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero);
+
+        BootState.ClockBoot(start).ShouldBe(86_400);
+        BootState.ClockBoot(start.AddSeconds(1)).ShouldBe(86_401);
+    }
+
+    [Fact]
     public async Task Devices_of_one_run_that_power_cycle_together_each_get_their_own_Boot()
     {
         BootState.Raise(StatePath, ["TRK-001"]);

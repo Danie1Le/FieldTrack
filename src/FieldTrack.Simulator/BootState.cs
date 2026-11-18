@@ -12,15 +12,26 @@ internal static class BootState
 
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
+    private static readonly DateTimeOffset _clockEpoch = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// The first Boot for a simulator whose state file does not outlive it (a container without lasting storage): the
+    /// whole seconds since 2026-01-01 UTC at <paramref name="now"/>, so each start begins above every Boot an earlier one
+    /// published (ADR 0001). A Power off raises a Boot by one, so this holds while a run has fewer Power offs per Device
+    /// than seconds; it fits an int until 2094.
+    /// </summary>
+    public static int ClockBoot(DateTimeOffset now) => checked((int)((now - _clockEpoch).Ticks / TimeSpan.TicksPerSecond));
+
     /// <summary>
     /// Raises the Boot counter of every Device in <paramref name="serials"/> by one, saves the file, and returns the
-    /// new counts. A Device not seen before gets Boot 1; Devices not in <paramref name="serials"/> keep their count.
+    /// new counts. A Device not seen before gets <paramref name="firstBoot"/>; Devices not in <paramref name="serials"/>
+    /// keep their count.
     /// </summary>
     /// <exception cref="SimulatorException">
     /// The file exists but cannot be read (it is not replaced: starting over from 0 would reuse identities), or another
     /// simulator is raising it at the same moment.
     /// </exception>
-    public static IReadOnlyDictionary<string, int> Raise(string path, IEnumerable<string> serials)
+    public static IReadOnlyDictionary<string, int> Raise(string path, IEnumerable<string> serials, int firstBoot = 1)
     {
         // Devices of one run power-cycle on their own threads; the file lock below would turn the second one into an error.
         lock (_gate)
@@ -28,7 +39,7 @@ internal static class BootState
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             using var exclusive = Lock(path);
             var state = Read(path);
-            var raised = serials.ToDictionary(serial => serial, serial => state.GetValueOrDefault(serial) + 1);
+            var raised = serials.ToDictionary(serial => serial, serial => state.TryGetValue(serial, out var boot) ? boot + 1 : firstBoot);
             foreach (var (serial, boot) in raised)
             {
                 state[serial] = boot;
