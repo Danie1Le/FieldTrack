@@ -28,6 +28,8 @@
   <!-- The test broker runs the same configuration as docker-compose. -->
   <ItemGroup>
     <None Include="..\..\docker\mosquitto\mosquitto.conf" Link="mosquitto.conf" CopyToOutputDirectory="PreserveNewest" />
+    <!-- CloudBroker builds the Container Apps broker image from these. -->
+    <None Include="..\..\docker\mosquitto\cloud\**" LinkBase="mosquitto-cloud" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -41,6 +41,29 @@ public sealed class BrokerConnectionTests(FieldTrackFixture fixture) : Integrati
         new MqttClientOptionsBuilder().WithBroker(new BrokerOptions { Host = "broker.example", UseTls = true }).Build()
             .ChannelOptions.TlsOptions.UseTls.ShouldBeTrue();
 
+    [Fact]
+    public void A_client_uses_MQTT_over_WebSockets_with_TLS_when_configured()
+    {
+        var built = new MqttClientOptionsBuilder()
+            .WithBroker(new BrokerOptions { Host = "broker.example", Port = 443, Transport = BrokerTransport.WebSockets, UseTls = true })
+            .Build();
+
+        var webSocket = built.ChannelOptions.ShouldBeOfType<MqttClientWebSocketOptions>();
+        new Uri(webSocket.Uri).ShouldBe(new Uri("wss://broker.example:443/mqtt"));
+        webSocket.TlsOptions.UseTls.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_client_pings_an_idle_connection_well_within_the_Container_Apps_ingress_timeout()
+    {
+        // Container Apps HTTP ingress drops a request (a WebSocket included) after 240 s; keep-alive traffic must come well before.
+        var ingressTimeout = TimeSpan.FromSeconds(240);
+
+        new MqttClientOptionsBuilder().WithBroker(new BrokerOptions { Host = "broker.example", Transport = BrokerTransport.WebSockets }).Build()
+            .KeepAlivePeriod.ShouldBe(MqttClientOptionsBuilderExtensions.KeepAlive);
+        MqttClientOptionsBuilderExtensions.KeepAlive.ShouldBeLessThanOrEqualTo(ingressTimeout / 4);
+    }
+
     [Theory]
     [InlineData("broker.example", false, false)]
     [InlineData("broker.example", true, true)]

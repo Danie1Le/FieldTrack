@@ -37,8 +37,9 @@
     <None Include="..\..\src\FieldTrack.Simulator\fleets\**" LinkBase="fleets" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- TelemetryPayloadTests checks the broker's payload limit matches the contract's. -->
+  <!-- TelemetryPayloadTests checks the brokers' payload limit matches the contract's; CloudBrokerTests compares the two broker configurations. -->
   <ItemGroup>
     <None Include="..\..\docker\mosquitto\mosquitto.conf" Link="mosquitto.conf" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\docker\mosquitto\cloud\**" LinkBase="mosquitto-cloud" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

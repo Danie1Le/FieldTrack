@@ -125,7 +125,7 @@ public sealed class IngestCrashTests(FieldTrackFixture fixture) : IntegrationTes
     };
 
     /// <summary>Fails every batch at <paramref name="point"/>, as a worker that crashes there each time.</summary>
-    private sealed class CrashAt(IngestCrashPoint point) : IIngestCrashPoints
+    internal sealed class CrashAt(IngestCrashPoint point) : IIngestCrashPoints
     {
         /// <summary>Completes the first time a batch reaches the point.</summary>
         public TaskCompletionSource Crashed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
