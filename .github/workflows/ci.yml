@@ -58,7 +58,7 @@ jobs:
           cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
           coverage=$(jq '.summary.linecoverage' coverage/Summary.json)
           echo "Domain line coverage: ${coverage}% from $(ls TestResults/coverage.cobertura.*.xml | wc -l) reports"
-          jq -e '.summary.linecoverage >= 99' coverage/Summary.json > /dev/null \
+          jq -e '.summary.linecoverage >= 80' coverage/Summary.json > /dev/null \
             || { echo "::error::Domain line coverage is ${coverage}%, below the 80% gate."; exit 1; }
 
   web:
