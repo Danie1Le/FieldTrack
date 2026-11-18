@@ -2,8 +2,10 @@
 
 The latest headline numbers, each linked to the JSON its run wrote. Methods and bars come from the benchmark method
 ([#17](https://github.com/Danie1Le/FieldTrack/issues/17)) and spec [#21](https://github.com/Danie1Le/FieldTrack/issues/21);
-how to run each one is in the [README](../README.md#benchmarks). Every JSON file also records the git SHA, Docker
-limits, Postgres settings and image tags of its run.
+how to run each one is in the [README](../README.md#benchmarks). Every `bench` JSON file also records the git SHA,
+Docker limits, Postgres settings and image tags of its run. The two k6 summaries hold k6 metrics only: they record no SHA
+or environment, so the machine below and the commit named here are the only record of where the 2026-11-18 k6 run
+happened (the earlier #126 run's commit is not recorded).
 
 All curated runs below were taken on 2026-11-18 (UTC) from commit `8826c90`, each from an empty database, with no other
 stack, test suite or benchmark running on the machine.
@@ -55,7 +57,7 @@ the GPX routes, 31 daily partitions, seeded in 63 s.
   runs, against 13 before). No sustained 2,000 msg/s run on Linux is recorded.
 - **Two latency clocks.** Ingest latency is the commit timestamp in Postgres (the Docker VM's clock, offset measured at
   ~1 ms) minus the Reading's Device time on the host. The same run's publish-to-PUBACK time (`tickToPubackMs`, p95 4 ms)
-  is lower, although PUBACKs follow the commit, so the two clocks disagree by tens of milliseconds. The page uses the
+  is lower, although PUBACKs follow the commit, so the two clocks disagree by ~108 ms at p95 (112 ms against 4 ms). The page uses the
   stricter commit-timestamp number.
 - **Crash duplicates.** The broker received 10 more PUBLISHes than were stored: publisher retries after a PUBACK
   timeout around a kill, dropped by the Reading key table as identical copies (`publisherRetryCopies`). Redeliveries are
@@ -68,4 +70,9 @@ the GPX routes, 31 daily partitions, seeded in 63 s.
   separate excursions that no Hysteresis suppresses; Hysteresis mainly removes the flapping inside Fault windows (40 Alerts
   in 10 windows without it, 10 with it). Parameters were not tuned to flatter the result.
 - **k6 ran on a young history.** The stack was fresh and the simulator (`--rate 20`, demo fleet) had published for one minute before the 5-minute test, so each Asset held at most ~1,500 Readings and the 24 h history call never had to thin. The heavy case, a full 24 h at demo rate thinned to 1,500 points, was measured when that path was built ([#126](https://github.com/Danie1Le/FieldTrack/issues/126)): p95 34 ms overall, 24 h history p95 52 ms, 0% failed ([run](../bench/results/k6-dashboard-2026-11-17T23-12-51-953Z.json)). Before #126 the history read returned every Reading and the test failed at p95 1,006 ms (#47).
+- **Replay is thinned to 1,500 points.** The Asset detail replay draws at most 1,500 points per range: a 24 h route keeps
+  a vertex about every 600 m, and a range of 1,500 Readings or fewer shows every Reading. At 3,000 points the readings p95
+  sat on the 150 ms bar, so the cap was halved; a 24 h route is coarser as a result.
+- **Known gap: From backlog tag.** The tag that marks backlogged Readings on the dashboard never shows; tracked in
+  [#146](https://github.com/Danie1Le/FieldTrack/issues/146). The demo shows the backlog in History instead.
 - **Coverage** is from CI, not a bench run: the Domain was at 97.4% when the gate landed (#49); CI fails a pull request below 80%.

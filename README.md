@@ -139,7 +139,8 @@ tags). A bench refuses a working tree with uncommitted changes, so the SHA ident
 means the run finished but missed its bar.
 
 Benchmarks run against a compose stack with the bench layer (commit timestamps on, larger `shared_buffers`, `$SYS`
-broker counters every second). Start each from an empty database, with the Admin's password replaced:
+broker counters every second). Start each from an empty database. The Admin's temporary password in `.env` must be
+replaced first: sign in at http://localhost:8081 and set a new one, then export the new password as below.
 
 ```sh
 docker compose down -v
@@ -148,8 +149,9 @@ export FIELDTRACK_ADMIN_EMAIL=... FIELDTRACK_ADMIN_PASSWORD=...
 bench() { dotnet run --project src/FieldTrack.Simulator -c Release -- bench "$@" --compose-project fieldtrack; }
 ```
 
-(`--compose-project` is the compose project name, by default the repo folder's name; `--api`, `--db`, `--mqtt-port`
-point at remapped ports.)
+`--compose-project` is required: it is the compose project name (`docker compose ls`; by default the repo folder's name,
+lower-case) and the bench uses it to find the containers it kills and queries. `--api`, `--db` and `--mqtt-port` point
+at remapped ports.
 
 | Command | Measures | Bar |
 |---|---|---|
