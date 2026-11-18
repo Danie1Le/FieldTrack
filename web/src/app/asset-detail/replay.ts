@@ -1,4 +1,4 @@
-import { AlertRule, Sensor } from '../control-room/live';
+import { AlertRule, Sensor, covers } from '../control-room/live';
 
 /**
  * The most vertices the route or the trail is drawn with, and so the most Readings the page asks the history endpoint
@@ -35,8 +35,8 @@ export interface RuleLine {
 }
 
 /**
- * The lines of every enabled Threshold rule on the sensor that covers the Asset (by Asset or Asset Group). Hysteresis
- * is a deadband (#10): `>` clears below threshold minus Hysteresis, `<` above threshold plus Hysteresis.
+ * The lines of every enabled Threshold rule on the sensor that covers the Asset (by Asset or Asset Group). With
+ * Hysteresis (#10), `>` clears below threshold minus Hysteresis, `<` above threshold plus Hysteresis.
  */
 export function ruleLines(
   rules: readonly AlertRule[],
@@ -49,7 +49,7 @@ export function ruleLines(
         rule.enabled &&
         rule.kind === 'Threshold' &&
         rule.sensor === sensor &&
-        (rule.assetId === asset.id || (rule.assetGroupId !== null && rule.assetGroupId === asset.assetGroupId)),
+        covers(rule, asset),
     )
     .map((rule) => {
       const [operator, threshold, hysteresis] = [rule.operator!, rule.threshold!, rule.hysteresis ?? 0];
