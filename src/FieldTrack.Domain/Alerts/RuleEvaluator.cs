@@ -144,7 +144,7 @@ public static class RuleEvaluator
             _ => null,
         };
 
-    // #10: deadband only. With > 105 and Hysteresis 5, breach above 105 and clear below 100; mirrored for <.
+    // #10: Hysteresis only. With > 105 and Hysteresis 5, breach above 105 and clear below 100; mirrored for <.
     // ADR 0005: unknown state counts as clear. A Reading without the sensor neither raises nor clears.
     private static (bool Was, bool Now)? ThresholdTransition(ThresholdSettings settings, Reading reading, bool? breached)
     {
