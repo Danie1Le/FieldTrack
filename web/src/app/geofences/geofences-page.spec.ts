@@ -133,9 +133,24 @@ describe('GeofencesPage', () => {
     api.expectOne({ method: 'DELETE', url: '/api/geofences/depot' }).flush({ detail }, { status: 409, statusText: 'Conflict' });
     await settle();
 
+    await serve([geofence('depot', 'Depot')], [rule('Left depot', 'depot')]);
+
     const shown = page().querySelector('[role="alert"]')!;
     expect(text(shown)).toBe(detail);
     expect(shown.querySelector('b')).toBeNull();
+  });
+
+  it('says a Geofence another Admin deleted is gone, and shows the list as it is now', async () => {
+    select('quarry');
+    await settle();
+    editor().changed.emit(square(2));
+    button('Save').click();
+
+    api.expectOne({ method: 'PUT', url: '/api/geofences/quarry' }).flush(null, { status: 404, statusText: 'Not Found' });
+    await serve([geofence('depot', 'Depot')]);
+
+    expect(text(page().querySelector('[role="alert"]'))).toBe('It no longer exists. The page now shows what is there.');
+    expect(items().map(([name]) => name)).toEqual(['Depot']);
   });
 
   it('shows the API validation messages for a refused area', async () => {

@@ -28,9 +28,9 @@
       }
     </ul>
 
-    @if (problems().length) {
+    @if (changes.problems().length) {
       <ul class="problems" role="alert">
-        @for (problem of problems(); track $index) {
+        @for (problem of changes.problems(); track $index) {
           <li>{{ problem }}</li>
         }
       </ul>
@@ -61,10 +61,10 @@
         </fieldset>
         <p class="muted hint">Drag the corners on the map to change the area.</p>
         <div class="actions">
-          <button type="submit" class="btn btn-solid" [disabled]="busy()">Save</button>
+          <button type="submit" class="btn btn-solid" [disabled]="changes.busy()">Save</button>
           <button type="button" class="btn" (click)="cancel()">Cancel</button>
           @if (draft.id) {
-            <button type="button" class="btn danger" [disabled]="busy()" (click)="remove()">Delete</button>
+            <button type="button" class="btn danger" [disabled]="changes.busy()" (click)="remove()">Delete</button>
           }
         </div>
       </form>
