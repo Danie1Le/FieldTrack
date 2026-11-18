@@ -1,0 +1,303 @@
+{
+  "bench": "geofence",
+  "startedAt": "2026-11-18T02:23:42.3184246+00:00",
+  "pass": true,
+  "parameters": {
+    "targetFraction": 0.01,
+    "warmRuns": 10,
+    "targetMs": 50,
+    "query": "SELECT count(*) FROM readings WHERE ST_Covers(ST_GeogFromText(@area), location)",
+    "coldBasis": "first execution after a restart of Postgres (shared buffers empty, setup done before the restart); the OS page cache is not flushed",
+    "barAppliesTo": "pass is the warm median with the index under targetMs for the headline shape only (the square of five positions unless --vertices says otherwise); other shapes are reported, not gated. Every with-index run must also use an index."
+  },
+  "results": {
+    "readings": 1080000,
+    "shapes": [
+      {
+        "headline": true,
+        "shape": "square",
+        "vertices": 5,
+        "centre": "POINT(-122.6696174217117 45.52531811555681)",
+        "reachMeters": 23.67322682368922,
+        "inside": 10800,
+        "fractionInside": 0.01,
+        "usedIndex": true,
+        "failure": null,
+        "withIndex": {
+          "cold": {
+            "planningMs": 58.392,
+            "executionMs": 58.803,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 8950,
+            "sharedReadBlocks": 0,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Bitmap Heap Scan",
+              "Bitmap Index Scan",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 117.195,
+            "usedIndex": true
+          },
+          "lastWarm": {
+            "planningMs": 7.279,
+            "executionMs": 40.641,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 8950,
+            "sharedReadBlocks": 0,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Bitmap Heap Scan",
+              "Bitmap Index Scan",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 47.92,
+            "usedIndex": true
+          },
+          "warmMs": [
+            31.165,
+            32.507999999999996,
+            29.334,
+            32.65,
+            31.262999999999998,
+            34.313,
+            37.107,
+            44.302,
+            43.288,
+            47.92
+          ],
+          "warmMedianMs": 33.4815,
+          "warmMinMs": 29.334,
+          "warmMaxMs": 47.92
+        },
+        "withoutIndex": {
+          "cold": {
+            "planningMs": 43.11,
+            "executionMs": 667.28,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 0,
+            "sharedReadBlocks": 19894,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 710.39,
+            "usedIndex": false
+          },
+          "lastWarm": {
+            "planningMs": 6.209,
+            "executionMs": 435.121,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 19894,
+            "sharedReadBlocks": 0,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 441.33,
+            "usedIndex": false
+          },
+          "warmMs": [
+            446.067,
+            524.13,
+            531.488,
+            542.9440000000001,
+            493.582,
+            468.072,
+            511.657,
+            506.522,
+            466.129,
+            441.33
+          ],
+          "warmMedianMs": 500.052,
+          "warmMinMs": 441.33,
+          "warmMaxMs": 542.9440000000001
+        },
+        "indexSpeedup": 14.935173155324584
+      },
+      {
+        "headline": false,
+        "shape": "circle",
+        "vertices": 65,
+        "centre": "POINT(-122.6696174217117 45.52531811555681)",
+        "reachMeters": 26.216971343959564,
+        "inside": 10789,
+        "fractionInside": 0.009989814814814814,
+        "usedIndex": true,
+        "failure": null,
+        "withIndex": {
+          "cold": {
+            "planningMs": 40.377,
+            "executionMs": 63.308,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 0,
+            "sharedReadBlocks": 9630,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Bitmap Heap Scan",
+              "Bitmap Index Scan",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 103.685,
+            "usedIndex": true
+          },
+          "lastWarm": {
+            "planningMs": 6.466,
+            "executionMs": 46.038,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 9630,
+            "sharedReadBlocks": 0,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Bitmap Heap Scan",
+              "Bitmap Index Scan",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 52.504,
+            "usedIndex": true
+          },
+          "warmMs": [
+            55.097,
+            52.431999999999995,
+            55.061,
+            52.255,
+            51.955,
+            52.312,
+            51.536,
+            52.08,
+            52.513999999999996,
+            52.504
+          ],
+          "warmMedianMs": 52.372,
+          "warmMinMs": 51.536,
+          "warmMaxMs": 55.097
+        },
+        "withoutIndex": {
+          "cold": {
+            "planningMs": 39.837,
+            "executionMs": 506.702,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 0,
+            "sharedReadBlocks": 19894,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 546.539,
+            "usedIndex": false
+          },
+          "lastWarm": {
+            "planningMs": 6.157,
+            "executionMs": 448.892,
+            "rowsReturned": 1,
+            "sharedHitBlocks": 19894,
+            "sharedReadBlocks": 0,
+            "nodeTypes": [
+              "Aggregate",
+              "Append",
+              "Gather",
+              "Seq Scan"
+            ],
+            "relationsScanned": 38,
+            "totalMs": 455.049,
+            "usedIndex": false
+          },
+          "warmMs": [
+            460.176,
+            464.78999999999996,
+            458.882,
+            468.76099999999997,
+            457.13300000000004,
+            463.115,
+            453.178,
+            461.064,
+            453.365,
+            455.049
+          ],
+          "warmMedianMs": 459.529,
+          "warmMinMs": 453.178,
+          "warmMaxMs": 468.76099999999997
+        },
+        "indexSpeedup": 8.774325975712213
+      }
+    ]
+  },
+  "environment": {
+    "gitSha": "8826c901f1f27770aca7d077aab8345e2c61f3e3",
+    "gitDirty": false,
+    "os": "Microsoft Windows 10.0.26300",
+    "cpu": {
+      "model": "Intel64 Family 6 Model 158 Stepping 13, GenuineIntel",
+      "logicalCores": 8
+    },
+    "ramBytes": 17118646272,
+    "dotnet": ".NET 10.0.2",
+    "docker": {
+      "engineVersion": "29.9.2",
+      "cpus": 8,
+      "memoryBytes": 8298065920,
+      "operatingSystem": "Docker Desktop"
+    },
+    "containers": [
+      {
+        "service": "api",
+        "image": "ft50-api",
+        "imageId": "sha256:539e342c3f8cfefcaf033ea011305d6ff8b044c536b2a8b30263ecf30569cc69",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      },
+      {
+        "service": "postgres",
+        "image": "postgis/postgis:16-3.6",
+        "imageId": "sha256:d07ce3f06f657b6516c7511412232e97174d7e9dcf4c9fe520109b682b44a201",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      },
+      {
+        "service": "mosquitto",
+        "image": "eclipse-mosquitto:2.1.2-alpine",
+        "imageId": "sha256:75d6662dee52c947dc9dd9c29f1d8d7ffef78ddaf38001caa09755681e8bbc98",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      }
+    ],
+    "postgres": {
+      "checkpoint_timeout": "5min",
+      "effective_cache_size": "4GB",
+      "fsync": "on",
+      "jit": "on",
+      "maintenance_work_mem": "64MB",
+      "max_connections": "100",
+      "max_parallel_workers_per_gather": "2",
+      "max_wal_size": "4GB",
+      "random_page_cost": "4",
+      "server_version": "16.15 (Debian 16.15-1.pgdg13\u002B2)",
+      "shared_buffers": "1GB",
+      "synchronous_commit": "on",
+      "track_commit_timestamp": "on",
+      "wal_level": "replica",
+      "work_mem": "4MB"
+    }
+  }
+}

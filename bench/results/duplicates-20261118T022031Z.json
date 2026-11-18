@@ -1,0 +1,77 @@
+{
+  "bench": "duplicates",
+  "startedAt": "2026-11-18T02:20:31.3430147+00:00",
+  "pass": true,
+  "parameters": {
+    "devices": 200,
+    "readings": 10000
+  },
+  "results": {
+    "published": 10000,
+    "republished": 10000,
+    "brokerReceived": 20000,
+    "storedAfterFirstPublish": 10000,
+    "stored": 10000,
+    "rejected": 0,
+    "backlogDrained": true,
+    "onlyOurTraffic": true,
+    "derivedKeyConflicts": 10000
+  },
+  "environment": {
+    "gitSha": "8826c901f1f27770aca7d077aab8345e2c61f3e3",
+    "gitDirty": false,
+    "os": "Microsoft Windows 10.0.26300",
+    "cpu": {
+      "model": "Intel64 Family 6 Model 158 Stepping 13, GenuineIntel",
+      "logicalCores": 8
+    },
+    "ramBytes": 17118646272,
+    "dotnet": ".NET 10.0.2",
+    "docker": {
+      "engineVersion": "29.9.2",
+      "cpus": 8,
+      "memoryBytes": 8298065920,
+      "operatingSystem": "Docker Desktop"
+    },
+    "containers": [
+      {
+        "service": "api",
+        "image": "ft50-api",
+        "imageId": "sha256:c386f8e7531fba12bacb6c2fc9c1ffe4ab55ee35583ab6ccda39f97d891df3c7",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      },
+      {
+        "service": "postgres",
+        "image": "postgis/postgis:16-3.6",
+        "imageId": "sha256:d07ce3f06f657b6516c7511412232e97174d7e9dcf4c9fe520109b682b44a201",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      },
+      {
+        "service": "mosquitto",
+        "image": "eclipse-mosquitto:2.1.2-alpine",
+        "imageId": "sha256:75d6662dee52c947dc9dd9c29f1d8d7ffef78ddaf38001caa09755681e8bbc98",
+        "memoryLimitBytes": 0,
+        "cpuLimit": 0
+      }
+    ],
+    "postgres": {
+      "checkpoint_timeout": "5min",
+      "effective_cache_size": "4GB",
+      "fsync": "on",
+      "jit": "on",
+      "maintenance_work_mem": "64MB",
+      "max_connections": "100",
+      "max_parallel_workers_per_gather": "2",
+      "max_wal_size": "4GB",
+      "random_page_cost": "4",
+      "server_version": "16.15 (Debian 16.15-1.pgdg13\u002B2)",
+      "shared_buffers": "1GB",
+      "synchronous_commit": "on",
+      "track_commit_timestamp": "on",
+      "wal_level": "replica",
+      "work_mem": "4MB"
+    }
+  }
+}
