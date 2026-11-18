@@ -1,9 +1,11 @@
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace FieldTrack.IntegrationTests;
@@ -28,6 +30,33 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
 
         // Spec #21 guard (PostGIS 3.6 everywhere), deliberately not derived from TestImages.
         version.ShouldNotBeNull().ShouldStartWith("3.6");
+    }
+
+    [Fact]
+    public async Task Startup_outside_development_creates_and_migrates_the_database_when_MigrateOnStartup_is_set()
+    {
+        var database = $"fieldtrack_{Guid.NewGuid():N}";
+        var connectionString = new NpgsqlConnectionStringBuilder(Fixture.DatabaseConnectionString) { Database = database }.ConnectionString;
+        try
+        {
+            await using var api = Fixture.Api.WithWebHostBuilder(builder => builder
+                .UseEnvironment("Production")
+                .UseSetting($"ConnectionStrings:{PersistenceServiceCollectionExtensions.ConnectionStringName}", connectionString)
+                .UseSetting(Program.MigrateOnStartupKey, "true"));
+            api.StartServer();
+
+            await using var scope = api.Services.CreateAsyncScope();
+            var pending = await scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>().Database.GetPendingMigrationsAsync(CancellationToken);
+
+            pending.ShouldBeEmpty();
+        }
+        finally
+        {
+            await using var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
+            await connection.OpenAsync(CancellationToken);
+            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS {database} WITH (FORCE)", connection);
+            await drop.ExecuteNonQueryAsync(CancellationToken);
+        }
     }
 
     [Theory]
