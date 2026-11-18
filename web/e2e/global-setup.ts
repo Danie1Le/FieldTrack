@@ -20,7 +20,7 @@ const web = process.env['E2E_BASE_URL'] ?? 'http://localhost:8081';
  *
  * Needs dotnet (the simulator) and, as for compose: FIELDTRACK_ADMIN_EMAIL, FIELDTRACK_ADMIN_PASSWORD (the temporary
  * password the API seeded) and E2E_ADMIN_PASSWORD (the one replacing it). E2E_API_URL, E2E_BASE_URL and E2E_MQTT_PORT
- * override compose's ports. The stack must be fresh: the temporary Admin password works only once..
+ * override compose's ports. The stack must be fresh: the temporary Admin password works only once.
  */
 export default async function globalSetup(): Promise<void> {
   await waitUntilOk(`${api}/health`);
