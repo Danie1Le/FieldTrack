@@ -128,10 +128,11 @@ jobs:
         working-directory: web
         run: npm ci --no-audit --no-fund
 
-      # The browser version is fixed by the pinned @playwright/test.
+      # The browser version is fixed by the pinned @playwright/test. No --with-deps: the runner image already has
+      # Chromium's libraries, and that apt-get once stalled 7 minutes on a slow mirror.
       - name: Install Chromium
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --only-shell chromium
 
       # Global setup waits for /health and the web server, then seeds, adds the rule and runs the Fault.
       - name: Smoke test
