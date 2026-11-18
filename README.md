@@ -124,7 +124,7 @@ Offline rule; any that exist are skipped by name), then runs the Scenario: five 
 | ~0:25 | Haul truck 2 drives out of North yard | Geofence exit Alert in the feed; North yard is drawn on the map |
 | ~1:50 | Haul truck 1 overheats (engine temperature ramps to 120 °C) | Critical Threshold Alert; the Asset's temperature turns red |
 | 1:00-3:30 | Excavator 1 is powered off for 150 s | Last seen counts up; the Asset moves to Offline at 3:00 and back to Normal when it returns on a new Boot |
-| 2:00-4:30 | Generator 1 loses coverage for 150 s and overheats meanwhile | Offline Alert at 3:00 (60 s rule). When coverage returns, the backlog arrives: the Offline Alert clears, and the Overheat the Generator suffered while unseen appears in History, raised and Cleared at the Device times it happened |
+| 2:00-4:30 | Generator 1 loses coverage for 150 s and overheats meanwhile | Offline Alert at 3:00 (60 s rule). When coverage returns, the backlog arrives: the Offline Alert clears, and the Overheat the Generator suffered while unseen appears in History tagged From backlog, raised and Cleared at the Device times it happened |
 
 Excavator 1 has no Offline rule on purpose: an Active Offline Alert ranks an Asset as Alerting, so only an Asset without
 one shows the Offline status.

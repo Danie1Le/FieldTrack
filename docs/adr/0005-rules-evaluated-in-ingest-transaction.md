@@ -10,7 +10,8 @@ Readings drive rules per Asset in (Boot, Sequence number) order, and only when t
 
 - **Geofences** are checked in memory with NetTopologySuite prepared geometries. `ST_Contains` remains for history queries and the spatial-index benchmark. The first Reading for a Geofence rule only sets the baseline; an Alert needs an observed transition.
 - **Threshold rules** treat unknown state as clear, so a first Reading past the threshold raises.
-- **Backlogs** (Coverage gap) are evaluated Reading by Reading. A breach that started and cleared inside the backlog is recorded as an Alert raised and resolved in the same batch.
+- **Backlogs** (Coverage gap) are evaluated Reading by Reading. A breach that started and cleared inside one batch is recorded as an Alert raised and resolved in that batch.
+- **From backlog** (#146): an Alert is From backlog when its condition Cleared, by Device time, more than 10 s before the Alert's `CreatedAt`. Ingest decides it whenever it resolves an Alert as Cleared, in the same batch or a later one. Being raised and resolved in one batch is not the rule: a Device that publishes its backlog one message per PUBACK puts the raise and the clear in different batches, and a live blip shorter than one batch puts them in the same one. The 10 s margin absorbs delivery latency and a Device clock running a little behind.
 - **Alert times:**
   - `RaisedAt` and platform `ResolvedAt` are the Device time of the Reading that caused them.
   - `CreatedAt` is when the platform created the Alert, used for latency measurement.
@@ -29,6 +30,7 @@ Readings drive rules per Asset in (Boot, Sequence number) order, and only when t
 - **`ST_Contains` in the database per batch:** matches the spec's wording, but adds a spatial query to every batch, when the handful of Geofences fits in memory.
 - **Rebuild state at startup from Active Alerts and the latest Readings:** no extra table, but loses the latch and the geofence baseline across restarts.
 - **Order by Device time:** natural for history, but a clock jump would skip or replay evaluations.
+- **From backlog when one batch raises and resolves** (the first rule): depends on batching, so it never fired for a backlog sent one Reading per PUBACK, and it tagged live blips. Making the simulator pipeline its backlog would only move the accident to the 25 ms batch window.
 - **Postgres LISTEN/NOTIFY for rule changes:** faster to react, but needs a dedicated connection and a fallback for missed notices.
 
 ## Consequences
