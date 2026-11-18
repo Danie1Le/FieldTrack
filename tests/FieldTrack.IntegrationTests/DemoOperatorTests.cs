@@ -183,6 +183,46 @@ public sealed class DemoOperatorTests(FieldTrackFixture fixture) : IntegrationTe
     }
 
     [Fact]
+    public async Task Replaying_a_Demo_Operator_refresh_token_leaves_another_users_tokens_of_the_same_family_alone()
+    {
+        await using var api = DemoApi(DemoPassword);
+        using var client = api.CreateClient();
+        var visitor = await AuthClient.SignInAsync(client, DemoEmail, DemoPassword);
+        var admin = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
+        // Families are only unique per user: give both users' tokens one family.
+        await using (var database = await OpenDatabaseAsync())
+        {
+            await SqlAsync(database, "UPDATE refresh_tokens SET family_id = @p0", Guid.Empty);
+        }
+
+        using var refreshed = await AuthClient.PostRefreshAsync(client, visitor.RefreshToken);
+        using var replayed = await AuthClient.PostRefreshAsync(client, visitor.RefreshToken);
+        using var adminAfterReplay = await AuthClient.PostRefreshAsync(client, admin.RefreshToken);
+
+        replayed.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        adminAfterReplay.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Disabled_Demo_Operator_cannot_refresh_a_token_the_startup_revoke_missed()
+    {
+        // A refresh committing while startup disables the Demo Operator leaves a token the revoke never saw.
+        await using var api = DemoApi(DemoPassword);
+        using var client = api.CreateClient();
+        var visitor = await AuthClient.SignInAsync(client, DemoEmail, DemoPassword);
+        await WithUsersAsync(async users =>
+        {
+            var demo = (await users.FindByEmailAsync(DemoEmail)).ShouldNotBeNull();
+            (await users.SetLockoutEnabledAsync(demo, true)).Succeeded.ShouldBeTrue();
+            (await users.SetLockoutEndDateAsync(demo, DateTimeOffset.MaxValue)).Succeeded.ShouldBeTrue();
+        });
+
+        using var refresh = await AuthClient.PostRefreshAsync(client, visitor.RefreshToken);
+
+        refresh.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task Startup_fails_and_keeps_the_previous_password_when_the_demo_password_is_too_weak()
     {
         await using (var previousDeploy = DemoApi("Previous-demo-pass-1"))

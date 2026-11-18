@@ -105,7 +105,8 @@ public sealed class TokenService(
                 // or only this sign-in's family for the Demo Operator, whom every visitor shares (ADR 0002).
                 if (await db.Users.AnyAsync(user => user.Id == stored.UserId && user.IsDemoOperator, cancellationToken))
                 {
-                    await RevokeAsync(token => token.FamilyId == stored.FamilyId, cancellationToken);
+                    // A family id is unique per user only: tokens of other users can share it.
+                    await RevokeAsync(token => token.UserId == stored.UserId && token.FamilyId == stored.FamilyId, cancellationToken);
                 }
                 else
                 {
@@ -119,7 +120,10 @@ public sealed class TokenService(
         }
 
         var user = await users.FindByIdAsync(stored.UserId.ToString());
-        if (user is null)
+        // A disabled Demo Operator refreshes nothing, not even a token committed after startup revoked the
+        // others (#135). Other users' lockouts come from failed sign-ins, which anyone who knows the email
+        // can cause, so those block new sign-ins only and leave sessions alone.
+        if (user is null || (user.IsDemoOperator && await users.IsLockedOutAsync(user)))
         {
             return null;
         }
