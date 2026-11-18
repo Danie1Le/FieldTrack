@@ -76,7 +76,7 @@ export class SignIn {
           this.errors.set([tooManyAttempts]);
           break;
         default:
-          this.errors.set(outcome.invalid.length ? outcome.invalid : ['The password could not be changed.']);
+          this.errors.set(outcome.invalid);
       }
     });
   }
