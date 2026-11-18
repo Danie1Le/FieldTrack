@@ -4,6 +4,11 @@ Real-time monitoring of field equipment and vehicles. Devices report their posit
 platform stores every Reading, evaluates Alert Rules (Geofence exit or enter, sensor thresholds with Hysteresis, Offline
 Devices) inside the same transaction, and pushes Asset Status and Alerts live to a map dashboard.
 
+[![FieldTrack demo: a truck leaves its Geofence and an engine overheats, and both Alerts reach the dashboard live](docs/media/fieldtrack-demo.gif)](docs/media/fieldtrack-demo.mp4)
+
+*A 20-second demo recorded from the real dashboard while the demo Scenario runs. Click it for the
+[MP4 with sound](docs/media/fieldtrack-demo.mp4). The map tiles are left out of the recording.*
+
 Every Device here is simulated. The simulator also drives the benchmarks behind the numbers on the
 [results page](docs/RESULTS.md).
 
