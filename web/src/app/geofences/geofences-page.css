@@ -144,9 +144,8 @@ fieldset {
   gap: 8px;
 }
 
-.danger {
+app-confirm-action {
   margin-left: auto;
-  color: var(--alert);
 }
 
 .map {

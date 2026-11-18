@@ -64,7 +64,7 @@
           <button type="submit" class="btn btn-solid" [disabled]="changes.busy()">Save</button>
           <button type="button" class="btn" (click)="cancel()">Cancel</button>
           @if (draft.id) {
-            <button type="button" class="btn danger" [disabled]="changes.busy()" (click)="remove()">Delete</button>
+            <app-confirm-action label="Delete" [question]="'Delete the Geofence ' + name() + '?'" [disabled]="changes.busy()" (confirmed)="remove()" />
           }
         </div>
       </form>

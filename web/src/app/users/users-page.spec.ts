@@ -38,7 +38,15 @@ describe('UsersPage', () => {
   const text = (element: Element | null) => element?.textContent!.trim();
   const rows = () =>
     [...page().querySelectorAll('tbody tr')].map((row) => [...row.querySelectorAll('td')].slice(0, 4).map((cell) => text(cell)));
-  const revoke = (id: string) => page().querySelector<HTMLButtonElement>(`[data-user="${id}"] button`)!.click();
+  const button = (id: string, label: string) =>
+    [...page().querySelectorAll<HTMLButtonElement>(`[data-user="${id}"] button`)].find((b) => text(b) === label)!;
+  /** Asks to revoke in the page, as `ConfirmAction` does, and answers yes or no. */
+  async function revoke(id: string, confirmed: boolean) {
+    button(id, 'Revoke sessions').click();
+    await settle();
+    expect(text(page().querySelector(`[data-user="${id}"] [role="group"]`))).toContain('15 minutes');
+    button(id, confirmed ? 'Yes, revoke sessions' : 'Cancel').click();
+  }
   const status = () => text(page().querySelector('[role="status"]'));
 
   /** Answers the page's read of the users, then lets the answer render. */
@@ -114,9 +122,7 @@ describe('UsersPage', () => {
   });
 
   it("revokes a user's refresh tokens once confirmed and says access ends within 15 minutes", async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    revoke('otto');
+    await revoke('otto', true);
     api.expectOne({ method: 'DELETE', url: '/api/users/otto/refresh-tokens' }).flush(null, { status: 204, statusText: 'No Content' });
     await settle();
 
@@ -125,9 +131,7 @@ describe('UsersPage', () => {
   });
 
   it('revokes nothing unless confirmed', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-
-    revoke('otto');
+    await revoke('otto', false);
     await settle();
 
     api.expectNone('/api/users/otto/refresh-tokens');

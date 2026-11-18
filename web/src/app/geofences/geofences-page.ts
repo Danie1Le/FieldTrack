@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../auth/auth';
 import { AlertRule, GeoJsonPolygon, Geofence } from '../control-room/live';
 import { Changes } from '../manage/changes';
+import { ConfirmAction } from '../manage/confirm-action';
 import { GeofenceDraft, GeofenceEditor } from './geofence-editor';
 
 /**
@@ -13,7 +14,7 @@ import { GeofenceDraft, GeofenceEditor } from './geofence-editor';
  */
 @Component({
   selector: 'app-geofences-page',
-  imports: [GeofenceEditor, RouterLink],
+  imports: [ConfirmAction, GeofenceEditor, RouterLink],
   templateUrl: './geofences-page.html',
   styleUrl: './geofences-page.css',
 })
@@ -68,10 +69,6 @@ export class GeofencesPage {
 
   protected remove(): Promise<void> {
     const id = this.draft()!.id!;
-    if (!confirm(`Delete the Geofence "${this.name()}"?`)) {
-      return Promise.resolve();
-    }
-
     return this.changes.send(this.http.delete(`/api/geofences/${encodeURIComponent(id)}`), () => this.done());
   }
 

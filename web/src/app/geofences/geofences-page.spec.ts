@@ -124,11 +124,12 @@ describe('GeofencesPage', () => {
   });
 
   it('shows why the API refused a change, as text', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     select('depot');
     await settle();
 
     button('Delete').click();
+    await settle();
+    button('Yes, delete').click();
     const detail = '<b>An Alert Rule names the Geofence; delete or change that rule first.</b>';
     api.expectOne({ method: 'DELETE', url: '/api/geofences/depot' }).flush({ detail }, { status: 409, statusText: 'Conflict' });
     await settle();
