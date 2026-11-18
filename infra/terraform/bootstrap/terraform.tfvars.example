@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Never commit the real file.
+state_storage_account_name = "fieldtracktfstate1234"
+budget_alert_email         = "you@example.com"
+# location                 = "westus2"

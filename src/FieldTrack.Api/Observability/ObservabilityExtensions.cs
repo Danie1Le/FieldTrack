@@ -30,6 +30,13 @@ public static class ObservabilityExtensions
     /// <summary>Configuration key that turns the Azure Monitor Live Metrics stream on. It is off unless set, so the host sends nothing beyond the exporter's own traffic.</summary>
     public const string LiveMetricsKey = "AzureMonitor:EnableLiveMetrics";
 
+    /// <summary>
+    /// Configuration key for a fixed fraction of traces to keep (0 to 1) in Application Insights (#158). Unset, the Distro's
+    /// default keeps at most 5 traces per second, which holds a busy API under the free ingestion allowance; set, the fixed
+    /// ratio replaces that rate limit.
+    /// </summary>
+    public const string SamplingRatioKey = "AzureMonitor:SamplingRatio";
+
     /// <summary>Registers OpenTelemetry for the API host and its ingest worker.</summary>
     public static WebApplicationBuilder AddFieldTrackObservability(this WebApplicationBuilder builder)
     {
@@ -59,8 +66,16 @@ public static class ObservabilityExtensions
             // The Distro switches the redaction off unless this is set, which would send SignalR's access_token to
             // Application Insights; the guard above refuses a stray "true".
             builder.Configuration[DisableUrlQueryRedactionKey] ??= "false";
+            var samplingRatio = builder.Configuration.GetValue<float?>(SamplingRatioKey);
             telemetry.UseAzureMonitor(options =>
-                options.EnableLiveMetrics = builder.Configuration.GetValue<bool>(LiveMetricsKey));
+            {
+                options.EnableLiveMetrics = builder.Configuration.GetValue<bool>(LiveMetricsKey);
+                if (samplingRatio is { } ratio)
+                {
+                    options.SamplingRatio = ratio;
+                    options.TracesPerSecond = null;
+                }
+            });
         }
         else if (!string.IsNullOrEmpty(builder.Configuration[OtlpEndpointKey]))
         {
