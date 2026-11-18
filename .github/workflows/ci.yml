@@ -14,13 +14,15 @@ concurrency:
   # Superseded PR pushes are cancelled; every main commit keeps its own result.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+# Three independent jobs run in parallel; any failing one fails the PR (#49).
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      DOTNET_NOLOGO: true
-      DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       # Pinned by commit SHA (tags are mutable); the comment names the tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,8 +43,32 @@ jobs:
         run: dotnet build --configuration Release --no-restore
 
       # Runs every test project in the solution; integration tests start their containers on the runner's Docker engine.
+      # Coverlet measures the Domain assembly in both test projects (spec #21: the gate is on Domain only).
       - name: Test
-        run: dotnet test --configuration Release --no-build
+        run: >-
+          dotnet test --configuration Release --no-build
+          --coverlet --coverlet-output-format cobertura --coverlet-include "[FieldTrack.Domain]*"
+          --results-directory "${{ github.workspace }}/TestResults"
+
+      # ReportGenerator merges both projects' reports; the gate reads the merged line coverage.
+      - name: Domain coverage gate (80% lines)
+        run: |
+          dotnet tool restore
+          dotnet reportgenerator "-reports:TestResults/**/coverage.cobertura.*.xml" -targetdir:coverage "-reporttypes:MarkdownSummaryGithub;JsonSummary"
+          cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          coverage=$(jq '.summary.linecoverage' coverage/Summary.json)
+          echo "Domain line coverage: ${coverage}% from $(ls TestResults/coverage.cobertura.*.xml | wc -l) reports"
+          jq -e '.summary.linecoverage >= 80' coverage/Summary.json > /dev/null \
+            || { echo "::error::Domain line coverage is ${coverage}%, below the 80% gate."; exit 1; }
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Angular 22 needs Node ^22.22.3 or ^24.15.0; keep this equal to web/Dockerfile's node image.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -52,16 +78,78 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install web packages
-        working-directory: web
         run: npm ci --no-audit --no-fund
 
       - name: Build web
-        working-directory: web
         run: npx ng build
 
+      # Vitest.
       - name: Test web
-        working-directory: web
         run: npx ng test --watch=false
 
-      - name: Build images
-        run: docker compose build api web
+  # One Playwright smoke test against the compose stack: sign in, the map, a simulated Fault's Alert (spec #21).
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FIELDTRACK_ADMIN_EMAIL: admin@ci.test
+      FIELDTRACK_DEMO_EMAIL: demo@ci.test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The simulator seeds the fleet and injects the Fault.
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Throwaway secrets, made per run and masked: the repository is public and holds none.
+      - name: Generate credentials
+        run: |
+          for name in FIELDTRACK_ADMIN_PASSWORD E2E_ADMIN_PASSWORD FIELDTRACK_DEMO_PASSWORD; do
+            value="Ci-$(openssl rand -hex 12)-1a"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+          key=$(openssl rand -base64 32)
+          echo "::add-mask::$key"
+          echo "FIELDTRACK_AUTH_SIGNING_KEY=$key" >> "$GITHUB_ENV"
+
+      # Builds both images, so a broken Dockerfile fails this job. lgtm is left out: nothing here reads it.
+      - name: Start the stack
+        run: docker compose up --detach --build postgres mosquitto api web
+
+      - name: Install web packages
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      # The browser version is fixed by the pinned @playwright/test. No --with-deps: the runner image already has
+      # Chromium's libraries, and that apt-get once stalled 7 minutes on a slow mirror.
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --only-shell chromium
+
+      # Global setup waits for /health and the web server, then seeds, adds the rule and runs the Fault.
+      - name: Smoke test
+        working-directory: web
+        run: npx playwright test
+
+      - name: Collect compose logs
+        if: failure()
+        run: docker compose logs --no-color --timestamps > compose.log
+
+      - name: Upload the trace and screenshots
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-failure
+          path: |
+            web/playwright-report/
+            web/test-results/
+            compose.log
+          retention-days: 7
