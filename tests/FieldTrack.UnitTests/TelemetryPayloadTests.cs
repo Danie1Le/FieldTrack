@@ -136,9 +136,11 @@ public sealed class TelemetryPayloadTests
     public void A_negative_Boot_or_Sequence_number_is_rejected_as_bad_JSON(int boot, long seq) =>
         Reject($$"""{"boot":{{boot}},"seq":{{seq}},"ts":{{ReceivedMs}},"lat":51.5,"lon":-0.12}""").ShouldBe(RejectReason.BadJson);
 
-    [Fact]
-    public void Mosquitto_refuses_payloads_larger_than_MaxPayloadBytes() =>
-        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "mosquitto.conf"))
+    [Theory]
+    [InlineData("mosquitto.conf")]
+    [InlineData("mosquitto-cloud/mosquitto.conf")]
+    public void Mosquitto_refuses_payloads_larger_than_MaxPayloadBytes(string config) =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, config))
             .ShouldContain($"\nmessage_size_limit {TelemetryPayload.MaxPayloadBytes}");
 
     private static string Payload(long ts) => $$"""{"boot":1,"seq":7,"ts":{{ts}},"lat":51.5,"lon":-0.12}""";
