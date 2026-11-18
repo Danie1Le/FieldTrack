@@ -37,7 +37,7 @@ yet.
 | History query time | report % difference | One Asset's 24 h (180 Readings): partitioned 0.55 ms vs unpartitioned 0.45 ms warm median, partitioned 22% slower (cold 27 vs 13 ms) | Reported | [history](../bench/results/history-20261118T022454Z.json) |
 | API load (k6, 50 Operators, 5 min) | p95 < 150 ms, < 0.1% failed | 24,613 requests, p95 13.7 ms, 0.000% failed; per endpoint p95: Asset list 6.9 ms, Active Alerts 4.4 ms, Alert history 7.3 ms, 24 h history 19.3 ms | **Pass** | [k6](../bench/results/k6-dashboard-2026-11-18T02-45-07-062Z.json) |
 | Test coverage | 80%+ lines on the Domain | 97.4% (191 of 196 coverable lines) when the gate landed, enforced on every pull request | **Pass** | CI (`build-and-test` job) |
-| Infra provisioning time, cloud cost | record them | Not measured: the Azure deployment (#51) is not built yet | Open | |
+| Infra provisioning time, cloud cost | record them | Not measured: the cloud deployment (#51) is not built yet | Open | |
 
 The query benchmarks ran on data from `bench seed-history`
 ([seed run](../bench/results/seed-history-20261118T022125Z.json)): 200 Assets x 30 days x one Reading per 8 minutes along

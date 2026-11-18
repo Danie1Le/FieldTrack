@@ -8,7 +8,7 @@ FieldTrack tracks field equipment and vehicles (trucks, excavators, generators, 
 
 It mirrors what stable industrial and engineering-software companies build: Trimble (fleet and construction tracking), Siemens and Itron (industrial and utility IoT), SEL and utilities (grid devices), Esri and Hexagon (spatial data), Daimler Truck and PACCAR (vehicle telematics), and Tektronix, Keysight and Fluke (test and measurement data).
 
-**Resume gaps this project closes:** a full ASP.NET Core application, EF Core, deep SQL with spatial queries, MQTT/IoT ingestion, PostGIS and maps, Angular, SignalR real-time, Azure hosting, Terraform on Azure, JWT auth and roles, xUnit + Testcontainers, OpenTelemetry.
+**Resume gaps this project closes:** a full ASP.NET Core application, EF Core, deep SQL with spatial queries, MQTT/IoT ingestion, PostGIS and maps, Angular, SignalR real-time, AWS hosting, Terraform on AWS, JWT auth and roles, xUnit + Testcontainers, OpenTelemetry.
 
 ---
 
@@ -40,9 +40,9 @@ It mirrors what stable industrial and engineering-software companies build: Trim
 | NFR-3 | Durability | Zero lost readings across forced restarts of the ingest worker (MQTT QoS 1 + idempotent writes) |
 | NFR-4 | Geofence query speed | Point-in-polygon check on 1M stored points under 50 ms with a spatial index |
 | NFR-5 | Test coverage | 80%+ line coverage on domain and rules logic |
-| NFR-6 | Reproducible infrastructure | Entire Azure environment created and destroyed with Terraform |
+| NFR-6 | Reproducible infrastructure | Entire AWS environment created and destroyed with Terraform |
 | NFR-7 | Observability | Traces, metrics, and logs for every request and ingested message |
-| NFR-8 | Security | JWT auth, role-based authorization, secrets in Azure Key Vault, no secrets in the repo |
+| NFR-8 | Security | JWT auth, role-based authorization, secrets in SSM Parameter Store, no secrets in the repo |
 
 ---
 
@@ -57,9 +57,9 @@ It mirrors what stable industrial and engineering-software companies build: Trim
 7. **REST API.** ASP.NET Core Web API for assets, devices, geofences, rules, alerts, history, and CSV export; OpenAPI docs.
 8. **Angular dashboard.** Leaflet map with live markers, geofence drawing tool, alert feed with acknowledge/resolve, asset detail page with route replay and sensor charts.
 9. **Auth.** ASP.NET Core Identity issuing JWTs (or Microsoft Entra ID), with Admin and Operator roles.
-10. **Infrastructure as code.** Terraform (azurerm provider) provisions everything on Azure; remote state in an Azure Storage account.
-11. **CI/CD.** GitHub Actions: build, test, container image push to Azure Container Registry, `terraform plan` on PRs, `terraform apply` and deploy on main.
-12. **Observability.** OpenTelemetry instrumentation exported to Azure Monitor / Application Insights (or Prometheus + Grafana locally), with a dashboard for ingest rate, alert latency, and error rate.
+10. **Infrastructure as code.** Terraform (aws provider) provisions everything on AWS; remote state in an S3 bucket.
+11. **CI/CD.** GitHub Actions: build, test, container image push to GitHub Container Registry, `terraform plan` on PRs, `terraform apply` and deploy on main.
+12. **Observability.** OpenTelemetry instrumentation exported to CloudWatch and X-Ray through the AWS Distro for OpenTelemetry collector (or Prometheus + Grafana locally), with a dashboard for ingest rate, alert latency, and error rate.
 13. **Load and chaos testing.** k6 scripts for API load; a simulator "flood" mode for ingestion load; a script that kills the ingest container mid-run to prove zero data loss.
 
 ---
@@ -115,21 +115,22 @@ Relationships: AssetGroup 1-N Asset; Asset 1-1 Device; Device 1-N TelemetryReadi
 
 Angular + Leaflet dashboard  <--- REST + SignalR --->  FieldTrack.Api
 
-Observability: OpenTelemetry -> Azure Monitor / App Insights (Grafana locally)
+Observability: OpenTelemetry -> ADOT collector -> CloudWatch / X-Ray (Grafana locally)
 ```
 
-### Azure deployment (all via Terraform)
+### AWS deployment (all via Terraform; ADR 0006)
 
-| Component | Azure service |
+| Component | AWS service |
 |---|---|
-| API + ingest worker | Azure Container Apps (consumption plan, scale to zero) |
-| MQTT broker | Mosquitto everywhere: a container locally, a Container App reached over MQTT over WebSockets (`wss://…:443`) in Azure (spec #21) |
-| Database | Azure Database for PostgreSQL Flexible Server, Burstable B1ms (PostGIS extension enabled), only while demoing |
-| Angular dashboard | Azure Static Web Apps (Free plan) |
-| Images | GitHub Container Registry (free for public repos) instead of Azure Container Registry |
-| Secrets | Azure Key Vault (managed identity access) |
-| Monitoring | Application Insights + Log Analytics (stay under the free monthly data allowance) |
-| Terraform state | Azure Storage account backend |
+| API + ingest worker | ECS Fargate, one replica (the API with the ingest worker inside) |
+| Simulator | Second Fargate service at demo rate |
+| MQTT broker | Mosquitto locally; AWS IoT Core in the cloud, X.509 client certificates |
+| Database | RDS for PostgreSQL `db.t4g.micro` with PostGIS, single-AZ, only while demoing |
+| Angular dashboard + HTTPS entry | S3 behind CloudFront; `/api` and `/hubs` go through an Application Load Balancer to Fargate |
+| Images | GitHub Container Registry (free for public repos) |
+| Secrets | SSM Parameter Store, standard tier |
+| Monitoring | ADOT collector sidecar to CloudWatch and X-Ray, logs kept 1 day |
+| Terraform state | S3 bucket (`bootstrap` stack) |
 
 See section 11 for the $0 budget rules.
 
@@ -147,7 +148,7 @@ fieldtrack/
     FieldTrack.UnitTests/      xUnit: rules engine, hysteresis, validation
     FieldTrack.IntegrationTests/ xUnit + Testcontainers (PostGIS, Mosquitto)
   load/                        k6 scripts, chaos scripts
-  infra/terraform/             azurerm modules + environments
+  infra/terraform/             aws provider: bootstrap and demo stacks
   docker-compose.yml           local stack: postgres/postgis, mosquitto, api, web, grafana
   .github/workflows/           CI/CD
 ```
@@ -166,10 +167,10 @@ fieldtrack/
 | Frontend | Angular 22, Leaflet 1.9 (+ Leaflet-Geoman for Geofences), Chart.js (spec #21) |
 | Auth | ASP.NET Core Identity + JWT bearer, role-based policies |
 | Testing | xUnit v3, Shouldly, Testcontainers for .NET, Vitest, Playwright, k6 (spec #21) |
-| Observability | OpenTelemetry .NET, Application Insights / Prometheus + Grafana |
+| Observability | OpenTelemetry .NET, CloudWatch + X-Ray / Prometheus + Grafana |
 | Containers | Docker, Docker Compose |
-| Cloud | Microsoft Azure |
-| IaC | Terraform (azurerm provider), remote state in Azure Storage |
+| Cloud | AWS |
+| IaC | Terraform (aws provider), remote state in S3 |
 | CI/CD | GitHub Actions (build, test, image push to GitHub Container Registry, terraform plan/apply), free for public repos |
 
 ---
@@ -183,9 +184,9 @@ What the finished project produces and what a reviewer or interviewer can see:
 3. **Alert workflow.** Alerts appear within a fraction of a second, can be acknowledged and resolved, and keep an audit trail (who, when).
 4. **REST API with Swagger docs.** Public OpenAPI page documenting every endpoint.
 5. **CSV export** of telemetry for any asset and time range.
-6. **Monitoring dashboard** (App Insights or Grafana) showing ingest rate, alert latency, error rate, and database query time.
-7. **Benchmark report** (`docs/RESULTS.md`) with the measured numbers from section 8, the hardware/Azure SKU used, and how to reproduce each test.
-8. **One-command infra.** `terraform apply` builds the full Azure environment; `terraform destroy` tears it down.
+6. **Monitoring dashboard** (CloudWatch or Grafana) showing ingest rate, alert latency, error rate, and database query time.
+7. **Benchmark report** (`docs/RESULTS.md`) with the measured numbers from section 8, the hardware/AWS instance sizes used, and how to reproduce each test.
+8. **One-command infra.** `terraform apply` builds the full AWS environment; `terraform destroy` tears it down.
 9. **README** with an architecture diagram, demo GIF or video, local setup (`docker compose up`), and links to the live demo and API docs.
 
 ---
@@ -208,7 +209,7 @@ Measure each of these with a repeatable script, record the result in `docs/RESUL
 | **Alert false positives** | Noisy sensor data near thresholds, with vs without hysteresis | X% fewer false alerts with hysteresis |
 | **Test coverage** | Coverlet report from xUnit | 80%+ on domain + rules |
 | **Infra provisioning time** | Time `terraform apply` from empty subscription to running app | Record it |
-| **Cloud cost** | Azure Cost Management per demo session and per idle day; a week of running would drain the free grant (spec #21) | Record $/demo session and $/idle day |
+| **Cloud cost** | AWS Cost Explorer per demo session and per idle day; a week of running would drain the credits (spec #21) | Record $/demo session and $/idle day |
 
 ---
 
@@ -218,7 +219,7 @@ Measure each of these with a repeatable script, record the result in `docs/RESUL
 |---|---|
 | 1 | Domain model, EF Core + PostGIS migrations, simulator, Mosquitto, ingest worker with idempotent upserts, REST API + Swagger, docker-compose |
 | 2 | Rules engine (geofence, threshold with hysteresis, offline), SignalR hub, Angular dashboard with live map, geofence drawing, alert feed, asset history |
-| 3 | JWT auth + roles, xUnit + Testcontainers tests, k6 + chaos scripts, OpenTelemetry, Terraform for Azure, GitHub Actions CI/CD, measurements + RESULTS.md, README + demo |
+| 3 | JWT auth + roles, xUnit + Testcontainers tests, k6 + chaos scripts, OpenTelemetry, Terraform for AWS, GitHub Actions CI/CD, measurements + RESULTS.md, README + demo |
 
 ---
 
@@ -229,14 +230,14 @@ Fill these in only with your own measured numbers once the project is built and 
 - Built an equipment-tracking platform in **ASP.NET Core** that ingests X MQTT readings/s from simulated assets with Y ms p95 alert latency
 - Cut geofence lookup time X% on 1M GPS points by adding a **PostGIS** GiST spatial index
 - Lost zero of X readings across Y forced crashes using MQTT QoS 1 and idempotent **EF Core** upserts
-- Pushed real-time alerts to an **Angular** + Leaflet map via SignalR, deployed to **Azure** with **Terraform**
+- Pushed real-time alerts to an **Angular** + Leaflet map via SignalR, deployed to **AWS** with **Terraform**
 - Reduced false alerts X% on noisy sensor data by adding hysteresis to threshold rules
 
 ---
 
 ## 11. Budget: $0
 
-Hard rule: the project must never cost real money. Everything is built and benchmarked locally for free, and Azure is used only through credits that cannot charge a card.
+Hard rule: the project must never cost real money. Everything is built and benchmarked locally for free, and AWS is used only through account credits, with a budget alert on spend after credits (ADR 0006).
 
 ### 11.1 Free by default (local development)
 
@@ -244,26 +245,25 @@ All of these are open source or free: .NET 10, ASP.NET Core, EF Core, PostgreSQL
 
 The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquitto, API, Angular, Grafana). All benchmarks in section 8 are run locally, so the numbers never depend on paid cloud capacity.
 
-### 11.2 Azure without spending money
+### 11.2 AWS without spending money
 
-1. **Sign up for Azure for Students** with the university email. It needs no credit card, so nothing can ever be billed to you. It gives a yearly credit, renewable while you are a student. When the credit runs out, services stop instead of charging.
-2. **Never upgrade to Pay-As-You-Go.** Do not add a credit card to the Azure account.
-3. **Set a budget of $0 with alerts** (Cost Management > Budgets) at 50%, 80%, and 100% of a small amount (e.g. $1 of credit) so any unexpected usage is visible right away.
-4. **Deploy only to demo.** Run `terraform apply` before a demo or recording, then `terraform destroy` right after. Nothing stays running between demos.
-5. **Pick free tiers in Terraform:**
+1. **Use the AWS account's credits.** Every resource is paid from credits. Before applying anything, check the account plan (Free or Paid) and the remaining credit.
+2. **Set a budget alert on spend after credits**, so it fires only if real money would be charged.
+3. **Deploy only to demo.** Apply the `demo` stack before a demo or recording and destroy it right after. Nothing stays running between demos. The `bootstrap` stack (state bucket, OIDC role, budget) is applied once and kept.
+4. **Pick cheap options in Terraform:**
 
-| Component | $0 choice |
+| Component | Cost choice |
 |---|---|
-| Angular dashboard | Azure Static Web Apps, Free plan |
-| API + ingest worker | Azure Container Apps consumption plan, `min_replicas = 0` for the API so it scales to zero (covered by the monthly free grant at demo traffic) |
-| MQTT broker | Mosquitto as a Container App on the Consumption profile, reached over MQTT over WebSockets (spec #21; replaces the HiveMQ Cloud plan) |
-| Database | Azure PostgreSQL Flexible Server Burstable B1ms only while deployed (covered by free/student hours); destroyed after each demo. Free fallback: a free-tier hosted Postgres that supports PostGIS (Neon or Supabase) |
-| Container images | GitHub Container Registry (free), not Azure Container Registry |
-| Monitoring | Application Insights with sampling turned on to stay inside the free monthly data allowance; Grafana locally for benchmarks |
-| Secrets | Azure Key Vault (fractions of a cent, covered by credit) or GitHub Actions secrets |
-| Terraform state | One small Azure Storage account (cents, covered by credit) or Terraform Cloud free tier |
+| Angular dashboard | S3 behind CloudFront |
+| API + ingest worker | ECS Fargate, one task, public subnets, no NAT gateway |
+| MQTT broker | AWS IoT Core (nothing idle) |
+| Database | RDS `db.t4g.micro`, single-AZ, 20 GB gp3, no final snapshot; destroyed after each demo |
+| Container images | GitHub Container Registry (free) |
+| Monitoring | ADOT sidecar to CloudWatch and X-Ray, logs kept 1 day; Grafana locally for benchmarks |
+| Secrets | SSM Parameter Store, standard tier (free) |
+| Terraform state | One small S3 bucket |
 
-6. **Check `terraform plan` output before every apply** and confirm no paid SKUs (no Standard/Premium tiers, no extra replicas, no NAT gateways or public IPs beyond the defaults).
+5. **Check `terraform plan` output before every apply** and confirm no paid SKUs (no NAT gateway, no Multi-AZ, one ALB, no extra tasks).
 
 ### 11.3 Showing the project without paying to host it
 
@@ -271,4 +271,4 @@ The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquit
 - Publish `docs/RESULTS.md` with the local benchmark numbers.
 - In interviews, say the whole environment is created and destroyed with Terraform in minutes. That is a real skill and explains why it is not always online.
 
-Free-tier limits change. Before deploying, confirm the current limits on the Azure for Students, Container Apps, Static Web Apps, and PostgreSQL Flexible Server pricing pages.
+Free-tier limits change. Before deploying, confirm the current credit terms and the Fargate, RDS, IoT Core and CloudFront pricing pages.
