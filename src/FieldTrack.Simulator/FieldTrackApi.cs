@@ -14,7 +14,10 @@ internal sealed record ApiAsset(Guid Id, string Name, AssetType Type);
 internal sealed record ApiDevice(Guid Id, string SerialNumber, bool Archived);
 
 /// <summary>An Alert Rule as the API returns it.</summary>
-internal sealed record ApiAlertRule(Guid Id);
+internal sealed record ApiAlertRule(Guid Id, string Name);
+
+/// <summary>A Geofence as the API returns it.</summary>
+internal sealed record ApiGeofence(Guid Id, string Name);
 
 /// <summary>An Attachment as the API returns it.</summary>
 internal sealed record ApiAttachment(Guid Id, Guid DeviceId, Guid AssetId, DateTimeOffset? DetachedAt);
@@ -72,6 +75,16 @@ internal sealed class FieldTrackApi
     /// <summary>Attaches a Device to an Asset from now on.</summary>
     public Task<ApiAttachment> AttachAsync(Guid deviceId, Guid assetId, CancellationToken cancellationToken) =>
         PostAsync<ApiAttachment>("/attachments", new { deviceId, assetId }, cancellationToken);
+
+    /// <summary>Lists every Alert Rule.</summary>
+    public Task<ApiAlertRule[]> ListAlertRulesAsync(CancellationToken cancellationToken) => GetAsync<ApiAlertRule[]>("/alert-rules", cancellationToken);
+
+    /// <summary>Lists every Geofence.</summary>
+    public Task<ApiGeofence[]> ListGeofencesAsync(CancellationToken cancellationToken) => GetAsync<ApiGeofence[]>("/geofences", cancellationToken);
+
+    /// <summary>Creates a Geofence from <paramref name="request"/>, the JSON of <c>POST /geofences</c>.</summary>
+    public Task<ApiGeofence> CreateGeofenceAsync(object request, CancellationToken cancellationToken) =>
+        PostAsync<ApiGeofence>("/geofences", request, cancellationToken);
 
     /// <summary>Creates an Alert Rule from <paramref name="request"/>, the JSON of <c>POST /alert-rules</c>.</summary>
     public Task<ApiAlertRule> CreateAlertRuleAsync(object request, CancellationToken cancellationToken) =>
