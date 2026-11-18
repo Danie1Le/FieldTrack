@@ -73,6 +73,11 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
             return NotFound();
         }
 
+        // The Asset it is attached to, which the delete leaves without a Device; the lock above keeps attaches out.
+        var assetIds = await db.Attachments
+            .Where(attachment => attachment.DeviceId == id && attachment.DetachedAt == null)
+            .Select(attachment => attachment.AssetId)
+            .ToListAsync(cancellationToken);
         List<Guid> resolved = [];
         if (await readingHistory.DeviceHasReadingsAsync(id, cancellationToken))
         {
@@ -89,7 +94,7 @@ public sealed class DevicesController(FieldTrackDbContext db, IReadingHistory re
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await live.AlertsUpdatedAsync(resolved, cancellationToken);
+        await live.PushAsync(assetIds, [], resolved, cancellationToken);
         return NoContent();
     }
 

@@ -192,6 +192,7 @@ public sealed class GeofenceTests(FieldTrackFixture fixture) : AlertTest(fixture
         var named = await CreateAsync(admin, "/geofences", Depot());
         await live.NextAsync(LiveHub.GeofencesChanged);
         await CreateAsync(admin, "/alert-rules", LeftDepot(asset, named));
+        await live.NextAsync(LiveHub.AlertRulesChanged);
         using var invalid = await admin.PostAsJsonAsync("/geofences", Depot() with { name = "" }, CancellationToken);
         using var unknown = await admin.PutAsJsonAsync($"/geofences/{Guid.NewGuid()}", Depot(), CancellationToken);
         using var refused = await admin.DeleteAsync($"/geofences/{named}", CancellationToken);

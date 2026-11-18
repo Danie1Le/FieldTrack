@@ -56,6 +56,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
         db.AlertRules.Add(rule);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.AlertRulesChangedAsync(cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ToResponse(rule));
     }
 
@@ -104,6 +105,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
 
         await transaction.CommitAsync(cancellationToken);
         await live.AlertsUpdatedAsync(resolved, cancellationToken);
+        await live.AlertRulesChangedAsync(cancellationToken);
         return ToResponse(rule);
     }
 
@@ -137,6 +139,7 @@ public sealed class AlertRulesController(FieldTrackDbContext db, TimeProvider ti
 
         await db.AlertRules.Where(rule => rule.Id == id).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.AlertRulesChangedAsync(cancellationToken);
         return NoContent();
     }
 

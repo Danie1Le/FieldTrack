@@ -1,3 +1,6 @@
+using FieldTrack.Domain.Alerts;
+using RuleSensor = FieldTrack.Domain.Alerts.Sensor;
+
 namespace FieldTrack.Simulator;
 
 /// <summary>
@@ -34,7 +37,7 @@ internal static class DemoSetup
         DemoRule[] rules =
         [
             Overheat("Demo: Haul truck 1 overheat", truck1),
-            new($"Demo: Haul truck 2 left {YardName}", "GeofenceExit", truck2, "Warning", GeofenceId: yard.Id),
+            new($"Demo: Haul truck 2 left {YardName}", AlertRuleKind.GeofenceExit, truck2, Severity.Warning, GeofenceId: yard.Id),
             Overheat("Demo: Generator 1 overheat", generator),
             Offline("Demo: Generator 1 offline", generator),
         ];
@@ -53,20 +56,23 @@ internal static class DemoSetup
 
     // The Overheat Faults peak at 120 °C from a normal 85 °C; clearing needs 100 °C.
     private static DemoRule Overheat(string name, Guid assetId) =>
-        new(name, "Threshold", assetId, "Critical", Sensor: "EngineTempC", Operator: "GreaterThan", Threshold: 105, Hysteresis: 5);
+        new(name, AlertRuleKind.Threshold, assetId, Severity.Critical, Sensor: RuleSensor.EngineTempC, Operator: ThresholdOperator.GreaterThan, Threshold: 105, Hysteresis: 5);
 
     // Only Generator 1 gets one: an Active Offline Alert ranks the Asset as Alerting, so Excavator 1, without one, shows the Offline status.
     // 60 s, so the Alert is raised well inside the Coverage gap and the backlog resolves it.
-    private static DemoRule Offline(string name, Guid assetId) => new(name, "Offline", assetId, "Warning", OfflineSeconds: 60);
+    private static DemoRule Offline(string name, Guid assetId) => new(name, AlertRuleKind.Offline, assetId, Severity.Warning, OfflineSeconds: 60);
 
-    /// <summary>The JSON of <c>POST /alert-rules</c> for one rule on one Asset; settings of other kinds stay null.</summary>
+    /// <summary>
+    /// The JSON of <c>POST /alert-rules</c> for one rule on one Asset; settings of other kinds stay null. Typed with the
+    /// Domain enums, sent by name, so a renamed member fails the build instead of the demo.
+    /// </summary>
     private sealed record DemoRule(
         string Name,
-        string Kind,
+        AlertRuleKind Kind,
         Guid AssetId,
-        string Severity,
-        string? Sensor = null,
-        string? Operator = null,
+        Severity Severity,
+        RuleSensor? Sensor = null,
+        ThresholdOperator? Operator = null,
         double? Threshold = null,
         double? Hysteresis = null,
         Guid? GeofenceId = null,

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using FieldTrack.Api.Auth;
 using FieldTrack.Api.Live;
@@ -100,6 +101,96 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_Archived_Asset_leaves_every_dashboard(bool withActiveAlert)
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-015");
+        if (withActiveAlert)
+        {
+            await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        }
+
+        await WriteAsync(Received("TRK-015", 0, DateTimeOffset.UtcNow.AddSeconds(1), 110));
+        await using var first = await LiveClient.ConnectAsync(Fixture.Api, Token(admin));
+        await using var second = await LiveClient.ConnectAsync(Fixture.Api, Token(admin));
+
+        (await admin.DeleteAsync($"/assets/{asset}", CancellationToken)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        foreach (var client in new[] { first, second })
+        {
+            (await client.NextAsync(LiveHub.AssetsRemoved)).EnumerateArray().ShouldHaveSingleItem().GetString().ShouldBe(asset);
+        }
+    }
+
+    [Fact]
+    public async Task Creating_editing_and_deleting_an_Asset_reach_the_dashboards()
+    {
+        using var admin = await AdminClientAsync();
+        await using var live = await LiveClient.ConnectAsync(Fixture.Api, Token(admin));
+
+        var asset = await CreateAsync(admin, "/assets", new { name = "Spare generator", type = "Generator" });
+        var created = (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem();
+        (await admin.PutAsJsonAsync($"/assets/{asset}", new { name = "Standby generator", type = "Generator" }, CancellationToken)).EnsureSuccessStatusCode();
+        var edited = (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem();
+        // No history, so it is deleted outright: gone from the dashboards all the same.
+        (await admin.DeleteAsync($"/assets/{asset}", CancellationToken)).EnsureSuccessStatusCode();
+        var removed = await live.NextAsync(LiveHub.AssetsRemoved);
+
+        created.GetProperty("id").GetString().ShouldBe(asset);
+        created.GetProperty("status").GetString().ShouldBe("NoDevice");
+        edited.GetProperty("name").GetString().ShouldBe("Standby generator");
+        removed.EnumerateArray().ShouldHaveSingleItem().GetString().ShouldBe(asset);
+    }
+
+    [Fact]
+    public async Task Attach_detach_and_Device_delete_reach_the_dashboards_with_the_Asset_Status()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 15", type = "Truck" });
+        var first = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-016" });
+        var second = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-017" });
+        await using var live = await LiveClient.ConnectAsync(Fixture.Api, Token(admin));
+        async Task<string?> StatusPushedAsync() =>
+            (await live.NextAsync(LiveHub.AssetsUpdated)).EnumerateArray().ShouldHaveSingleItem().GetProperty("status").GetString();
+
+        var attachment = await CreateAsync(admin, "/attachments", new { deviceId = first, assetId = asset });
+        var attached = await StatusPushedAsync();
+        (await admin.PostAsync($"/attachments/{attachment}/detach", null, CancellationToken)).EnsureSuccessStatusCode();
+        var detached = await StatusPushedAsync();
+        await CreateAsync(admin, "/attachments", new { deviceId = second, assetId = asset });
+        await StatusPushedAsync();
+        (await admin.DeleteAsync($"/devices/{second}", CancellationToken)).EnsureSuccessStatusCode();
+        var deviceDeleted = await StatusPushedAsync();
+
+        attached.ShouldBe("Normal");
+        detached.ShouldBe("NoDevice");
+        deviceDeleted.ShouldBe("NoDevice");
+    }
+
+    [Fact]
+    public async Task Every_Alert_Rule_and_Asset_Group_change_tells_the_dashboards_to_reload_them()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin, "TRK-018");
+        await using var live = await LiveClient.ConnectAsync(Fixture.Api, Token(admin));
+
+        var rule = await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        await live.NextAsync(LiveHub.AlertRulesChanged);
+        (await admin.PutAsJsonAsync($"/alert-rules/{rule}", Overheat(asset), CancellationToken)).EnsureSuccessStatusCode();
+        await live.NextAsync(LiveHub.AlertRulesChanged);
+        (await admin.DeleteAsync($"/alert-rules/{rule}", CancellationToken)).EnsureSuccessStatusCode();
+        await live.NextAsync(LiveHub.AlertRulesChanged);
+        var group = await CreateAsync(admin, "/asset-groups", new { name = "North yard" });
+        await live.NextAsync(LiveHub.AssetGroupsChanged);
+        (await admin.PutAsJsonAsync($"/asset-groups/{group}", new { name = "South yard" }, CancellationToken)).EnsureSuccessStatusCode();
+        await live.NextAsync(LiveHub.AssetGroupsChanged);
+        (await admin.DeleteAsync($"/asset-groups/{group}", CancellationToken)).EnsureSuccessStatusCode();
+        await live.NextAsync(LiveHub.AssetGroupsChanged);
+    }
+
     [Fact]
     public async Task A_breach_published_over_MQTT_is_pushed_after_commit_with_the_Asset_and_its_clear_as_an_Alert_update()
     {
@@ -135,10 +226,11 @@ public sealed class LiveTests(FieldTrackFixture fixture) : IntegrationTest(fixtu
     [InlineData(false)]
     public async Task Ingest_keeps_committing_while_the_push_stalls_or_throws(bool stalled)
     {
+        // Set up on a working host: the attach pushes too, and a stalled push would hold its response.
+        using var admin = await AdminClientAsync();
+        var (device, _) = await AttachedDeviceAsync(admin, "TRK-011");
         var hub = stalled ? BrokenLiveHub.Stalled() : BrokenLiveHub.Throwing();
         await using var api = await StartIngestAsync(services: services => services.AddSingleton<HubLifetimeManager<LiveHub>>(hub));
-        using var admin = await AdminClientAsync(api);
-        var (device, _) = await AttachedDeviceAsync(admin, "TRK-011");
         await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
         await using var database = await OpenDatabaseAsync();
         var t = DateTimeOffset.UtcNow.AddSeconds(1);

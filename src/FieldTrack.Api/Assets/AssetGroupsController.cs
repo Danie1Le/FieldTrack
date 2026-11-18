@@ -1,4 +1,5 @@
 using FieldTrack.Api.Auth;
+using FieldTrack.Api.Live;
 using FieldTrack.Domain.Assets;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -14,7 +15,7 @@ namespace FieldTrack.Api.Assets;
 [ApiController]
 [Route("asset-groups")]
 [Authorize(Policy = Policies.Read)]
-public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBase
+public sealed class AssetGroupsController(FieldTrackDbContext db, LivePush live) : ControllerBase
 {
     /// <summary>Lists Asset Groups by name.</summary>
     [HttpGet]
@@ -35,6 +36,7 @@ public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBa
         var group = new AssetGroup { Name = request.Name };
         db.AssetGroups.Add(group);
         await db.SaveChangesAsync(cancellationToken);
+        await live.AssetGroupsChangedAsync(cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ToResponse(group));
     }
 
@@ -64,6 +66,7 @@ public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBa
             return NotFound();
         }
 
+        await live.AssetGroupsChangedAsync(cancellationToken);
         return ToResponse(group);
     }
 
@@ -98,6 +101,7 @@ public sealed class AssetGroupsController(FieldTrackDbContext db) : ControllerBa
 
         await db.AssetGroups.Where(group => group.Id == id).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.AssetGroupsChangedAsync(cancellationToken);
         return NoContent();
     }
 

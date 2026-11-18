@@ -1,5 +1,4 @@
 using System.Linq.Expressions;
-using System.Security.Claims;
 using FieldTrack.Api.Auth;
 using FieldTrack.Api.Live;
 using FieldTrack.Domain.Alerts;
@@ -9,7 +8,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
-using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace FieldTrack.Api.Alerts;
 
@@ -70,7 +68,7 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time, 
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<AlertResponse>> Acknowledge(Guid id, CancellationToken cancellationToken)
     {
-        var user = CurrentUserId();
+        var user = User.UserId();
         var now = time.GetUtcNow();
         // Conditional, so an Alert the platform Resolves at the same moment is not Acknowledged (#10).
         var acknowledged = await db.Alerts
@@ -101,7 +99,7 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time, 
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ResolveAlertRequest? request,
         CancellationToken cancellationToken)
     {
-        var user = CurrentUserId();
+        var user = User.UserId();
         var now = time.GetUtcNow();
         var note = string.IsNullOrWhiteSpace(request?.Note) ? null : request.Note;
         // ADR 0005: a conditional update like ingest's, so whichever of the platform and users Resolves first wins and
@@ -118,9 +116,6 @@ public sealed class AlertsController(FieldTrackDbContext db, TimeProvider time, 
                 .SetProperty(alert => alert.Latched, ConditionHolds(db)), cancellationToken);
         return await OutcomeAsync(id, resolved, "The Alert is already Resolved.", cancellationToken);
     }
-
-    // The JWT's sub claim is the user id (TokenService).
-    private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
 
     // The update has committed when this runs (it is its own statement), so a change is pushed live here (ADR 0005).
     private async Task<ActionResult<AlertResponse>> OutcomeAsync(Guid id, int changed, string refusal, CancellationToken cancellationToken)

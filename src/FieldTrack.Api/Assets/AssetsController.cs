@@ -57,6 +57,7 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             return UnknownAssetGroup();
         }
 
+        await live.PushAsync([asset.Id], [], [], cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ToResponse(asset));
     }
 
@@ -88,6 +89,7 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
             return UnknownAssetGroup();
         }
 
+        await live.PushAsync([id], [], [], cancellationToken);
         return ToResponse(asset);
     }
 
@@ -140,7 +142,8 @@ public sealed class AssetsController(FieldTrackDbContext db, IReadingHistory rea
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await live.AlertsUpdatedAsync(resolved, cancellationToken);
+        // Archived or deleted, it goes out as removed.
+        await live.PushAsync([id], [], resolved, cancellationToken);
         return NoContent();
     }
 

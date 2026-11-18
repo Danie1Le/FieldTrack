@@ -50,12 +50,15 @@ internal sealed class LiveClient : IAsyncDisposable
             })
             .Build();
         var client = new LiveClient(connection);
-        foreach (var name in new[] { LiveHub.AssetsUpdated, LiveHub.AlertRaised, LiveHub.AlertUpdated })
+        foreach (var name in new[] { LiveHub.AssetsUpdated, LiveHub.AssetsRemoved, LiveHub.AlertRaised, LiveHub.AlertUpdated })
         {
             connection.On<JsonElement>(name, payload => client._received.Writer.TryWrite((name, payload)));
         }
 
-        connection.On(LiveHub.GeofencesChanged, () => client._received.Writer.TryWrite((LiveHub.GeofencesChanged, default)));
+        foreach (var name in new[] { LiveHub.GeofencesChanged, LiveHub.AlertRulesChanged, LiveHub.AssetGroupsChanged })
+        {
+            connection.On(name, () => client._received.Writer.TryWrite((name, default)));
+        }
 
         connection.Closed += _ =>
         {
