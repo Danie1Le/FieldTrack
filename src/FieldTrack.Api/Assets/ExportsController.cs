@@ -1,13 +1,11 @@
 using System.Buffers.Text;
 using System.Globalization;
-using System.Security.Claims;
 using System.Security.Cryptography;
 using FieldTrack.Api.Auth;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.Net.Http.Headers;
 using Npgsql;
 
@@ -54,7 +52,7 @@ public sealed class ExportsController(FieldTrackDbContext db, TimeProvider time)
         }
 
         // Refused here too so the dashboard can say why; the download enforces the limit.
-        var user = CurrentUserId();
+        var user = User.UserId();
         if (await ReadingCsvExport.RunningAsync(db, user, cancellationToken) >= ReadingCsvExport.MaxRunningPerUser)
         {
             return TooManyRunning();
@@ -142,6 +140,4 @@ public sealed class ExportsController(FieldTrackDbContext db, TimeProvider time)
 
     private ObjectResult TooManyRunning() =>
         Problem($"You already run {ReadingCsvExport.MaxRunningPerUser} exports; wait for one to finish.", statusCode: StatusCodes.Status429TooManyRequests);
-
-    private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
 }
