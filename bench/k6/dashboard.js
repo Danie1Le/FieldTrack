@@ -84,7 +84,8 @@ export default function (data) {
     const assetId = data.ids[Math.floor(Math.random() * data.ids.length)];
     const to = new Date();
     const from = new Date(to.getTime() - DAY_MS);
-    get(`/assets/${assetId}/readings?from=${from.toISOString()}&to=${to.toISOString()}`, 'readings-24h');
+    // As the Asset detail page reads it: thinned server-side to the 1,500 points it draws (maxDrawn, #126).
+    get(`/assets/${assetId}/readings?from=${from.toISOString()}&to=${to.toISOString()}&thinTo=1500`, 'readings-24h');
   }
   sleep(1);
 }
