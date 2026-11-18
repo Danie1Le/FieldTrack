@@ -60,7 +60,8 @@ public sealed class BrokerConnectionTests(FieldTrackFixture fixture) : Integrati
         var ingressTimeout = TimeSpan.FromSeconds(240);
 
         new MqttClientOptionsBuilder().WithBroker(new BrokerOptions { Host = "broker.example", Transport = BrokerTransport.WebSockets }).Build()
-            .KeepAlivePeriod.ShouldBeLessThanOrEqualTo(ingressTimeout / 4);
+            .KeepAlivePeriod.ShouldBe(MqttClientOptionsBuilderExtensions.KeepAlive);
+        MqttClientOptionsBuilderExtensions.KeepAlive.ShouldBeLessThanOrEqualTo(ingressTimeout / 4);
     }
 
     [Theory]

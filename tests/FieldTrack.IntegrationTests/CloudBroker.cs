@@ -36,7 +36,7 @@ public sealed class CloudBroker : IAsyncLifetime
 
     /// <summary>The broker as the simulator reaches it: WebSockets, signed in as the simulator user.</summary>
     internal MqttBroker Simulator =>
-        new(new UriBuilder("ws", Container.Hostname, Container.GetMappedPublicPort(WebSocketPort), "/mqtt").Uri, "simulator", SimulatorPassword);
+        new(new UriBuilder("ws", Container.Hostname, Container.GetMappedPublicPort(WebSocketPort), Ingest.WebSocketPath).Uri, "simulator", SimulatorPassword);
 
     private IContainer Container => _container ?? throw new InvalidOperationException("The broker has not started.");
 
