@@ -5,6 +5,7 @@ using System.Text.Json;
 using FieldTrack.Api.Assets;
 using FieldTrack.Api.Ingest;
 using FieldTrack.Domain.Telemetry;
+using FieldTrack.Infrastructure.Persistence;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -249,6 +250,103 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
 
         tooMany.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         atTheCap.StatusCode.ShouldBe(HttpStatusCode.OK);
+        // Thinned for display, the same range is read: the cap bounds what one response holds, not what it covers.
+        (await ListAsync(admin, $"/assets/{asset}/readings?{Range(from, from.AddHours(1))}&thinTo=3000")).Length.ShouldBe(3000);
+    }
+
+    [Fact]
+    public async Task Asset_history_thinned_for_display_keeps_the_first_Reading_of_each_even_slice_of_Device_time_and_the_last()
+    {
+        using var admin = await AdminClientAsync();
+        var (device, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        var from = DateTimeOffset.UtcNow.AddHours(-1);
+        await using var database = await OpenDatabaseAsync();
+        // Eleven Readings, Sequence numbers 0 to 10, one a second. Thinned to 4: slices from 0, 3.3 and 6.7 s, and the last.
+        await SqlAsync(database, """
+            INSERT INTO readings (device_id, boot, seq, asset_id, device_time, received_time, location)
+            SELECT @p0, 1, g, @p1, @p2 + g * interval '1 second', now(), ST_SetSRID(ST_MakePoint(g, 0), 4326)::geography
+            FROM generate_series(0, 10) g
+            """, Guid.Parse(device), Guid.Parse(asset), from);
+        var range = Range(from, from.AddHours(1));
+
+        var thinned = await ListAsync(admin, $"/assets/{asset}/readings?{range}&thinTo=4");
+        var roomy = await ListAsync(admin, $"/assets/{asset}/readings?{range}&thinTo=11");
+        using var tooFew = await admin.GetAsync($"/assets/{asset}/readings?{range}&thinTo=1", CancellationToken);
+
+        thinned.Select(reading => reading.GetProperty("sequenceNumber").GetInt64()).ShouldBe([0, 4, 7, 10]);
+        thinned[1].GetProperty("longitude").GetDouble().ShouldBe(4, tolerance: 1e-9);
+        roomy.Length.ShouldBe(11);
+        tooFew.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Asset_history_thinned_for_display_does_not_depend_on_the_session_TimeZone()
+    {
+        using var admin = await AdminClientAsync();
+        var (device, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        var from = DateTimeOffset.Parse("2026-03-07T00:00:00Z", CultureInfo.InvariantCulture);
+        await using var database = await OpenDatabaseAsync();
+        // One Reading a minute over three days that hold the New York clock change (2026-03-08): Sequence numbers 0 to 4320.
+        // Only today's neighbourhood has partitions, so give the four days theirs.
+        var days = Enumerable.Range(0, 4).Select(offset => from.AddDays(offset)).ToList();
+        foreach (var day in days)
+        {
+            await SqlAsync(database, $"CREATE TABLE readings_{day:yyyyMMdd} PARTITION OF readings FOR VALUES FROM ('{day:yyyy-MM-dd}T00:00:00Z') TO ('{day.AddDays(1):yyyy-MM-dd}T00:00:00Z')");
+        }
+
+        await SqlAsync(database, """
+            INSERT INTO readings (device_id, boot, seq, asset_id, device_time, received_time, location)
+            SELECT @p0, 1, g, @p1, @p2 + g * interval '1 minute', now(), ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography
+            FROM generate_series(0, 4320) g
+            """, Guid.Parse(device), Guid.Parse(asset), from);
+        await using var newYork = Fixture.Api.WithWebHostBuilder(builder => builder.UseSetting(
+            "ConnectionStrings:" + PersistenceServiceCollectionExtensions.ConnectionStringName, Fixture.DatabaseConnectionString + ";Timezone=America/New_York"));
+        using var client = await AdminClientAsync(newYork);
+
+        var thinned = await ListAsync(client, $"/assets/{asset}/readings?{Range(from, from.AddDays(4))}&thinTo=4");
+
+        // Drop them again: later tests expect the partitions ingest maintains and nothing else.
+        foreach (var day in days)
+        {
+            await SqlAsync(database, $"DROP TABLE readings_{day:yyyyMMdd}");
+        }
+
+        thinned.Select(reading => reading.GetProperty("sequenceNumber").GetInt64()).ShouldBe([0, 1440, 2880, 4320]);
+    }
+
+    [Fact]
+    public async Task Asset_history_thinned_for_display_ends_with_the_same_Reading_as_the_unthinned_read_when_Device_times_tie()
+    {
+        using var admin = await AdminClientAsync();
+        var (device, asset) = await AttachedDeviceAsync(admin, "TRK-007");
+        var from = DateTimeOffset.UtcNow.AddHours(-1);
+        await using var database = await OpenDatabaseAsync();
+        // Ten Readings, one a second, but Sequence numbers 7, 8 and 9 share the last Device time.
+        await SqlAsync(database, """
+            INSERT INTO readings (device_id, boot, seq, asset_id, device_time, received_time, location)
+            SELECT @p0, 1, g, @p1, @p2 + least(g, 7) * interval '1 second', now(), ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography
+            FROM generate_series(0, 9) g
+            """, Guid.Parse(device), Guid.Parse(asset), from);
+        var range = Range(from, from.AddHours(1));
+
+        var thinned = await ListAsync(admin, $"/assets/{asset}/readings?{range}&thinTo=4");
+        var unthinned = await ListAsync(admin, $"/assets/{asset}/readings?{range}");
+
+        thinned[^1].GetProperty("sequenceNumber").GetInt64().ShouldBe(unthinned[^1].GetProperty("sequenceNumber").GetInt64());
+    }
+
+    [Fact]
+    public async Task Asset_history_refuses_thinTo_above_MaxThinTo()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        var range = Range(DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow);
+
+        using var atTheCap = await admin.GetAsync($"/assets/{asset}/readings?{range}&thinTo={ReadingsController.MaxThinTo}", CancellationToken);
+        using var over = await admin.GetAsync($"/assets/{asset}/readings?{range}&thinTo={ReadingsController.MaxThinTo + 1}", CancellationToken);
+
+        atTheCap.StatusCode.ShouldBe(HttpStatusCode.OK);
+        over.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
