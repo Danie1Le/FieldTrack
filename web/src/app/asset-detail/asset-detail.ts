@@ -31,7 +31,7 @@ function localInput(time: number): string {
  * Why the API refused a request, for people: a validation problem's messages (such as a range over 31 days, #26), else
  * its detail or title. Shown as text, never as HTML.
  */
-function refusal(error: unknown): string {
+function refusal(error: unknown, fallback = 'The history could not be read. Try again.'): string {
   if (error instanceof HttpErrorResponse) {
     if (error.status === 404) return 'No Asset has this id.';
     const problem = error.error as { title?: string; detail?: string; errors?: Record<string, string[]> } | null;
@@ -41,7 +41,7 @@ function refusal(error: unknown): string {
     if (problem?.title) return problem.title;
   }
 
-  return 'The history could not be read. Try again.';
+  return fallback;
 }
 
 /**
@@ -70,6 +70,8 @@ export class AssetDetail {
   protected readonly readings = signal<Reading[]>([]);
   protected readonly loading = signal(true);
   protected readonly problem = signal<string | null>(null);
+  /** An export is being issued: the button is off so one click makes one download. */
+  protected readonly exporting = signal(false);
   protected readonly from = signal(Date.now() - day);
   protected readonly to = signal(Date.now());
 
@@ -115,7 +117,15 @@ export class AssetDetail {
    * with its own download UI, so a month of Readings streams to disk instead of into the page.
    */
   protected async export(from: string, to: string): Promise<void> {
+    if (this.exporting()) return;
+    // The button is type=button, so the form's `required` does not stop an empty bound.
+    if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to))) {
+      this.problem.set('Pick a start and end time.');
+      return;
+    }
+
     this.problem.set(null);
+    this.exporting.set(true);
     const range = { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
     try {
       const { url } = await firstValueFrom(
@@ -127,7 +137,9 @@ export class AssetDetail {
       link.download = '';
       link.click();
     } catch (error) {
-      this.problem.set(refusal(error));
+      this.problem.set(refusal(error, 'The export could not be started. Try again.'));
+    } finally {
+      this.exporting.set(false);
     }
   }
 

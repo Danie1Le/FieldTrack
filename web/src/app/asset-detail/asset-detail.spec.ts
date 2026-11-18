@@ -254,6 +254,65 @@ describe('AssetDetail', () => {
     expect(page.querySelector('[role=alert]')!.textContent).toContain('You already run <b>2</b> exports; wait for one to finish.');
   });
 
+  it('shows the validation message when an export range is refused with 400', async () => {
+    await load();
+
+    button('Export CSV').click();
+    api.expectOne('/api/assets/truck-7/exports').flush(
+      { title: 'One or more validation errors occurred.', errors: { to: ['The range must span at most 31 days; split a longer range into several exports.'] } },
+      { status: 400, statusText: 'Bad Request' },
+    );
+    await settled();
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('split a longer range into several exports.');
+  });
+
+  it('says no Asset has this id when an export gets 404', async () => {
+    await load();
+
+    button('Export CSV').click();
+    api.expectOne('/api/assets/truck-7/exports').flush(null, { status: 404, statusText: 'Not Found' });
+    await settled();
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('No Asset has this id.');
+  });
+
+  it('says the export could not be started, not that the history could not be read, when it fails', async () => {
+    await load();
+
+    button('Export CSV').click();
+    api.expectOne('/api/assets/truck-7/exports').flush(null, { status: 500, statusText: 'Server Error' });
+    await settled();
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('The export could not be started. Try again.');
+  });
+
+  it('asks for both times, and sends nothing, when an export bound is empty', async () => {
+    await load();
+    page.querySelector<HTMLInputElement>('#to')!.value = '';
+
+    button('Export CSV').click();
+    await settled();
+
+    api.expectNone('/api/assets/truck-7/exports');
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('Pick a start and end time.');
+  });
+
+  it('makes one export per click run: a second click while the first is in flight sends nothing', async () => {
+    await load();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    button('Export CSV').click();
+    button('Export CSV').click();
+    const request = api.expectOne('/api/assets/truck-7/exports');
+    fixture.detectChanges();
+    expect(button('Export CSV').disabled).toBe(true);
+    request.flush({ url: '/exports?token=abc', expiresAt: '2026-11-17T12:01:00Z' });
+    await settled();
+
+    expect(button('Export CSV').disabled).toBe(false);
+  });
+
   it('says so when the range has no Readings', async () => {
     await load([]);
 
