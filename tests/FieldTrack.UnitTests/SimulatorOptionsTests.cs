@@ -119,6 +119,27 @@ public sealed class SimulatorOptionsTests
         Should.Throw<SimulatorException>(() => SimulatorCli.RunOptionsFrom(options, Fleet)).Message.ShouldContain(reason);
     }
 
+    [Theory]
+    [InlineData("wss", "broker.example", "wss://broker.example:443/mqtt")]
+    [InlineData("tcp", "localhost", "mqtt://localhost:1883/")]
+    [InlineData("ws", "127.0.0.1", "ws://127.0.0.1:80/mqtt")]
+    public void A_broker_user_connects_with_the_password_from_the_environment(string transport, string host, string address)
+    {
+        var options = Options.Parse(["--rate", "1", "--mqtt-transport", transport, "--mqtt-host", host, "--mqtt-username", "simulator"]);
+
+        var broker = SimulatorCli.RunOptionsFrom(options, Fleet, name => name == "FIELDTRACK_MQTT_PASSWORD" ? "s3cret" : null).Broker;
+
+        broker.ShouldBe(new MqttBroker(new Uri(address), "simulator", "s3cret"));
+    }
+
+    [Fact]
+    public void A_broker_user_without_a_password_is_refused()
+    {
+        var options = Options.Parse(["--rate", "1", "--mqtt-transport", "wss", "--mqtt-host", "broker.example", "--mqtt-username", "simulator"]);
+
+        Should.Throw<SimulatorException>(() => SimulatorCli.RunOptionsFrom(options, Fleet, _ => null)).Message.ShouldContain("Set FIELDTRACK_MQTT_PASSWORD");
+    }
+
     [Fact]
     public void A_broker_never_prints_its_password() =>
         new MqttBroker(new Uri("wss://broker.example/mqtt"), "simulator", "s3cret").ToString().ShouldNotContain("s3cret");
