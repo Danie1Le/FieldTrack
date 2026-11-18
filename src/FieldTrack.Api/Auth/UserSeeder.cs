@@ -1,6 +1,7 @@
 using FieldTrack.Infrastructure.Identity;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace FieldTrack.Api.Auth;
@@ -26,7 +27,8 @@ public static partial class UserSeeder
     /// <summary>
     /// Ensures both roles exist, creates an Admin from configuration when none exists (it must change
     /// the configured password at first sign-in, like any user with a temporary password), and in demo
-    /// mode creates the Demo Operator or resets it to the configured password.
+    /// mode creates the Demo Operator or resets it to the configured password. A Demo Operator that demo
+    /// mode no longer names is disabled.
     /// </summary>
     public static async Task SeedAsync(IServiceProvider services)
     {
@@ -51,6 +53,7 @@ public static partial class UserSeeder
         }
 
         await SeedAdminAsync(users, configuration, logger);
+        await DisableStaleDemoOperatorsAsync(users, provider.GetRequiredService<TokenService>(), demoOperator);
         await ResetDemoOperatorAsync(users, demoOperator);
         await transaction.CommitAsync();
     }
@@ -84,6 +87,19 @@ public static partial class UserSeeder
         EnsureSucceeded(await users.AddToRoleAsync(admin, Roles.Admin));
     }
 
+    /// <summary>
+    /// Disables every Demo Operator that demo mode no longer names: the password once shown on the login
+    /// page must stop working when demo mode goes off or moves to another email (#135).
+    /// </summary>
+    private static async Task DisableStaleDemoOperatorsAsync(UserManager<FieldTrackUser> users, TokenService tokens, DemoOperatorOptions demoOperator)
+    {
+        var normalizedEmail = demoOperator.Enabled ? users.NormalizeEmail(demoOperator.Email) : null;
+        foreach (var stale in await users.Users.Where(user => user.IsDemoOperator && user.NormalizedEmail != normalizedEmail).ToListAsync())
+        {
+            await DisableAsync(users, tokens, stale);
+        }
+    }
+
     private static async Task ResetDemoOperatorAsync(UserManager<FieldTrackUser> users, DemoOperatorOptions demoOperator)
     {
         if (!demoOperator.Enabled)
@@ -91,21 +107,21 @@ public static partial class UserSeeder
             return;
         }
 
-        var email = demoOperator.Email!;
         var password = demoOperator.Password!;
-        var demo = await users.FindByEmailAsync(email);
+        var demo = await users.FindByEmailAsync(demoOperator.Email!);
         if (demo is null)
         {
-            demo = new FieldTrackUser { UserName = email, Email = email, DisplayName = DemoOperatorDisplayName };
+            demo = new FieldTrackUser { UserName = demoOperator.Email, Email = demoOperator.Email, DisplayName = DemoOperatorDisplayName, IsDemoOperator = true };
             EnsureSucceeded(await users.CreateAsync(demo, password));
             EnsureSucceeded(await users.AddToRoleAsync(demo, Roles.Operator));
         }
         else
         {
-            // Never reset an Admin's password because the demo settings name their email.
-            if (!await users.IsInRoleAsync(demo, Roles.Operator))
+            // Never hand a real user's account to visitors because the demo settings name their email.
+            if (!demo.IsDemoOperator)
             {
-                throw new InvalidOperationException($"{DemoOperatorOptions.EmailKey} names {email}, who is not an Operator.");
+                throw new InvalidOperationException(
+                    $"{DemoOperatorOptions.EmailKey} names {demoOperator.Email}, an existing user who is not the Demo Operator. Choose an unused email.");
             }
 
             EnsureSucceeded(await users.RemovePasswordAsync(demo));
@@ -113,11 +129,21 @@ public static partial class UserSeeder
         }
 
         // The password is public and fixed by the deploy, so the Demo Operator never changes it,
-        // and a lockout would only let visitors lock each other out. SetLockoutEnabledAsync saves
-        // the user, these fields included.
+        // and a lockout would only let visitors lock each other out. Turning lockout off also brings
+        // back a Demo Operator disabled while demo mode was off; its lockout end goes too. SetLockoutEnabledAsync
+        // saves the user, these fields included.
         demo.MustChangePassword = false;
         demo.DisplayName = DemoOperatorDisplayName;
+        demo.LockoutEnd = null;
         EnsureSucceeded(await users.SetLockoutEnabledAsync(demo, false));
+    }
+
+    /// <summary>Locks the Demo Operator out for good and revokes its refresh tokens.</summary>
+    private static async Task DisableAsync(UserManager<FieldTrackUser> users, TokenService tokens, FieldTrackUser demo)
+    {
+        EnsureSucceeded(await users.SetLockoutEnabledAsync(demo, true));
+        EnsureSucceeded(await users.SetLockoutEndDateAsync(demo, DateTimeOffset.MaxValue));
+        await tokens.RevokeAllAsync(demo.Id, CancellationToken.None);
     }
 
     private static void EnsureSucceeded(IdentityResult result)

@@ -49,6 +49,38 @@ public sealed class RefreshTokenTests(FieldTrackFixture fixture) : IntegrationTe
     }
 
     [Fact]
+    public async Task Replaying_a_spent_refresh_token_revokes_every_refresh_token_of_that_user()
+    {
+        using var client = Fixture.Api.CreateClient();
+        var signedIn = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
+        var otherSession = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
+        using var refreshed = await AuthClient.PostRefreshAsync(client, signedIn.RefreshToken);
+
+        using var replayed = await AuthClient.PostRefreshAsync(client, signedIn.RefreshToken);
+        using var otherAfterReplay = await AuthClient.PostRefreshAsync(client, otherSession.RefreshToken);
+
+        otherAfterReplay.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Failed_sign_ins_that_lock_a_user_out_do_not_end_their_session()
+    {
+        // Anyone who knows the email can trigger this lockout, so it blocks new sign-ins only.
+        using var client = Fixture.Api.CreateClient();
+        var signedIn = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            using var failed = await AuthClient.PostSignInAsync(client, AdminEmail, "Wrong-pass-1");
+        }
+
+        using var signIn = await AuthClient.PostSignInAsync(client, AdminEmail, AdminPassword);
+        using var refreshed = await AuthClient.PostRefreshAsync(client, signedIn.RefreshToken);
+
+        signIn.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        refreshed.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task Two_refreshes_racing_with_one_token_leave_no_usable_refresh_token()
     {
         using var client = Fixture.Api.CreateClient();

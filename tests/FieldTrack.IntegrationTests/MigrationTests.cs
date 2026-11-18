@@ -326,6 +326,63 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Fact]
+    public async Task DemoOperatorHardening_marks_the_seeded_Demo_Operator_and_gives_older_refresh_tokens_one_family_per_user()
+    {
+        var database = $"backfill_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE DATABASE {database}");
+        try
+        {
+            var connectionString = new NpgsqlConnectionStringBuilder(Fixture.DatabaseConnectionString) { Database = database }.ConnectionString;
+            await using var db = new FieldTrackDbContext(new DbContextOptionsBuilder<FieldTrackDbContext>()
+                .UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite()).UseSnakeCaseNamingConvention().Options);
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync("ExportTickets", CancellationToken);
+            // The seeder's Operator has lockout off, and keeps its email's local part as display name when no
+            // demo-mode startup has run since display names existed. An Admin-created Operator has lockout on.
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO roles (id, name, normalized_name) VALUES ('00000000-0000-0000-0000-0000000000a1', 'Operator', 'OPERATOR');
+                INSERT INTO users (id, user_name, email, display_name, email_confirmed, phone_number_confirmed, two_factor_enabled, lockout_enabled, access_failed_count, must_change_password)
+                VALUES ('00000000-0000-0000-0000-00000000000d', 'demo@example.com', 'demo@example.com', 'demo', false, false, false, false, 0, false),
+                       ('00000000-0000-0000-0000-00000000000e', 'jo@example.com', 'jo@example.com', 'Demo Operator', false, false, false, true, 0, false);
+                INSERT INTO user_roles (user_id, role_id)
+                VALUES ('00000000-0000-0000-0000-00000000000d', '00000000-0000-0000-0000-0000000000a1'),
+                       ('00000000-0000-0000-0000-00000000000e', '00000000-0000-0000-0000-0000000000a1');
+                INSERT INTO refresh_tokens (id, user_id, token_hash, created_at, expires_at)
+                VALUES (gen_random_uuid(), '00000000-0000-0000-0000-00000000000d', '\x01', now(), now() + interval '7 days'),
+                       (gen_random_uuid(), '00000000-0000-0000-0000-00000000000d', '\x02', now(), now() + interval '7 days')
+                """, CancellationToken);
+
+            await migrator.MigrateAsync(cancellationToken: CancellationToken);
+
+            (await db.Database.SqlQueryRaw<string>("SELECT email AS \"Value\" FROM users WHERE is_demo_operator").SingleAsync(CancellationToken)).ShouldBe("demo@example.com");
+            (await db.Database.SqlQueryRaw<Guid>("SELECT DISTINCT family_id AS \"Value\" FROM refresh_tokens").SingleAsync(CancellationToken))
+                .ShouldBe(Guid.Parse("00000000-0000-0000-0000-00000000000d"));
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools();
+            await ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)");
+        }
+    }
+
+    [Fact]
+    public async Task Database_gives_each_refresh_token_written_without_a_family_a_family_of_its_own()
+    {
+        // While a deploy rolls out, the previous revision still writes refresh tokens without a family.
+        await ExecuteAsync("""
+            INSERT INTO users (id, user_name, email, display_name, email_confirmed, phone_number_confirmed, two_factor_enabled, lockout_enabled, access_failed_count, must_change_password)
+            VALUES ('00000000-0000-0000-0000-00000000000d', 'a@example.com', 'a@example.com', 'A', false, false, false, true, 0, false),
+                   ('00000000-0000-0000-0000-00000000000e', 'b@example.com', 'b@example.com', 'B', false, false, false, true, 0, false);
+            INSERT INTO refresh_tokens (id, user_id, token_hash, created_at, expires_at)
+            VALUES (gen_random_uuid(), '00000000-0000-0000-0000-00000000000d', '\x01', now(), now() + interval '7 days'),
+                   (gen_random_uuid(), '00000000-0000-0000-0000-00000000000e', '\x02', now(), now() + interval '7 days')
+            """);
+
+        await using var connection = await OpenDatabaseAsync();
+        (await SqlAsync(connection, "SELECT count(DISTINCT family_id) FROM refresh_tokens WHERE family_id <> '00000000-0000-0000-0000-000000000000'")).ShouldBe(2L);
+    }
+
+    [Fact]
     public async Task Database_allows_one_Active_Alert_per_Alert_Rule_and_Asset_besides_any_number_of_Resolved_ones()
     {
         await InsertRuleAsync();
