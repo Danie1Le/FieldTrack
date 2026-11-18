@@ -53,7 +53,8 @@ public static partial class UserSeeder
         }
 
         await SeedAdminAsync(users, configuration, logger);
-        await ResetDemoOperatorAsync(users, provider.GetRequiredService<TokenService>(), demoOperator);
+        await DisableStaleDemoOperatorsAsync(users, provider.GetRequiredService<TokenService>(), demoOperator);
+        await ResetDemoOperatorAsync(users, demoOperator);
         await transaction.CommitAsync();
     }
 
@@ -86,16 +87,21 @@ public static partial class UserSeeder
         EnsureSucceeded(await users.AddToRoleAsync(admin, Roles.Admin));
     }
 
-    private static async Task ResetDemoOperatorAsync(UserManager<FieldTrackUser> users, TokenService tokens, DemoOperatorOptions demoOperator)
+    /// <summary>
+    /// Disables every Demo Operator that demo mode no longer names: the password once shown on the login
+    /// page must stop working when demo mode goes off or moves to another email (#135).
+    /// </summary>
+    private static async Task DisableStaleDemoOperatorsAsync(UserManager<FieldTrackUser> users, TokenService tokens, DemoOperatorOptions demoOperator)
     {
-        var email = demoOperator.Enabled ? users.NormalizeEmail(demoOperator.Email) : null;
-        // The password once shown on the login page must stop working when demo mode goes off or moves
-        // to another email (#135).
-        foreach (var stale in await users.Users.Where(user => user.IsDemoOperator && user.NormalizedEmail != email).ToListAsync())
+        var normalizedEmail = demoOperator.Enabled ? users.NormalizeEmail(demoOperator.Email) : null;
+        foreach (var stale in await users.Users.Where(user => user.IsDemoOperator && user.NormalizedEmail != normalizedEmail).ToListAsync())
         {
             await DisableAsync(users, tokens, stale);
         }
+    }
 
+    private static async Task ResetDemoOperatorAsync(UserManager<FieldTrackUser> users, DemoOperatorOptions demoOperator)
+    {
         if (!demoOperator.Enabled)
         {
             return;
