@@ -20,7 +20,7 @@ public sealed class SimulatorRunTests(FieldTrackFixture fixture) : IntegrationTe
         """, AppContext.BaseDirectory);
 
     private RunOptions Options(TimeSpan duration, double rate = 30) =>
-        new(Fixture.BrokerHost, Fixture.BrokerPort, rate, duration, Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"));
+        new(MqttBroker.Tcp(Fixture.BrokerHost, Fixture.BrokerPort), rate, duration, Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"));
 
     private async Task SeedAsync()
     {

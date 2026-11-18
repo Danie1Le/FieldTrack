@@ -13,7 +13,7 @@ public sealed class FleetRunnerTests : IDisposable
         var fleet = FleetFile.Parse("""{ "devices": [ { "serial": "TRK-001", "assetType": "Truck" } ] }""", _directory);
         var manifestPath = Path.Combine(_directory, "manifest.json");
         // The broker is never reached: the Device fails building its first Reading, before it connects.
-        var options = new RunOptions("127.0.0.1", 1, 10, Duration: null, Path.Combine(_directory, "state.json"), manifestPath);
+        var options = new RunOptions(MqttBroker.Tcp("127.0.0.1", 1), 10, Duration: null, Path.Combine(_directory, "state.json"), manifestPath);
         var log = new StringWriter();
 
         var exception = await Should.ThrowAsync<InvalidOperationException>(
@@ -33,9 +33,9 @@ public sealed class FleetRunnerTests : IDisposable
         var manifest = Path.Combine(_directory, "manifest.json");
 
         var withScenario = await Should.ThrowAsync<SimulatorException>(
-            () => FleetRunner.RunAsync(fleet, new RunOptions("127.0.0.1", 1, null, null, state, manifest, scenario), TextWriter.Null, TimeProvider.System, TestContext.Current.CancellationToken));
+            () => FleetRunner.RunAsync(fleet, new RunOptions(MqttBroker.Tcp("127.0.0.1", 1), null, null, state, manifest, scenario), TextWriter.Null, TimeProvider.System, TestContext.Current.CancellationToken));
         var withRates = await Should.ThrowAsync<SimulatorException>(
-            () => FleetRunner.RunAsync(fleet, new RunOptions("127.0.0.1", 1, null, null, state, manifest, null, new RandomRates(1, 0, 0)), TextWriter.Null, TimeProvider.System, TestContext.Current.CancellationToken));
+            () => FleetRunner.RunAsync(fleet, new RunOptions(MqttBroker.Tcp("127.0.0.1", 1), null, null, state, manifest, null, new RandomRates(1, 0, 0)), TextWriter.Null, TimeProvider.System, TestContext.Current.CancellationToken));
 
         withScenario.Message.ShouldContain("--rate max");
         withRates.Message.ShouldContain("--rate max");
@@ -47,7 +47,7 @@ public sealed class FleetRunnerTests : IDisposable
     {
         var fleet = FleetFile.Parse("""{ "devices": [ { "serial": "TRK-001", "assetType": "Truck" } ] }""", _directory);
         var manifestPath = Path.Combine(_directory, "manifest.json");
-        var options = new RunOptions("127.0.0.1", 1, 10, Duration: null, Path.Combine(_directory, "state.json"), manifestPath);
+        var options = new RunOptions(MqttBroker.Tcp("127.0.0.1", 1), 10, Duration: null, Path.Combine(_directory, "state.json"), manifestPath);
 
         // The wall clock jumps an hour after the run starts, as after an NTP correction or a VM resume.
         await Should.ThrowAsync<InvalidOperationException>(

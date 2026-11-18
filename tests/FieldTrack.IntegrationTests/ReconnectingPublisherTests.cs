@@ -50,7 +50,7 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
         await SubscribeAsync(topic);
         using var proxy = new TcpProxy(fixture.BrokerHost, fixture.BrokerPort);
         proxy.Start();
-        await using var publisher = new ReconnectingPublisher("127.0.0.1", proxy.Port, "recon", TextWriter.Null);
+        await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp("127.0.0.1", proxy.Port), "recon", TextWriter.Null);
         await publisher.PublishAsync(topic, "before"u8.ToArray(), TestContext.Current.CancellationToken);
 
         proxy.SeverConnections();
@@ -67,7 +67,7 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
         var topic = $"fieldtrack/v1/devices/RECON-{Guid.NewGuid():N}/telemetry";
         await SubscribeAsync(topic);
         using var proxy = new TcpProxy(fixture.BrokerHost, fixture.BrokerPort);
-        await using var publisher = new ReconnectingPublisher("127.0.0.1", proxy.Port, "recon", TextWriter.Null);
+        await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp("127.0.0.1", proxy.Port), "recon", TextWriter.Null);
 
         var publishing = publisher.PublishAsync(topic, "late"u8.ToArray(), TestContext.Current.CancellationToken);
         await Task.Delay(700, TestContext.Current.CancellationToken);
@@ -82,7 +82,7 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
     public async Task Cancelling_ends_the_retries()
     {
         using var proxy = new TcpProxy(fixture.BrokerHost, fixture.BrokerPort);
-        await using var publisher = new ReconnectingPublisher("127.0.0.1", proxy.Port, "recon", TextWriter.Null);
+        await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp("127.0.0.1", proxy.Port), "recon", TextWriter.Null);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
 
         var publishing = publisher.PublishAsync("fieldtrack/v1/devices/RECON/telemetry", "never"u8.ToArray(), stop.Token);
@@ -113,7 +113,7 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
         {
             for (var attempt = 0; attempt < 200; attempt++)
             {
-                await using var publisher = new ReconnectingPublisher("127.0.0.1", port, "reset", TextWriter.Null);
+                await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp("127.0.0.1", port), "reset", TextWriter.Null);
                 using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
                 var publishing = publisher.PublishAsync("fieldtrack/v1/devices/RESET/telemetry", "never"u8.ToArray(), stop.Token);
                 Thread.SpinWait(Random.Shared.Next(200_000));
@@ -151,7 +151,7 @@ public sealed class ReconnectingPublisherTests(FieldTrackFixture fixture) : IDis
             }
         }, stop.Token);
         var log = new LogLines();
-        await using var publisher = new ReconnectingPublisher("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port, "silent", log);
+        await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port), "silent", log);
         var started = Stopwatch.StartNew();
 
         var publishing = publisher.PublishAsync("fieldtrack/v1/devices/SILENT/telemetry", "x"u8.ToArray(), stop.Token);

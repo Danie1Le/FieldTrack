@@ -54,7 +54,7 @@ internal static class BenchRun
 
         var tickToPuback = new List<double>();
         var options = new RunOptions(
-            target.BrokerHost, target.BrokerPort, rate, duration, target.StatePath, target.PathFor("manifest-", bench, DateTimeOffset.UtcNow),
+            MqttBroker.Tcp(target.BrokerHost, target.BrokerPort), rate, duration, target.StatePath, target.PathFor("manifest-", bench, DateTimeOffset.UtcNow),
             scenario,
             Acknowledged: wait =>
             {

@@ -58,7 +58,7 @@ public sealed class SimulatorCatchUpTests(FieldTrackFixture fixture) : IDisposab
             }
         }
 
-        var options = new RunOptions("127.0.0.1", proxy.Port, rate, TimeSpan.FromSeconds(5), Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"));
+        var options = new RunOptions(MqttBroker.Tcp("127.0.0.1", proxy.Port), rate, TimeSpan.FromSeconds(5), Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"));
 
         // The broker is down for the first 2.5 s of a 5 s run: the first Reading is taken at once and cannot be delivered.
         // The run's clock has started once the first Reading's first attempt fails, which is when it logs that retry.

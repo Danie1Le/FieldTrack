@@ -113,7 +113,7 @@ internal static class DuplicateBench
     private static Task PublishAsync(FleetFile fleet, BenchTarget target, List<List<byte[]>> payloadsByDevice, CancellationToken cancellationToken) =>
         Task.WhenAll(fleet.Devices.Select(async (spec, index) =>
         {
-            await using var publisher = new ReconnectingPublisher(target.BrokerHost, target.BrokerPort, spec.Serial, TextWriter.Null);
+            await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp(target.BrokerHost, target.BrokerPort), spec.Serial, TextWriter.Null);
             foreach (var payload in payloadsByDevice[index])
             {
                 await publisher.PublishAsync(SimulatedDevice.TopicFor(spec.Serial), payload, cancellationToken);

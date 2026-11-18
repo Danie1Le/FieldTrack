@@ -94,7 +94,7 @@ internal static class AlertLatencyBench
         ConcurrentDictionary<(Guid Asset, long Sequence), TaskCompletionSource<(JsonElement Alert, DateTimeOffset ReceivedAt)>> raised,
         ConcurrentDictionary<Guid, TaskCompletionSource> resolved, ConcurrentBag<AlertTiming> timings, CancellationToken cancellationToken)
     {
-        await using var publisher = new ReconnectingPublisher(target.BrokerHost, target.BrokerPort, serial, TextWriter.Null);
+        await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp(target.BrokerHost, target.BrokerPort), serial, TextWriter.Null);
         await publisher.ConnectAsync(cancellationToken);
         long sequence = 0;
 
