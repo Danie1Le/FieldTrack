@@ -23,4 +23,10 @@ public sealed class FieldTrackUser : IdentityUser<Guid>
     /// their own before they get tokens.
     /// </summary>
     public bool MustChangePassword { get; set; }
+
+    /// <summary>
+    /// True for the Demo Operator account the seeder created. Marked in the database rather than matched by email, so
+    /// startup can disable it once demo mode is off and never hands a real Operator's account to visitors (#135).
+    /// </summary>
+    public bool IsDemoOperator { get; set; }
 }

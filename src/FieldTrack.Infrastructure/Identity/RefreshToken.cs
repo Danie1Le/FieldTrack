@@ -12,6 +12,12 @@ public sealed class RefreshToken
     /// <summary>The user the token signs in.</summary>
     public Guid UserId { get; set; }
 
+    /// <summary>
+    /// The sign-in this token descends from: a sign-in starts a family and each refresh passes it on. A replayed
+    /// Demo Operator token revokes only its family (ADR 0002).
+    /// </summary>
+    public Guid FamilyId { get; set; }
+
     /// <summary>SHA-256 of the token the client holds.</summary>
     public required byte[] TokenHash { get; set; }
 

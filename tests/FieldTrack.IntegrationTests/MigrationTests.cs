@@ -326,6 +326,41 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
     }
 
     [Fact]
+    public async Task DemoOperatorHardening_marks_the_seeded_Demo_Operator_and_gives_older_refresh_tokens_one_family_per_user()
+    {
+        var database = $"backfill_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE DATABASE {database}");
+        try
+        {
+            var connectionString = new NpgsqlConnectionStringBuilder(Fixture.DatabaseConnectionString) { Database = database }.ConnectionString;
+            await using var db = new FieldTrackDbContext(new DbContextOptionsBuilder<FieldTrackDbContext>()
+                .UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite()).UseSnakeCaseNamingConvention().Options);
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync("ExportTickets", CancellationToken);
+            // The seeder's Demo Operator has lockout off; an Admin-created user of the same name has it on.
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO users (id, user_name, email, display_name, email_confirmed, phone_number_confirmed, two_factor_enabled, lockout_enabled, access_failed_count, must_change_password)
+                VALUES ('00000000-0000-0000-0000-00000000000d', 'demo@example.com', 'demo@example.com', 'Demo Operator', false, false, false, false, 0, false),
+                       ('00000000-0000-0000-0000-00000000000e', 'jo@example.com', 'jo@example.com', 'Demo Operator', false, false, false, true, 0, false);
+                INSERT INTO refresh_tokens (id, user_id, token_hash, created_at, expires_at)
+                VALUES (gen_random_uuid(), '00000000-0000-0000-0000-00000000000d', '\x01', now(), now() + interval '7 days'),
+                       (gen_random_uuid(), '00000000-0000-0000-0000-00000000000d', '\x02', now(), now() + interval '7 days')
+                """, CancellationToken);
+
+            await migrator.MigrateAsync(cancellationToken: CancellationToken);
+
+            (await db.Database.SqlQueryRaw<string>("SELECT email AS \"Value\" FROM users WHERE is_demo_operator").SingleAsync(CancellationToken)).ShouldBe("demo@example.com");
+            (await db.Database.SqlQueryRaw<Guid>("SELECT DISTINCT family_id AS \"Value\" FROM refresh_tokens").SingleAsync(CancellationToken))
+                .ShouldBe(Guid.Parse("00000000-0000-0000-0000-00000000000d"));
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools();
+            await ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)");
+        }
+    }
+
+    [Fact]
     public async Task Database_allows_one_Active_Alert_per_Alert_Rule_and_Asset_besides_any_number_of_Resolved_ones()
     {
         await InsertRuleAsync();
