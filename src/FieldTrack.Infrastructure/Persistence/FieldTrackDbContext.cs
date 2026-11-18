@@ -267,7 +267,7 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                 table.HasCheckConstraint("ck_alerts_status", NamesCheck<AlertStatus>("status"));
                 table.HasCheckConstraint("ck_alerts_resolve_reason", NamesCheck<ResolveReason>("resolve_reason"));
                 // Ingest and manual resolve write these with SQL: a Resolved Alert has its time and reason, an Active
-                // one neither, and only a breach that cleared inside its batch is from backlog.
+                // one neither, and only an Alert whose condition Cleared can be From backlog.
                 table.HasCheckConstraint("ck_alerts_resolution",
                     $"(status = '{nameof(AlertStatus.Resolved)}') = (resolved_at IS NOT NULL)"
                     + " AND (resolved_at IS NULL) = (resolve_reason IS NULL)"

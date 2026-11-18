@@ -46,9 +46,10 @@ public sealed class AlertRuleRunner
     private const string ResolvedAlertId = "resolved_alert_id";
 
     // Conditional, so a manual resolve that got there first wins (#10). Returns the id of the Alert it resolved, for
-    // the live push.
+    // the live push. From backlog as Alert.ClearedFromBacklog decides it, here for an Alert raised by an earlier batch.
     private const string ResolveActive = $"""
-        UPDATE alerts SET status = 'Resolved', resolved_at = @at, resolve_reason = 'Cleared'
+        UPDATE alerts SET status = 'Resolved', resolved_at = @at, resolve_reason = 'Cleared',
+                          from_backlog = @at < created_at - @backlog_margin
         WHERE alert_rule_id = @rule AND asset_id = @asset AND status <> 'Resolved'
         RETURNING id AS {ResolvedAlertId}
         """;
@@ -125,7 +126,8 @@ public sealed class AlertRuleRunner
                 // Resolve before inserting: the unique index allows one Active Alert per rule and Asset.
                 if (evaluation.ResolveActiveAlertAt is { } resolveAt)
                 {
-                    writes.BatchCommands.Add(Command(ResolveActive, ("at", resolveAt), ("rule", rule.Id), ("asset", assetId)));
+                    writes.BatchCommands.Add(Command(ResolveActive,
+                        ("at", resolveAt), ("backlog_margin", Alert.BacklogMargin), ("rule", rule.Id), ("asset", assetId)));
                 }
 
                 foreach (var alert in evaluation.Raised)

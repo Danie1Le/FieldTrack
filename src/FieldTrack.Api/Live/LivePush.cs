@@ -22,7 +22,7 @@ public sealed partial class LivePush(IHubContext<LiveHub> hub, IServiceScopeFact
     /// Sends the Alerts <paramref name="raisedAlertIds"/> as <see cref="LiveHub.AlertRaised"/> and
     /// <paramref name="updatedAlertIds"/> as <see cref="LiveHub.AlertUpdated"/>, then the Assets
     /// <paramref name="assetIds"/> together with every Asset those Alerts are about, whose Asset Status they may have
-    /// changed. A raised Alert that is already Resolved (raised From backlog and resolved in the same commit) goes as
+    /// changed. A raised Alert that is already Resolved (raised and resolved in the same commit) goes as
     /// <see cref="LiveHub.AlertUpdated"/>, so <see cref="LiveHub.AlertRaised"/> always means a new Active Alert.
     /// </summary>
     public async Task PushAsync(
