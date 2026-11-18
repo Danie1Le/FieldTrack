@@ -1,0 +1,176 @@
+# The demo stack (#156, layout in ADR 0006): everything one recorded session needs, applied from empty and destroyed
+# afterwards. Paid-feature guardrails (ADR 0006): no VNet, private endpoint, dedicated workload profile, maintenance
+# window, HA or geo-redundant backup anywhere in this stack.
+
+data "azurerm_client_config" "current" {}
+
+# Owned by the bootstrap stack, whose role-granting identity is scoped to it: read, never created or deleted here.
+data "azurerm_resource_group" "demo" {
+  name = var.resource_group_name
+}
+
+locals {
+  location = data.azurerm_resource_group.demo.location
+  # Key Vault and PostgreSQL names are global DNS names; a suffix fixed per subscription keeps them unique and stable.
+  suffix = substr(sha1(data.azurerm_resource_group.demo.id), 0, 6)
+
+  database_login = "fieldtrack"
+
+  # Key Vault secret name => value. The values come from ephemeral resources and reach Azure only through write-only
+  # arguments, so no password is ever in plan or state (the read-only plan identity can read state).
+  secret_values = {
+    "db-connection-string" = join(";", [
+      "Host=${azurerm_postgresql_flexible_server.demo.fqdn}",
+      "Database=fieldtrack",
+      "Username=${local.database_login}",
+      "Password=${ephemeral.random_password.secret["db"].result}",
+      # Azure requires TLS; check the server's certificate and name too.
+      "SSL Mode=VerifyFull",
+      # The aspnet image has no Kerberos library (docker-compose.yml says the same).
+      "Gss Encryption Mode=Disable",
+    ])
+    "auth-signing-key"         = ephemeral.random_bytes.signing_key.base64
+    "mqtt-ingest-password"     = ephemeral.random_password.secret["mqtt-ingest"].result
+    "mqtt-simulator-password"  = ephemeral.random_password.secret["mqtt-simulator"].result
+    "admin-temporary-password" = ephemeral.random_password.secret["admin-temporary"].result
+    "admin-password"           = ephemeral.random_password.secret["admin"].result
+    "demo-password"            = ephemeral.random_password.secret["demo"].result
+  }
+
+  # Bump to write freshly generated values for every secret and the database password on the next apply.
+  secrets_version = 1
+}
+
+# --- Secrets ---------------------------------------------------------------------------------------------------------
+
+# New values on every run, but write-only arguments send them only when secrets_version changes (or on create).
+ephemeral "random_password" "secret" {
+  for_each = toset(["db", "mqtt-ingest", "mqtt-simulator", "admin-temporary", "admin", "demo"])
+
+  length = 24
+  # Identity's default rules want all four kinds; PostgreSQL wants three. "-" and "_" need no quoting in a connection
+  # string, an environment variable or mosquitto_passwd's arguments.
+  override_special = "-_"
+  min_lower        = 1
+  min_upper        = 1
+  min_numeric      = 1
+  min_special      = 1
+}
+
+# The API refuses a signing key under 256 bits.
+ephemeral "random_bytes" "signing_key" {
+  length = 32
+}
+
+resource "azurerm_key_vault" "demo" {
+  name                = "kv-fieldtrack-${local.suffix}"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.demo.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+  # Data access through Azure RBAC roles only; the bootstrap lets the deploy identity grant just the two secret roles.
+  rbac_authorization_enabled = true
+  # Destroy purges the vault (azurerm's default), so its name is free again for the next apply.
+  purge_protection_enabled   = false
+  soft_delete_retention_days = 7
+}
+
+# The apps' identity reads secrets; Container Apps resolves the Key Vault references with it.
+resource "azurerm_user_assigned_identity" "apps" {
+  name                = "id-fieldtrack-apps"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.demo.name
+}
+
+resource "azurerm_role_assignment" "apps_read_secrets" {
+  scope                = azurerm_key_vault.demo.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.apps.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# Whoever applies writes the secrets.
+resource "azurerm_role_assignment" "deployer_writes_secrets" {
+  scope                = azurerm_key_vault.demo.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+  principal_type       = var.deployer_principal_type
+}
+
+# New role assignments take a while to reach Key Vault's data plane; writing or resolving a secret before then fails
+# with 403.
+resource "time_sleep" "role_propagation" {
+  create_duration = "60s"
+  depends_on      = [azurerm_role_assignment.apps_read_secrets, azurerm_role_assignment.deployer_writes_secrets]
+}
+
+resource "azurerm_key_vault_secret" "demo" {
+  for_each = toset(keys(local.secret_values))
+
+  name             = each.key
+  key_vault_id     = azurerm_key_vault.demo.id
+  value_wo         = local.secret_values[each.key]
+  value_wo_version = local.secrets_version
+
+  depends_on = [time_sleep.role_propagation]
+}
+
+# --- Database --------------------------------------------------------------------------------------------------------
+
+resource "azurerm_postgresql_flexible_server" "demo" {
+  name                = "psql-fieldtrack-${local.suffix}"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.demo.name
+  # Burstable B1ms (1 vCore, 2 GiB), PostgreSQL 16: covered by the free account's 12-month hours (ADR 0006).
+  sku_name   = "B_Standard_B1ms"
+  version    = "16"
+  storage_mb = 32768 # the smallest size Flexible Server offers
+
+  administrator_login               = local.database_login
+  administrator_password_wo         = ephemeral.random_password.secret["db"].result
+  administrator_password_wo_version = local.secrets_version
+
+  # Public access, limited by the firewall rule below; no VNet or private endpoint (paid-feature guardrails).
+  public_network_access_enabled = true
+  backup_retention_days         = 7
+  geo_redundant_backup_enabled  = false
+  auto_grow_enabled             = false
+  # No high_availability or maintenance_window block: both are paid features.
+}
+
+# PostGIS must be allow-listed before the API's first migration runs CREATE EXTENSION postgis.
+resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
+  name      = "azure.extensions"
+  server_id = azurerm_postgresql_flexible_server.demo.id
+  value     = "POSTGIS"
+}
+
+# 0.0.0.0 to 0.0.0.0 is Azure's "allow public access from Azure services" rule: Container Apps reach the server,
+# the internet does not.
+resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services" {
+  name             = "AllowAllAzureServicesAndResourcesWithinAzureIps"
+  server_id        = azurerm_postgresql_flexible_server.demo.id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "0.0.0.0"
+}
+
+# --- Observability ---------------------------------------------------------------------------------------------------
+
+resource "azurerm_log_analytics_workspace" "demo" {
+  name                = "log-fieldtrack-demo"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.demo.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30 # the minimum, inside the free retention period
+  daily_quota_gb      = var.log_daily_cap_gb
+}
+
+# Workspace-based, so the effective cap is the lower of the two caps (Azure Monitor docs); both get the same value.
+resource "azurerm_application_insights" "demo" {
+  name                 = "appi-fieldtrack-demo"
+  location             = local.location
+  resource_group_name  = data.azurerm_resource_group.demo.name
+  workspace_id         = azurerm_log_analytics_workspace.demo.id
+  application_type     = "web"
+  daily_data_cap_in_gb = var.log_daily_cap_gb
+}
