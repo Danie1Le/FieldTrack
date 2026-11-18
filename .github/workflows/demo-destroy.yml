@@ -11,16 +11,20 @@ permissions:
   # The OIDC token azurerm and azure/login exchange for the apply identity's Azure token; no Azure secret is stored.
   id-token: write
 
-# Shared with Apply demo, so apply and destroy never overlap; a queued run waits instead of cancelling one mid-way.
+# A Destroy must never be dropped (the demo keeps billing), so it has its own group: no Apply dispatch can replace a
+# waiting Destroy. A newer Destroy may replace a waiting one, which does the same thing. Apply and Destroy are kept from
+# changing the stack at once by the state blob's lease: Destroy waits for it (-lock-timeout below) while an Apply runs.
+# (infra/terraform/demo README: Destroy)
 concurrency:
-  group: demo-environment
+  group: demo-destroy
   cancel-in-progress: false
 
 jobs:
   destroy:
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # Up to 60 minutes waiting for a running Apply's state lease, plus the destroy itself.
+    timeout-minutes: 100
     defaults:
       run:
         working-directory: infra/terraform/demo
@@ -41,6 +45,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
+          # Keep equal to ci.yml (terraform job), terraform-plan.yml and demo-apply.yml.
           terraform_version: 1.17.0
           terraform_wrapper: false
 
@@ -62,7 +67,8 @@ jobs:
           echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
           start=$(date +%s)
           status=0
-          terraform destroy -auto-approve || status=$?
+          # Waits for the lease of an Apply that is still running (its job limit is 60 minutes) instead of failing.
+          terraform destroy -auto-approve -lock-timeout=60m || status=$?
           echo "| terraform destroy | $(( $(date +%s) - start )) | $([ "$status" = 0 ] && echo ok || echo "failed ($status)") |" >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 

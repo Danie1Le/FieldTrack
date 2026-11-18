@@ -15,9 +15,12 @@ permissions:
   # The OIDC token azurerm exchanges for the apply identity's Azure token; no Azure secret is stored.
   id-token: write
 
-# Shared with Destroy demo, so apply and destroy never overlap; a queued run waits instead of cancelling one mid-way.
+# One Apply at a time, never cancelled mid-way. GitHub keeps one pending run per group, so a newer dispatch replaces a
+# waiting Apply. Destroy demo has its own group, so an Apply can never replace a waiting Destroy; the state blob's lease
+# keeps the two from changing the stack at once (infra/terraform/demo README: Destroy). Apply does not wait for that
+# lease: started while Destroy holds it, it fails at once.
 concurrency:
-  group: demo-environment
+  group: demo-apply
   cancel-in-progress: false
 
 jobs:
@@ -46,6 +49,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
+          # Keep equal to ci.yml (terraform job), terraform-plan.yml and demo-destroy.yml.
           terraform_version: 1.17.0
           terraform_wrapper: false
 
@@ -55,6 +59,7 @@ jobs:
         run: |
           [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "::error::Not an image tag: $IMAGE_TAG"; exit 1; }
           registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          # Keep equal to the images.yml matrix and the *_image variables in infra/terraform/demo/variables.tf.
           for name in api dashboard mosquitto simulator; do
             image="$registry/fieldtrack-$name:$IMAGE_TAG"
             docker manifest inspect "$image" > /dev/null \
@@ -92,14 +97,21 @@ jobs:
           url=$(terraform output -raw dashboard_url)
           echo "::notice::Dashboard: $url"
           deadline=$(( $(date +%s) + 900 ))
+          result=ok
           until curl --fail --silent --show-error --output /dev/null --max-time 10 "$url/api/health"; do
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "| until the dashboard answers | $(( $(date +%s) - STARTED )) | timed out |" >> "$GITHUB_STEP_SUMMARY"
-              echo "::error::$url/api/health did not answer within 15 minutes of apply."
-              exit 1
+              result="timed out"
+              break
             fi
             sleep 10
           done
-          echo "| until the dashboard answers (from apply start) | $(( $(date +%s) - STARTED )) | ok |" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Dashboard: $url" >> "$GITHUB_STEP_SUMMARY"
+          # One row either way, and the URL even on a timeout, when it is most needed.
+          {
+            echo "| until the dashboard answers (from apply start) | $(( $(date +%s) - STARTED )) | $result |"
+            echo ""
+            echo "Dashboard: $url"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$result" != ok ]; then
+            echo "::error::$url/api/health did not answer within 15 minutes of apply."
+            exit 1
+          fi

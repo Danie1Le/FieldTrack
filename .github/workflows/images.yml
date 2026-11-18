@@ -23,6 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Keep equal to the image list in demo-apply.yml and the *_image variables in infra/terraform/demo/variables.tf.
         include:
           - image: fieldtrack-api
             context: .
