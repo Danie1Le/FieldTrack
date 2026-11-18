@@ -29,7 +29,7 @@
               <td>{{ user.role }}</td>
               <td class="muted">{{ user.mustChangePassword ? 'Temporary password' : '' }}</td>
               <td>
-                <button type="button" class="btn" [disabled]="busy()" (click)="revoke(user)">Revoke sessions</button>
+                <app-confirm-action label="Revoke sessions" [question]="revokeQuestion(user)" [disabled]="busy()" (confirmed)="revoke(user)" />
               </td>
             </tr>
           } @empty {

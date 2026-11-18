@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { AuthService } from '../auth/auth';
 import { LIVE_HUB, LiveFleet, LiveHubConnection } from './live-fleet';
-import { Alert, Geofence, LiveAsset } from './live';
+import { Alert, AlertRule, Geofence, LiveAsset } from './live';
 
 /** Stands in for SignalR's HubConnection: records connects and lets a test fire the client's events. */
 class FakeHub implements LiveHubConnection {
@@ -152,6 +152,51 @@ describe('LiveFleet', () => {
     await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
 
     expect(fleet.assets()[0].status).toBe('Offline');
+  });
+
+  it('drops an Asset that was Archived or deleted, also over a snapshot loading meanwhile', async () => {
+    fleet.start();
+    await serveSnapshot([truck('Normal'), truck('Normal', 'truck-2')]);
+
+    hub.fire('AssetsRemoved', ['truck-1']);
+    expect(fleet.assets().map((a) => a.id)).toEqual(['truck-2']);
+
+    hub.fire('reconnecting');
+    hub.fire('reconnected');
+    const snapshot = await snapshotReads();
+    hub.fire('AssetsRemoved', ['truck-2']);
+    snapshot.assets.flush([truck('Normal', 'truck-2'), truck('Normal', 'truck-3')]);
+    snapshot.others.forEach((read) => read.flush([]));
+    await vi.waitFor(() => expect(fleet.connection()).toBe('live'));
+
+    expect(fleet.assets().map((a) => a.id)).toEqual(['truck-3']);
+  });
+
+  it('reloads the Alert Rules and Asset Groups when either changes', async () => {
+    fleet.start();
+    await serveSnapshot([truck('Normal')]);
+    const rule: AlertRule = {
+      id: 'rule-1',
+      name: 'Engine overheat',
+      kind: 'Threshold',
+      assetId: 'truck-1',
+      assetGroupId: null,
+      severity: 'Critical',
+      enabled: true,
+      sensor: 'EngineTempC',
+      operator: 'GreaterThan',
+      threshold: 95,
+      hysteresis: 5,
+      geofenceId: null,
+    };
+
+    hub.fire('AlertRulesChanged');
+    api.expectOne('/api/alert-rules').flush([rule]);
+    hub.fire('AssetGroupsChanged');
+    api.expectOne('/api/asset-groups').flush([{ id: 'group-1', name: 'North yard' }]);
+
+    await vi.waitFor(() => expect(fleet.rules().map((r) => r.threshold)).toEqual([95]));
+    await vi.waitFor(() => expect(fleet.groups().map((g) => g.name)).toEqual(['North yard']));
   });
 
   it('lets two overlapping loads each finish without stopping the hub', async () => {

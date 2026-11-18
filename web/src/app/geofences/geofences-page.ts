@@ -1,10 +1,11 @@
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Observable, firstValueFrom } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../auth/auth';
 import { AlertRule, GeoJsonPolygon, Geofence } from '../control-room/live';
-import { problemsOf } from '../problems';
+import { Changes } from '../manage/changes';
+import { ConfirmAction } from '../manage/confirm-action';
 import { GeofenceDraft, GeofenceEditor } from './geofence-editor';
 
 /**
@@ -13,7 +14,7 @@ import { GeofenceDraft, GeofenceEditor } from './geofence-editor';
  */
 @Component({
   selector: 'app-geofences-page',
-  imports: [GeofenceEditor, RouterLink],
+  imports: [ConfirmAction, GeofenceEditor, RouterLink],
   templateUrl: './geofences-page.html',
   styleUrl: './geofences-page.css',
 })
@@ -29,8 +30,7 @@ export class GeofencesPage {
   protected readonly kind = signal<Geofence['kind']>('Inclusion');
   /** The draft's area as last drawn or edited on the map. */
   private readonly area = signal<GeoJsonPolygon | null>(null);
-  protected readonly busy = signal(false);
-  protected readonly problems = signal<string[]>([]);
+  protected readonly changes = new Changes(() => this.load());
 
   constructor() {
     void this.load();
@@ -55,26 +55,21 @@ export class GeofencesPage {
 
   protected cancel(): void {
     this.draft.set(null);
-    this.problems.set([]);
+    this.changes.problems.set([]);
   }
 
   protected save(): Promise<void> {
     const id = this.draft()!.id;
     const body = { name: this.name(), kind: this.kind(), area: this.area() };
-    return this.change(
-      id === null
-        ? this.http.post('/api/geofences', body)
-        : this.http.put(`/api/geofences/${encodeURIComponent(id)}`, body),
+    return this.changes.send(
+      id === null ? this.http.post('/api/geofences', body) : this.http.put(`/api/geofences/${encodeURIComponent(id)}`, body),
+      () => this.done(),
     );
   }
 
   protected remove(): Promise<void> {
     const id = this.draft()!.id!;
-    if (!confirm(`Delete the Geofence "${this.name()}"?`)) {
-      return Promise.resolve();
-    }
-
-    return this.change(this.http.delete(`/api/geofences/${encodeURIComponent(id)}`));
+    return this.changes.send(this.http.delete(`/api/geofences/${encodeURIComponent(id)}`), () => this.done());
   }
 
   private start(id: string | null, area: GeoJsonPolygon, name: string, kind: Geofence['kind']): void {
@@ -82,22 +77,13 @@ export class GeofencesPage {
     this.area.set(area);
     this.name.set(name);
     this.kind.set(kind);
-    this.problems.set([]);
+    this.changes.problems.set([]);
   }
 
-  /** Sends a change; once it is done, closes the form and reloads, else shows why it was refused. */
-  private async change(request: Observable<unknown>): Promise<void> {
-    this.busy.set(true);
-    this.problems.set([]);
-    try {
-      await firstValueFrom(request);
-      this.draft.set(null);
-      await this.load();
-    } catch (error) {
-      this.problems.set(problemsOf(error));
-    } finally {
-      this.busy.set(false);
-    }
+  /** After a change went through: closes the form and reloads. */
+  private done(): Promise<void> {
+    this.draft.set(null);
+    return this.load();
   }
 
   private async load(): Promise<void> {
@@ -109,7 +95,7 @@ export class GeofencesPage {
       this.geofences.set(geofences);
       this.rules.set(rules);
     } catch {
-      this.problems.set(['The Geofences could not be loaded. Reload the page to try again.']);
+      this.changes.problems.set(['The Geofences could not be loaded. Reload the page to try again.']);
     }
   }
 }

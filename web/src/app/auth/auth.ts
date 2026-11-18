@@ -2,6 +2,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { problemsOf } from '../problems';
 
 /** Tokens as the API's sign-in, refresh and change-password endpoints return them (ADR 0002). */
 interface TokenResponse {
@@ -13,7 +14,7 @@ interface TokenResponse {
 /** What a sign-in attempt came to; anything else is an unexpected error and throws. */
 export type SignInOutcome = 'signedIn' | 'passwordChangeRequired' | 'refused' | 'tooManyAttempts';
 
-/** What a password change came to: `invalid` carries the API's validation messages; anything else throws. */
+/** What a password change came to: `invalid` carries why the API refused it, never empty; anything else throws. */
 export type ChangePasswordOutcome = 'changed' | { invalid: string[] } | 'refused' | 'tooManyAttempts';
 
 /** The Demo Operator's public credentials, served in demo mode only (ADR 0002). */
@@ -115,7 +116,7 @@ export class AuthService {
       switch (error.status) {
         case 400:
           // A validation problem: { errors: { NewPassword: ["Passwords must have at least one digit ('0'-'9')."] } }.
-          return { invalid: Object.values<string[]>(error.error?.errors ?? {}).flat() };
+          return { invalid: problemsOf(error, 'The password could not be changed.') };
         case 401:
           return 'refused';
         case 429:

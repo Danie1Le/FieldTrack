@@ -28,6 +28,15 @@ export interface Reading {
   batteryV: number | null;
 }
 
+/** Each Sensor's value in a Reading; null when the Reading does not carry it. */
+export const sensorValue: Record<Sensor, (reading: Reading) => number | null> = {
+  SpeedKph: (r) => r.speedKph,
+  EngineTempC: (r) => r.engineTempC,
+  FuelPct: (r) => r.fuelPct,
+  VibrationMmS: (r) => r.vibrationMmS,
+  BatteryV: (r) => r.batteryV,
+};
+
 /** An Asset as the dashboard shows it live (`LiveAssetResponse`). */
 export interface LiveAsset {
   id: string;
@@ -124,4 +133,9 @@ export interface Geofence {
   /** Inclusion: Assets are meant to stay inside; Exclusion: meant to stay out. The map draws Exclusion dashed. */
   kind: 'Inclusion' | 'Exclusion';
   area: GeoJsonPolygon;
+}
+
+/** Whether an Alert Rule covers the Asset: it names the Asset, or the Asset Group the Asset is in. */
+export function covers(rule: AlertRule, asset: { id: string; assetGroupId: string | null }): boolean {
+  return rule.assetId === asset.id || (rule.assetGroupId !== null && rule.assetGroupId === asset.assetGroupId);
 }

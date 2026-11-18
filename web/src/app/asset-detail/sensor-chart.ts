@@ -1,18 +1,10 @@
 import { Component, DestroyRef, ElementRef, afterNextRender, afterRenderEffect, inject, input } from '@angular/core';
 import { Chart, Decimation, Filler, LineController, LineElement, LinearScale, PointElement, Plugin } from 'chart.js';
-import { Reading, Sensor } from '../control-room/live';
+import { Reading, Sensor, sensorValue } from '../control-room/live';
 import { RuleLine } from './replay';
 
 // Chart.js used directly (#13); registering only what the charts draw keeps the lazy chunk small.
 Chart.register(Decimation, Filler, LineController, LineElement, LinearScale, PointElement);
-
-const sensorValue: Record<Sensor, (reading: Reading) => number | null> = {
-  SpeedKph: (r) => r.speedKph,
-  EngineTempC: (r) => r.engineTempC,
-  FuelPct: (r) => r.fuelPct,
-  VibrationMmS: (r) => r.vibrationMmS,
-  BatteryV: (r) => r.batteryV,
-};
 
 const sensorNames: Record<Sensor, string> = {
   SpeedKph: 'Speed',

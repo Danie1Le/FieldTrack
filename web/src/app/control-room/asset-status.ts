@@ -1,4 +1,4 @@
-import { AlertRule, AssetStatus, AssetType, LiveAsset, Reading, Sensor } from './live';
+import { AlertRule, AssetStatus, AssetType, LiveAsset, Sensor, covers, sensorValue } from './live';
 
 /** The Asset list's groups, top to bottom: what needs attention first (Dashboard UX, #20). */
 const groupOrder: AssetStatus[] = ['Alerting', 'Offline', 'NoDevice', 'Normal'];
@@ -38,14 +38,6 @@ export function kindLetter(type: AssetType): string {
   return type[0];
 }
 
-const sensorValue: Record<Sensor, (reading: Reading) => number | null> = {
-  SpeedKph: (r) => r.speedKph,
-  EngineTempC: (r) => r.engineTempC,
-  FuelPct: (r) => r.fuelPct,
-  VibrationMmS: (r) => r.vibrationMmS,
-  BatteryV: (r) => r.batteryV,
-};
-
 /**
  * The sensors whose latest value is past an enabled Threshold rule covering the Asset (by Asset or Asset Group): the
  * values the list highlights. The threshold alone decides; hysteresis only delays clearing an Alert.
@@ -53,8 +45,7 @@ const sensorValue: Record<Sensor, (reading: Reading) => number | null> = {
 export function breachedSensors(asset: LiveAsset, rules: readonly AlertRule[]): Set<Sensor> {
   const breached = new Set<Sensor>();
   for (const rule of rules) {
-    const covers = rule.assetId === asset.id || (rule.assetGroupId !== null && rule.assetGroupId === asset.assetGroupId);
-    if (!rule.enabled || !covers || rule.kind !== 'Threshold' || !rule.sensor || rule.threshold === null || !asset.latest) {
+    if (!rule.enabled || !covers(rule, asset) || rule.kind !== 'Threshold' || !rule.sensor || rule.threshold === null || !asset.latest) {
       continue;
     }
 

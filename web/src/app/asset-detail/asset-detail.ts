@@ -4,6 +4,7 @@ import { Component, DestroyRef, computed, effect, inject, input, signal, untrack
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { Alert, AlertRule, AssetType, Reading, reasonLabels } from '../control-room/live';
+import { problemsOf } from '../problems';
 import { maxDrawn, positionAt, ruleLines } from './replay';
 import { ReplayMap } from './replay-map';
 import { SensorChart } from './sensor-chart';
@@ -27,21 +28,9 @@ function localInput(time: number): string {
   return local.toISOString().slice(0, 16);
 }
 
-/**
- * Why the API refused a request, for people: a validation problem's messages (such as a range over 31 days, #26), else
- * its detail or title. Shown as text, never as HTML.
- */
+/** Why the API refused a request, for people, such as a range over 31 days (#26). */
 function refusal(error: unknown, fallback = 'The history could not be read. Try again.'): string {
-  if (error instanceof HttpErrorResponse) {
-    if (error.status === 404) return 'No Asset has this id.';
-    const problem = error.error as { title?: string; detail?: string; errors?: Record<string, string[]> } | null;
-    const messages = Object.values(problem?.errors ?? {}).flat();
-    if (messages.length > 0) return messages.join(' ');
-    if (problem?.detail) return problem.detail;
-    if (problem?.title) return problem.title;
-  }
-
-  return fallback;
+  return error instanceof HttpErrorResponse && error.status === 404 ? 'No Asset has this id.' : problemsOf(error, fallback).join(' ');
 }
 
 /**

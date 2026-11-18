@@ -3,6 +3,7 @@ import { Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Observable, firstValueFrom } from 'rxjs';
 import { AuthService } from '../auth/auth';
+import { ConfirmAction } from '../manage/confirm-action';
 import { problemsOf } from '../problems';
 
 /** A user as `GET /users` returns them (Admins only: the list exposes accounts, ADR 0002). */
@@ -14,13 +15,16 @@ export interface User {
   mustChangePassword: boolean;
 }
 
+// ADR 0002: revoking leaves access tokens already issued valid until they expire.
+const revokeEffect = 'They are signed out when their access token expires, within 15 minutes.';
+
 /**
  * The users page (Admins only, spec #21 stories 73 and 76): create an Admin or Operator with a temporary password they
  * replace at first sign-in, and revoke a user's refresh tokens.
  */
 @Component({
   selector: 'app-users-page',
-  imports: [RouterLink],
+  imports: [ConfirmAction, RouterLink],
   templateUrl: './users-page.html',
   styleUrl: './users-page.css',
 })
@@ -47,14 +51,12 @@ export class UsersPage {
     }
   }
 
-  protected async revoke(user: User): Promise<void> {
-    // ADR 0002: revoking leaves access tokens already issued valid until they expire.
-    const effect = 'They are signed out when their access token expires, within 15 minutes.';
-    if (!confirm(`Revoke the sessions of ${user.displayName} (${user.email})? ${effect}`)) {
-      return;
-    }
+  protected revokeQuestion(user: User): string {
+    return `Revoke the sessions of ${user.displayName} (${user.email})? ${revokeEffect}`;
+  }
 
-    await this.change(this.http.delete(`/api/users/${encodeURIComponent(user.id)}/refresh-tokens`), `Revoked the sessions of ${user.displayName}. ${effect}`);
+  protected async revoke(user: User): Promise<void> {
+    await this.change(this.http.delete(`/api/users/${encodeURIComponent(user.id)}/refresh-tokens`), `Revoked the sessions of ${user.displayName}. ${revokeEffect}`);
   }
 
   /** Sends a change and says what it did, else why it was refused; resolves whether it went through. */
