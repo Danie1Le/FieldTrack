@@ -493,5 +493,6 @@ bench/results/*
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfvars.json
 !*.tfvars.example
 *.tfplan
