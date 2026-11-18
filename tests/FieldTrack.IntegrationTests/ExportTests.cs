@@ -58,6 +58,30 @@ public sealed class ExportTests(FieldTrackFixture fixture) : IntegrationTest(fix
     }
 
     [Fact]
+    public async Task Export_of_several_days_holds_every_Reading_once_under_one_header()
+    {
+        using var admin = await AdminClientAsync();
+        var asset = await CreateAsync(admin, "/assets", new { name = "Generator 1", type = "Generator" });
+        var device = await CreateAsync(admin, "/devices", new { serialNumber = "GEN-1" });
+        var from = Yesterday.AddDays(-2).AddHours(6);
+        await using var database = await OpenDatabaseAsync();
+        // One Reading every 30 minutes for three days from `from`, Sequence numbers 0 to 144: the range ends on the last.
+        await SqlAsync(database, """
+            INSERT INTO readings (device_id, boot, seq, asset_id, device_time, received_time, location)
+            SELECT @p0, 1, g, @p1, @p2 + g * interval '30 minutes', now(), ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography
+            FROM generate_series(0, 144) g
+            """, Guid.Parse(device), Guid.Parse(asset), from);
+
+        var ticket = await PostExportAsync(admin, asset, from, from.AddDays(3));
+        using var anonymous = Fixture.Api.CreateClient();
+        var lines = (await anonymous.GetStringAsync(ticket, CancellationToken)).Split('\n');
+
+        lines[0].ShouldBe(Header);
+        lines[1..^1].Select(line => long.Parse(line.Split(',')[2], CultureInfo.InvariantCulture)).ShouldBe(Enumerable.Range(0, 144).Select(seq => (long)seq));
+        lines[^1].ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task An_export_URL_downloads_once()
     {
         using var admin = await AdminClientAsync();

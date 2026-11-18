@@ -1,0 +1,5 @@
+{
+  "injections": [
+    { "device": "TRK-001", "kind": "overheat", "atSeconds": 0, "durationSeconds": 60, "amount": 120 }
+  ]
+}
