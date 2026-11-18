@@ -49,6 +49,20 @@ public sealed class RefreshTokenTests(FieldTrackFixture fixture) : IntegrationTe
     }
 
     [Fact]
+    public async Task Replaying_a_spent_refresh_token_revokes_every_refresh_token_of_that_user()
+    {
+        using var client = Fixture.Api.CreateClient();
+        var signedIn = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
+        var otherSession = await AuthClient.SignInAsync(client, AdminEmail, AdminPassword);
+        using var refreshed = await AuthClient.PostRefreshAsync(client, signedIn.RefreshToken);
+
+        using var replayed = await AuthClient.PostRefreshAsync(client, signedIn.RefreshToken);
+        using var otherAfterReplay = await AuthClient.PostRefreshAsync(client, otherSession.RefreshToken);
+
+        otherAfterReplay.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task Two_refreshes_racing_with_one_token_leave_no_usable_refresh_token()
     {
         using var client = Fixture.Api.CreateClient();

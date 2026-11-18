@@ -1,5 +1,3 @@
-using FieldTrack.Infrastructure.Identity;
-
 namespace FieldTrack.Api.Auth;
 
 /// <summary>
@@ -22,8 +20,4 @@ public sealed class DemoOperatorOptions
 
     /// <summary>True in demo mode.</summary>
     public bool Enabled => !string.IsNullOrEmpty(Password);
-
-    /// <summary>True in demo mode when <paramref name="user"/> is the Demo Operator.</summary>
-    public bool IsDemoOperator(FieldTrackUser user) =>
-        Enabled && string.Equals(user.Email, Email, StringComparison.OrdinalIgnoreCase);
 }

@@ -62,7 +62,8 @@ Needs Docker (Docker Desktop on Windows or macOS) and, for the simulator, the .N
    FIELDTRACK_AUTH_SIGNING_KEY=<base64 of 32 random bytes, e.g. openssl rand -base64 32>
    FIELDTRACK_ADMIN_EMAIL=admin@example.com
    FIELDTRACK_ADMIN_PASSWORD=<a temporary password, replaced at first sign-in>
-   # Optional demo mode: the sign-in page offers this Operator to visitors.
+   # Optional demo mode: the sign-in page offers this Operator to visitors. Use an email no other
+   # user has; leaving the password empty later turns demo mode off and locks the account out.
    FIELDTRACK_DEMO_EMAIL=demo@example.com
    FIELDTRACK_DEMO_PASSWORD=<a password>
    ```

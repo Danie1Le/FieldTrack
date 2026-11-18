@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using FieldTrack.Infrastructure.Identity;
 using FieldTrack.Infrastructure.Persistence;
@@ -31,8 +32,11 @@ public sealed class TokenService(
     /// <summary>How long a refresh token is valid. Each refresh issues a fresh one, so a user who keeps refreshing stays signed in.</summary>
     public static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(7);
 
-    /// <summary>Issues a new access token and refresh token for <paramref name="user"/>.</summary>
-    public async Task<TokenResponse> IssueAsync(FieldTrackUser user, CancellationToken cancellationToken)
+    /// <summary>Issues a new access token and a refresh token that starts a new family for <paramref name="user"/>.</summary>
+    public Task<TokenResponse> IssueAsync(FieldTrackUser user, CancellationToken cancellationToken) =>
+        IssueAsync(user, Guid.NewGuid(), cancellationToken);
+
+    private async Task<TokenResponse> IssueAsync(FieldTrackUser user, Guid familyId, CancellationToken cancellationToken)
     {
         // JWT times are whole seconds; truncate so the reported expiry equals the token's exp claim.
         var now = DateTimeOffset.FromUnixTimeSeconds(time.GetUtcNow().ToUnixTimeSeconds());
@@ -57,6 +61,7 @@ public sealed class TokenService(
         db.RefreshTokens.Add(new RefreshToken
         {
             UserId = user.Id,
+            FamilyId = familyId,
             TokenHash = SHA256.HashData(refreshToken),
             CreatedAt = now,
             ExpiresAt = now + RefreshTokenLifetime,
@@ -80,7 +85,7 @@ public sealed class TokenService(
         var hash = SHA256.HashData(Base64Url.DecodeFromChars(refreshToken));
         var now = time.GetUtcNow();
         // Spend and reissue in one transaction: a replay racing with this refresh waits on the row
-        // lock until the new token is committed, so its RevokeAllAsync revokes that token too.
+        // lock until the new token is committed, so its revoke reaches that token too.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // A conditional update, so two refreshes racing with one token cannot both succeed.
         var spent = await db.RefreshTokens
@@ -96,8 +101,17 @@ public sealed class TokenService(
         {
             if (stored.RevokedAt is not null)
             {
-                // A spent token presented again means it was copied: revoke every refresh token of that user.
-                await RevokeAllAsync(stored.UserId, cancellationToken);
+                // A spent token presented again means it was copied: revoke every refresh token of that user,
+                // or only this sign-in's family for the Demo Operator, whom every visitor shares (ADR 0002).
+                if (await db.Users.AnyAsync(user => user.Id == stored.UserId && user.IsDemoOperator, cancellationToken))
+                {
+                    await RevokeAsync(token => token.FamilyId == stored.FamilyId, cancellationToken);
+                }
+                else
+                {
+                    await RevokeAllAsync(stored.UserId, cancellationToken);
+                }
+
                 await transaction.CommitAsync(cancellationToken);
             }
 
@@ -110,17 +124,21 @@ public sealed class TokenService(
             return null;
         }
 
-        var response = await IssueAsync(user, cancellationToken);
+        var response = await IssueAsync(user, stored.FamilyId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return response;
     }
 
     /// <summary>Revokes every refresh token of the user, so they must sign in again within one access token lifetime.</summary>
-    public async Task RevokeAllAsync(Guid userId, CancellationToken cancellationToken)
+    public Task RevokeAllAsync(Guid userId, CancellationToken cancellationToken) =>
+        RevokeAsync(token => token.UserId == userId, cancellationToken);
+
+    private async Task RevokeAsync(Expression<Func<RefreshToken, bool>> which, CancellationToken cancellationToken)
     {
         var now = time.GetUtcNow();
         await db.RefreshTokens
-            .Where(token => token.UserId == userId && token.RevokedAt == null)
+            .Where(which)
+            .Where(token => token.RevokedAt == null)
             .ExecuteUpdateAsync(token => token.SetProperty(t => t.RevokedAt, now), cancellationToken);
     }
 }

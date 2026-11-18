@@ -74,7 +74,7 @@ public sealed class AuthController(
             return Unauthorized();
         }
 
-        if (demoOperator.Value.IsDemoOperator(user))
+        if (user.IsDemoOperator)
         {
             return Problem(statusCode: StatusCodes.Status403Forbidden, title: "The Demo Operator's password cannot be changed.");
         }

@@ -94,18 +94,92 @@ public sealed class DemoOperatorTests(FieldTrackFixture fixture) : IntegrationTe
     }
 
     [Fact]
-    public async Task Demo_mode_clears_the_password_change_an_Admin_created_Demo_Operator_would_need()
+    public async Task Startup_refuses_demo_mode_that_names_an_Operator_and_leaves_the_Operator_alone()
     {
         using var admin = Fixture.Api.CreateClient();
         await AuthClient.AuthorizeAsync(admin, AdminEmail, AdminPassword);
-        using var created = await AuthClient.PostUserAsync(admin, DemoEmail, "Operator", AuthClient.TemporaryPassword);
-        created.EnsureSuccessStatusCode();
+        await AuthClient.CreateUserAsync(admin, DemoEmail, "Operator", "Operator-pass-1");
 
         await using var api = DemoApi(DemoPassword);
-        using var client = api.CreateClient();
-        using var response = await AuthClient.PostSignInAsync(client, DemoEmail, DemoPassword);
 
+        Should.Throw<InvalidOperationException>(() => api.CreateClient()).Message.ShouldContain(DemoOperatorOptions.EmailKey);
+        using var client = Fixture.Api.CreateClient();
+        using var operatorSignIn = await AuthClient.PostSignInAsync(client, DemoEmail, "Operator-pass-1");
+        using var demoSignIn = await AuthClient.PostSignInAsync(client, DemoEmail, DemoPassword);
+        operatorSignIn.StatusCode.ShouldBe(HttpStatusCode.OK);
+        demoSignIn.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Startup_without_demo_mode_disables_the_Demo_Operator()
+    {
+        string refreshToken;
+        await using (var demoDeploy = DemoApi(DemoPassword))
+        {
+            using var demoClient = demoDeploy.CreateClient();
+            refreshToken = (await AuthClient.SignInAsync(demoClient, DemoEmail, DemoPassword)).RefreshToken;
+        }
+
+        await UserSeeder.SeedAsync(Fixture.Api.Services);
+
+        using var client = Fixture.Api.CreateClient();
+        using var signIn = await AuthClient.PostSignInAsync(client, DemoEmail, DemoPassword);
+        using var refresh = await AuthClient.PostRefreshAsync(client, refreshToken);
+        signIn.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        refresh.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Startup_with_another_demo_email_disables_the_previous_Demo_Operator()
+    {
+        await using (var previousDeploy = DemoApi(DemoPassword))
+        {
+            using var started = previousDeploy.CreateClient();
+        }
+
+        await using var api = DemoApi(DemoPassword, "new-demo@fieldtrack.test");
+        using var client = api.CreateClient();
+
+        using var previous = await AuthClient.PostSignInAsync(client, DemoEmail, DemoPassword);
+        using var current = await AuthClient.PostSignInAsync(client, "new-demo@fieldtrack.test", DemoPassword);
+        previous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        current.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Demo_mode_on_again_brings_the_disabled_Demo_Operator_back()
+    {
+        await using (var previousDeploy = DemoApi(DemoPassword))
+        {
+            using var started = previousDeploy.CreateClient();
+        }
+
+        await UserSeeder.SeedAsync(Fixture.Api.Services);
+        await using var api = DemoApi(DemoPassword);
+        using var client = api.CreateClient();
+
+        using var response = await AuthClient.PostSignInAsync(client, DemoEmail, DemoPassword);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Replaying_a_Demo_Operator_refresh_token_signs_out_only_that_visitor()
+    {
+        // ADR 0002: every visitor shares the Demo Operator, so one replay must not sign the others out.
+        await using var api = DemoApi(DemoPassword);
+        using var client = api.CreateClient();
+        var visitor = await AuthClient.SignInAsync(client, DemoEmail, DemoPassword);
+        var otherVisitor = await AuthClient.SignInAsync(client, DemoEmail, DemoPassword);
+        using var refreshed = await AuthClient.PostRefreshAsync(client, visitor.RefreshToken);
+        var rotated = await AuthClient.ReadTokensAsync(refreshed);
+
+        using var replayed = await AuthClient.PostRefreshAsync(client, visitor.RefreshToken);
+        using var visitorAfterReplay = await AuthClient.PostRefreshAsync(client, rotated.RefreshToken);
+        using var otherAfterReplay = await AuthClient.PostRefreshAsync(client, otherVisitor.RefreshToken);
+
+        replayed.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        visitorAfterReplay.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        otherAfterReplay.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]
