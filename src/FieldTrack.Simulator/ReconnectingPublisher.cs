@@ -16,14 +16,13 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
     private static readonly TimeSpan _keepAlive = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan _disconnectTimeout = TimeSpan.FromSeconds(1);
 
-    private readonly string _host;
-    private readonly int _port;
+    private readonly MqttBroker _broker;
     private readonly string _name;
     private readonly TextWriter _log;
     private IMqttClient? _client;
 
-    /// <summary>A publisher to the broker at <paramref name="host"/>:<paramref name="port"/>; <paramref name="name"/> (the serial) names it in the log and its client id.</summary>
-    public ReconnectingPublisher(string host, int port, string name, TextWriter log) => (_host, _port, _name, _log) = (host, port, name, log);
+    /// <summary>A publisher to <paramref name="broker"/>; <paramref name="name"/> (the serial) names it in the log and its client id.</summary>
+    public ReconnectingPublisher(MqttBroker broker, string name, TextWriter log) => (_broker, _name, _log) = (broker, name, log);
 
     /// <summary>
     /// Opens the connection ahead of the first Reading, so a run does not count the time a whole fleet takes to connect against its
@@ -119,15 +118,21 @@ internal sealed class ReconnectingPublisher : IAsyncDisposable
         var client = new MqttClientFactory().CreateMqttClient();
         try
         {
-            var options = new MqttClientOptionsBuilder()
-                .WithTcpServer(_host, _port)
+            var builder = new MqttClientOptionsBuilder()
+                .WithConnectionUri(_broker.Address)
                 // A new ClientId each time, so a connection the broker still thinks is open cannot block the new one.
                 .WithClientId($"fieldtrack-sim-{_name}-{Guid.NewGuid():N}")
                 .WithCleanStart()
                 .WithTimeout(_timeout)
                 // Short, so an idle connection to a broker that went silent is noticed before the next Reading.
-                .WithKeepAlivePeriod(_keepAlive)
-                .Build();
+                // It also keeps an idle WebSocket open through Container Apps ingress, which drops one after 240 s (#154).
+                .WithKeepAlivePeriod(_keepAlive);
+            if (_broker.Username is not null)
+            {
+                builder.WithCredentials(_broker.Username, _broker.Password);
+            }
+
+            var options = builder.Build();
             // MQTTnet returns a refused CONNACK instead of throwing.
             var result = await client.ConnectAsync(options, cancellationToken);
             if (result.ResultCode != MqttClientConnectResultCode.Success)

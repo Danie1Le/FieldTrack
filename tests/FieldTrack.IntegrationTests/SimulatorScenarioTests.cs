@@ -20,7 +20,7 @@ public sealed class SimulatorScenarioTests(FieldTrackFixture fixture) : Integrat
         """, AppContext.BaseDirectory);
 
     private RunOptions Options(TimeSpan duration, double? rate, Scenario? scenario = null, Action<TimeSpan>? acknowledged = null) =>
-        new(Fixture.BrokerHost, Fixture.BrokerPort, rate, duration, Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"), scenario, Acknowledged: acknowledged);
+        new(MqttBroker.Tcp(Fixture.BrokerHost, Fixture.BrokerPort), rate, duration, Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"), scenario, Acknowledged: acknowledged);
 
     private async Task<Dictionary<string, JsonElement>> SeedAsync()
     {

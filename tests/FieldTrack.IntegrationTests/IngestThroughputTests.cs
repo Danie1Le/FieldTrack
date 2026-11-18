@@ -47,7 +47,7 @@ public sealed class IngestThroughputTests(FieldTrackFixture fixture) : Integrati
         await Seeder.SeedAsync(api, Fleet, TextWriter.Null, CancellationToken);
         await using var ingest = await StartIngestAsync();
         var flood = new RunOptions(
-            Fixture.BrokerHost, Fixture.BrokerPort, RatePerSecond: null, TimeSpan.FromSeconds(2),
+            MqttBroker.Tcp(Fixture.BrokerHost, Fixture.BrokerPort), RatePerSecond: null, TimeSpan.FromSeconds(2),
             Path.Combine(_directory, "state.json"), Path.Combine(_directory, "manifest.json"));
 
         var manifest = await FleetRunner.RunAsync(Fleet, flood, TextWriter.Null, TimeProvider.System, CancellationToken);

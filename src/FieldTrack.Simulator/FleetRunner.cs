@@ -1,8 +1,7 @@
 namespace FieldTrack.Simulator;
 
 /// <summary>Where and how fast a run publishes, and where it keeps its files.</summary>
-/// <param name="BrokerHost">Host name of the MQTT broker.</param>
-/// <param name="BrokerPort">Port of the MQTT broker.</param>
+/// <param name="Broker">The MQTT broker the Devices publish to.</param>
 /// <param name="RatePerSecond">The target aggregate rate across all Devices, in Readings per second, or null for maximum mode: as fast as the broker acknowledges.</param>
 /// <param name="Duration">How long to run, or null to run until cancelled.</param>
 /// <param name="StatePath">The Boot counter file (<see cref="BootState"/>).</param>
@@ -12,8 +11,7 @@ namespace FieldTrack.Simulator;
 /// <param name="NoiseSeed">Seeds every Device's sensor noise instead of its Boot, so the same Scenario draws the same noise on each run; null to draw from the Boot.</param>
 /// <param name="Acknowledged">Called, possibly from several Devices at once, with the time from a Device's tick to the broker's acknowledgement of each Reading it published; null for nobody listening.</param>
 internal sealed record RunOptions(
-    string BrokerHost,
-    int BrokerPort,
+    MqttBroker Broker,
     double? RatePerSecond,
     TimeSpan? Duration,
     string StatePath,
@@ -60,7 +58,7 @@ internal static class FleetRunner
 
         // One connection per Device, as on the real fleet. They connect before the run's clock starts: connecting a whole fleet can
         // take over a second, which would be a debt the schedule skips (#105).
-        var publishers = devices.Select(device => new ReconnectingPublisher(options.BrokerHost, options.BrokerPort, device.Serial, log)).ToList();
+        var publishers = devices.Select(device => new ReconnectingPublisher(options.Broker, device.Serial, log)).ToList();
         await Task.WhenAll(publishers.Select(publisher => publisher.ConnectAsync(stop.Token)));
         if (options.Duration is { } duration)
         {

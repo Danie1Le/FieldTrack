@@ -19,6 +19,7 @@ internal static class SimulatorCli
               Creates the fleet's Assets, Devices and Attachments through the REST API as Admin. Safe to repeat.
 
           run --fleet <file> --rate <readings per second | max> [--duration <seconds>] [--mqtt-host localhost] [--mqtt-port 1883]
+              [--mqtt-transport tcp|ws|wss] [--mqtt-path /mqtt] [--mqtt-username <user>]
               [--state simulator-state.json] [--manifest manifest-<time>.json]
               [--scenario <file>] [--fault-rate <n>] [--power-off-rate <n>] [--coverage-gap-rate <n>]
               Publishes Readings for every Device at the target aggregate rate, spread evenly across Devices, until
@@ -27,8 +28,10 @@ internal static class SimulatorCli
               at 0. --scenario injects the Faults, Power offs, Coverage gaps and clock problems a file scripts (seconds
               from the start); the three rates (events per Device-hour) inject them at random, dropping a draw that
               would overlap one already running, so long windows at high rates come in under their rate. Only paced
-              runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP without credentials: point it only at a local or
-              trusted-network broker.
+              runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP by
+              default; ws and wss are MQTT over WebSockets at --mqtt-path (port 80 or 443 unless --mqtt-port is given), wss with TLS,
+              as the Container Apps broker needs. With --mqtt-username the password is read from FIELDTRACK_MQTT_PASSWORD, and
+              only wss may carry it beyond this machine.
 
           demo --fleet fleets/demo.json --scenario fleets/demo-scenario.json --rate 5 [--duration 300] [run's other options]
               The scripted demo: seeds the fleet, adds the Geofence "North yard" and the demo's Alert Rules (skipping those that exist by
@@ -154,7 +157,7 @@ internal static class SimulatorCli
         var run = RunOptionsFrom(options, fleet);
 
         var pace = run.RatePerSecond is { } rate ? $"{rate} Readings/s" : "as many Readings as the broker acknowledges";
-        Console.WriteLine($"Publishing {pace} for {fleet.Devices.Count} Devices to {run.BrokerHost}:{run.BrokerPort}. Ctrl+C stops.");
+        Console.WriteLine($"Publishing {pace} for {fleet.Devices.Count} Devices to {run.Broker}. Ctrl+C stops.");
         var manifest = await FleetRunner.RunAsync(fleet, run, Console.Out, TimeProvider.System, cancellationToken);
         var published = manifest.Devices.Sum(device => device.Ranges.Sum(range => range.LastSequence - range.FirstSequence + 1));
         var injected = manifest.Devices.Sum(device => device.Windows.Count);
@@ -171,12 +174,6 @@ internal static class SimulatorCli
             "max" => (double?)null,
             _ => options.GetNumber("rate"),
         };
-        var port = options.GetNumber("mqtt-port") ?? 1883;
-        if (port is not (>= 1 and <= 65535) || port != Math.Floor(port))
-        {
-            throw new SimulatorException($"--mqtt-port must be a whole number from 1 to 65535, got {port}.");
-        }
-
         var seconds = options.GetNumber("duration");
         if (seconds is not (null or >= 0 and <= MaxDurationSeconds))
         {
@@ -184,14 +181,47 @@ internal static class SimulatorCli
         }
 
         return new RunOptions(
-            options.Get("mqtt-host") ?? "localhost",
-            (int)port,
+            BrokerFrom(options),
             rate,
             seconds is { } duration ? TimeSpan.FromSeconds(duration) : null,
             options.Get("state") ?? "simulator-state.json",
             options.Get("manifest") ?? $"manifest-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssZ}.json",
             options.Get("scenario") is { } scenario ? Scenario.Load(scenario, fleet) : null,
             new RandomRates(PerHour(options, "fault-rate"), PerHour(options, "power-off-rate"), PerHour(options, "coverage-gap-rate")));
+    }
+
+    /// <summary>The broker of <c>run</c>: <c>--mqtt-transport tcp</c> (default), <c>ws</c> or <c>wss</c>, with its host, port, path and user.</summary>
+    /// <exception cref="SimulatorException">An option is out of range, or a password would cross the network unencrypted.</exception>
+    private static MqttBroker BrokerFrom(Options options)
+    {
+        var transport = options.Get("mqtt-transport") ?? "tcp";
+        var (scheme, defaultPort) = transport switch
+        {
+            "tcp" => ("mqtt", 1883),
+            "ws" => ("ws", 80),
+            "wss" => ("wss", 443),
+            _ => throw new SimulatorException($"--mqtt-transport must be tcp, ws or wss, got '{transport}'."),
+        };
+        var port = options.GetNumber("mqtt-port") ?? defaultPort;
+        if (port is not (>= 1 and <= 65535) || port != Math.Floor(port))
+        {
+            throw new SimulatorException($"--mqtt-port must be a whole number from 1 to 65535, got {port}.");
+        }
+
+        // MQTTnet's ws:// and wss:// addresses carry the path; the TCP one has none.
+        var path = scheme == "mqtt" ? string.Empty : options.Get("mqtt-path") ?? "/mqtt";
+        var address = new UriBuilder(scheme, options.Get("mqtt-host") ?? "localhost", (int)port, path).Uri;
+        if (options.Get("mqtt-username") is not { } username)
+        {
+            return new MqttBroker(address);
+        }
+
+        if (scheme != "wss" && !address.IsLoopback)
+        {
+            throw new SimulatorException($"The broker password goes only over wss to a host other than this machine; got {address}.");
+        }
+
+        return new MqttBroker(address, username, Credential(null, "FIELDTRACK_MQTT_PASSWORD", options));
     }
 
     private static double PerHour(Options options, string name) =>
