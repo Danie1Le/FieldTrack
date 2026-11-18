@@ -9,6 +9,7 @@ namespace FieldTrack.Simulator;
 /// <param name="Scenario">What to inject into which Device and when; null for nothing scripted.</param>
 /// <param name="RandomInjection">How often to inject at random; null for never. Neither this nor a Scenario is allowed in maximum mode.</param>
 /// <param name="NoiseSeed">Seeds every Device's sensor noise instead of its Boot, so the same Scenario draws the same noise on each run; null to draw from the Boot.</param>
+/// <param name="FirstBoot">The Boot of a Device the state file does not know yet (<see cref="BootState.ClockBoot"/> when the file does not outlive the run).</param>
 /// <param name="Acknowledged">Called, possibly from several Devices at once, with the time from a Device's tick to the broker's acknowledgement of each Reading it published; null for nobody listening.</param>
 internal sealed record RunOptions(
     MqttBroker Broker,
@@ -19,7 +20,8 @@ internal sealed record RunOptions(
     Scenario? Scenario = null,
     RandomRates? RandomInjection = null,
     Action<TimeSpan>? Acknowledged = null,
-    int? NoiseSeed = null);
+    int? NoiseSeed = null,
+    int FirstBoot = 1);
 
 /// <summary>
 /// Runs every Device of a fleet against the broker and writes the Manifest when it stops. Paced mode (a rate) spreads the sends
@@ -44,9 +46,9 @@ internal static class FleetRunner
         }
 
         Pacing? pacing = options.RatePerSecond is { } rate ? new Pacing(fleet.Devices.Count, rate) : null;
-        var boots = BootState.Raise(options.StatePath, fleet.Devices.Select(device => device.Serial));
+        var boots = BootState.Raise(options.StatePath, fleet.Devices.Select(device => device.Serial), options.FirstBoot);
         var devices = fleet.Devices.Select(device => SimulatedDevice.Start(
-            device, boots[device.Serial], options.Scenario, options.RandomInjection, () => BootState.Raise(options.StatePath, [device.Serial])[device.Serial],
+            device, boots[device.Serial], options.Scenario, options.RandomInjection, () => BootState.Raise(options.StatePath, [device.Serial], options.FirstBoot)[device.Serial],
             options.NoiseSeed)).ToList();
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

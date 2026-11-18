@@ -44,13 +44,37 @@ internal sealed class FieldTrackApi
         if (response.StatusCode == HttpStatusCode.Forbidden)
         {
             throw new SimulatorException(
-                $"{email} still has a temporary password. Choose a new one with POST /auth/change-password, then give the simulator the new password.");
+                $"{email} still has a temporary password. Choose a new one with POST /auth/change-password, then give the simulator the new password, "
+                + "or give it the temporary one in FIELDTRACK_ADMIN_TEMPORARY_PASSWORD to have it do that.");
         }
 
-        await EnsureSuccessAsync(response, "Sign-in");
-        var tokens = await response.Content.ReadFromJsonAsync<TokenResponse>(_json, cancellationToken);
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens!.AccessToken);
-        return new FieldTrackApi(http);
+        return await SignedInAsync(http, response, "Sign-in", cancellationToken);
+    }
+
+    /// <summary>
+    /// Signs in where nobody is at hand to replace the first Admin's temporary password (#61), such as the Azure demo:
+    /// an Admin still on <paramref name="temporaryPassword"/> is moved to <paramref name="password"/>, and one already
+    /// moved signs in with <paramref name="password"/>.
+    /// </summary>
+    /// <exception cref="SignInRefusedException">Neither password signs in, or the account is locked out.</exception>
+    public static async Task<FieldTrackApi> SignInReplacingTemporaryPasswordAsync(
+        HttpClient http, string email, string temporaryPassword, string password, CancellationToken cancellationToken)
+    {
+        // The temporary password fails once the Admin has moved on; that failure counts towards lockout, but the
+        // successful sign-in right after it resets the count.
+        using var response = await http.PostAsJsonAsync("/auth/sign-in", new { email, password = temporaryPassword }, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            return await SignInAsync(http, email, password, cancellationToken);
+        }
+
+        if (response.StatusCode != HttpStatusCode.Forbidden)
+        {
+            return await SignedInAsync(http, response, "Sign-in", cancellationToken);
+        }
+
+        using var changed = await http.PostAsJsonAsync("/auth/change-password", new { email, currentPassword = temporaryPassword, newPassword = password }, cancellationToken);
+        return await SignedInAsync(http, changed, "Change password", cancellationToken);
     }
 
     /// <summary>Lists the Assets that are not Archived.</summary>
@@ -103,6 +127,20 @@ internal sealed class FieldTrackApi
         using var response = await anonymous.PostAsJsonAsync("/auth/change-password", new { email, currentPassword = temporary, newPassword = password }, cancellationToken);
         await EnsureSuccessAsync(response, "Change password");
         return (await response.Content.ReadFromJsonAsync<TokenResponse>(_json, cancellationToken))!.AccessToken;
+    }
+
+    // Sends the access token in response on every later request from http.
+    private static async Task<FieldTrackApi> SignedInAsync(HttpClient http, HttpResponseMessage response, string what, CancellationToken cancellationToken)
+    {
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new SignInRefusedException($"{what} failed with 401: wrong email or password, or the account is locked out.");
+        }
+
+        await EnsureSuccessAsync(response, what);
+        var tokens = await response.Content.ReadFromJsonAsync<TokenResponse>(_json, cancellationToken);
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens!.AccessToken);
+        return new FieldTrackApi(http);
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, string what)

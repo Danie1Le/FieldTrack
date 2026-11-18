@@ -63,9 +63,9 @@ builder.Services.AddSingleton<LivePush>();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>(Program.MigrateOnStartupKey))
 {
-    // Development and integration tests migrate on startup; deployed environments migrate as a release step.
+    // Development, integration tests and the Azure demo migrate on startup; other deployments migrate as a release step.
     await using var scope = app.Services.CreateAsyncScope();
     await scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>().Database.MigrateAsync();
 }
@@ -88,4 +88,12 @@ app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpira
 await app.RunAsync();
 
 /// <summary>The API host entry point; public so integration tests can start it.</summary>
-public partial class Program;
+public partial class Program
+{
+    /// <summary>
+    /// Configuration key that makes a host outside Development create and migrate its database at startup; a failed
+    /// migration stops the host. The Azure demo sets it: it has no release pipeline to migrate from and runs a single API
+    /// replica (ADR 0006). A revision rollover briefly runs two, and EF Core's migration lock serializes their migrations.
+    /// </summary>
+    public const string MigrateOnStartupKey = "Database:MigrateOnStartup";
+}

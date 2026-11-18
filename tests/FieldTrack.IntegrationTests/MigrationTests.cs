@@ -1,9 +1,12 @@
 using FieldTrack.Domain.Alerts;
 using FieldTrack.Domain.Telemetry;
 using FieldTrack.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace FieldTrack.IntegrationTests;
@@ -28,6 +31,67 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
 
         // Spec #21 guard (PostGIS 3.6 everywhere), deliberately not derived from TestImages.
         version.ShouldNotBeNull().ShouldStartWith("3.6");
+    }
+
+    [Fact]
+    public async Task Startup_outside_development_creates_and_migrates_the_database_when_MigrateOnStartup_is_set()
+    {
+        var database = $"fieldtrack_{Guid.NewGuid():N}";
+        var connectionString = new NpgsqlConnectionStringBuilder(Fixture.DatabaseConnectionString) { Database = database }.ConnectionString;
+        try
+        {
+            await using var api = OutsideDevelopment(connectionString, "true");
+            api.StartServer();
+
+            await using var scope = api.Services.CreateAsyncScope();
+            var pending = await scope.ServiceProvider.GetRequiredService<FieldTrackDbContext>().Database.GetPendingMigrationsAsync(CancellationToken);
+
+            pending.ShouldBeEmpty();
+        }
+        finally
+        {
+            await using var connection = new NpgsqlConnection(Fixture.DatabaseConnectionString);
+            await connection.OpenAsync(CancellationToken);
+            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS {database} WITH (FORCE)", connection);
+            await drop.ExecuteNonQueryAsync(CancellationToken);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("false")]
+    public async Task Startup_outside_development_leaves_the_schema_alone_unless_MigrateOnStartup_is_set(string? migrateOnStartup)
+    {
+        await WithEmptyDatabaseAsync(async connectionString =>
+        {
+            await using var api = OutsideDevelopment(connectionString, migrateOnStartup);
+
+            // Unmigrated, the user seeder finds no tables.
+            Should.Throw<PostgresException>(api.StartServer).SqlState.ShouldBe(PostgresErrorCodes.UndefinedTable);
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(CancellationToken);
+            (await SqlAsync(connection, "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")).ShouldBe(0L);
+        });
+    }
+
+    [Fact]
+    public async Task Startup_stops_when_MigrateOnStartup_is_set_and_the_migration_fails()
+    {
+        await WithEmptyDatabaseAsync(async connectionString =>
+        {
+            // A history table EF cannot read fails the migration with UndefinedColumn. Carrying on past it would fail
+            // differently, in the user seeder, with UndefinedTable.
+            await using (var connection = new NpgsqlConnection(connectionString))
+            {
+                await connection.OpenAsync(CancellationToken);
+                await using var command = new NpgsqlCommand("CREATE TABLE \"__EFMigrationsHistory\" (unexpected int)", connection);
+                await command.ExecuteNonQueryAsync(CancellationToken);
+            }
+
+            await using var api = OutsideDevelopment(connectionString, "true");
+
+            Should.Throw<PostgresException>(api.StartServer).SqlState.ShouldBe(PostgresErrorCodes.UndefinedColumn);
+        });
     }
 
     [Theory]
@@ -433,6 +497,33 @@ public sealed class MigrationTests(FieldTrackFixture fixture) : IntegrationTest(
 
         await using var connection = await OpenDatabaseAsync();
         (await SqlAsync(connection, "SELECT (SELECT count(*) FROM alert_rules) + (SELECT count(*) FROM alert_rule_states)")).ShouldBe(0L);
+    }
+
+    // A null migrateOnStartup leaves the key out (UseSetting would set it to an empty string).
+    private WebApplicationFactory<Program> OutsideDevelopment(string connectionString, string? migrateOnStartup) =>
+        Fixture.Api.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Production")
+                .UseSetting($"ConnectionStrings:{PersistenceServiceCollectionExtensions.ConnectionStringName}", connectionString);
+            if (migrateOnStartup is not null)
+            {
+                builder.UseSetting(Program.MigrateOnStartupKey, migrateOnStartup);
+            }
+        });
+
+    private async Task WithEmptyDatabaseAsync(Func<string, Task> test)
+    {
+        var database = $"empty_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE DATABASE {database}");
+        try
+        {
+            await test(new NpgsqlConnectionStringBuilder(Fixture.DatabaseConnectionString) { Database = database }.ConnectionString);
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools();
+            await ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)");
+        }
     }
 
     // Each insert starts from a valid row; tests override single columns with SQL literals.
