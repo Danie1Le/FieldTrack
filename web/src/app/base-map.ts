@@ -2,7 +2,7 @@ import { DestroyRef, inject } from '@angular/core';
 import * as L from 'leaflet';
 
 /**
- * The map both Leaflet views share: OpenStreetMap tiles with attribution, zoom control bottom left, re-measured
+ * The map every Leaflet view shares: OpenStreetMap tiles with attribution, zoom control bottom left, re-measured
  * whenever `host` is shown or resized (`onResize` runs after each re-measure). Call it where `inject` works; the
  * map is removed with the component.
  */

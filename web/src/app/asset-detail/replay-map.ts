@@ -1,5 +1,6 @@
-import { Component, DestroyRef, ElementRef, afterRenderEffect, computed, inject, input } from '@angular/core';
+import { Component, ElementRef, afterRenderEffect, computed, inject, input } from '@angular/core';
 import * as L from 'leaflet';
+import { baseMap } from '../base-map';
 import { Reading } from '../control-room/live';
 
 /** A palette colour (styles.css); read from the root, since this host is not on the page yet when the layers are made. */
@@ -23,7 +24,8 @@ export class ReplayMap {
   readonly position = input.required<number>();
 
   private readonly host: HTMLElement = inject(ElementRef).nativeElement;
-  private readonly map = L.map(this.host, { zoomControl: false }).setView([52.2, -1.1], 6);
+  // On a phone the page reflows; the base map re-measures on every resize.
+  private readonly map = baseMap(this.host, () => this.fitOnce());
   private readonly route = L.polyline([], {
     color: colour('--muted'),
     weight: 3,
@@ -45,24 +47,9 @@ export class ReplayMap {
   private fitted = false;
 
   constructor() {
-    L.control.zoom({ position: 'bottomleft' }).addTo(this.map);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(this.map);
     this.route.addTo(this.map);
     this.trail.addTo(this.map);
     this.dot.addTo(this.map);
-    // On a phone the page reflows; re-measure on every resize.
-    const resized = new ResizeObserver(() => {
-      this.map.invalidateSize();
-      this.fitOnce();
-    });
-    resized.observe(this.host);
-    inject(DestroyRef).onDestroy(() => {
-      resized.disconnect();
-      this.map.remove();
-    });
 
     afterRenderEffect(() => {
       this.route.setLatLngs(this.points());
