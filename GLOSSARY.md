@@ -97,7 +97,7 @@ To end an Alert, done by the platform when its condition clears or by a user at 
 _Avoid_: Close, dismiss, clear
 
 **From backlog**:
-Said of an Alert whose condition Cleared, by Device time, more than 10 seconds before the platform created the Alert, as when a breach comes and goes during a Coverage gap: nobody could have seen it while it held. It depends only on the Readings' times, never on how ingest batched them, so a live breach is never From backlog.
+Said of an Alert whose condition Cleared, by Device time, more than 10 seconds before the platform created the Alert, as when a breach comes and goes during a Coverage gap: nobody could have seen it while it held. It depends only on the Readings' times, never on how ingest batched them. Device clock skew can mislead it: a clock more than 10 seconds behind can tag a short live breach, and a clock running ahead (ingest accepts up to 5 minutes) can leave a short Coverage gap breach untagged.
 _Avoid_: Late alert, historical alert, offline alert
 
 **Latch**:

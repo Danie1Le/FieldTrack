@@ -86,7 +86,10 @@ export interface Alert {
    * while the condition held.
    */
   latched: boolean;
-  /** Raised and Resolved in one ingest batch, so it was never Active. */
+  /**
+   * Its condition Cleared, by Device time, more than 10 s before the platform created it, so nobody could have seen it
+   * while it held.
+   */
   fromBacklog: boolean;
 }
 
