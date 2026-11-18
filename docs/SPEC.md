@@ -1,5 +1,7 @@
 # FieldTrack: Real-Time Equipment & Fleet Monitoring Platform
 
+> This is the original proposal. The current spec is [issue #21](https://github.com/Danie1Le/FieldTrack/issues/21); where they differ, #21 wins. Measured results are on [RESULTS.md](RESULTS.md).
+
 ## 1. Overview
 
 FieldTrack tracks field equipment and vehicles (trucks, excavators, generators, substation sensors) in real time. Simulated devices publish GPS position and sensor readings over MQTT. The platform ingests them, stores them in a spatial database, evaluates alert rules (geofence exit, threshold breach, device offline), and pushes everything live to a map dashboard.
@@ -121,7 +123,7 @@ Observability: OpenTelemetry -> Azure Monitor / App Insights (Grafana locally)
 | Component | Azure service |
 |---|---|
 | API + ingest worker | Azure Container Apps (consumption plan, scale to zero) |
-| MQTT broker | HiveMQ Cloud free tier (managed MQTT, $0) during demos; Mosquitto container locally |
+| MQTT broker | Mosquitto everywhere: a container locally, a Container App reached over MQTT over WebSockets (`wss://…:443`) in Azure (spec #21) |
 | Database | Azure Database for PostgreSQL Flexible Server, Burstable B1ms (PostGIS extension enabled), only while demoing |
 | Angular dashboard | Azure Static Web Apps (Free plan) |
 | Images | GitHub Container Registry (free for public repos) instead of Azure Container Registry |
@@ -156,14 +158,14 @@ fieldtrack/
 
 | Layer | Technology |
 |---|---|
-| Language | C# 12 / .NET 8 (LTS), TypeScript |
+| Language | C# / .NET 10 (LTS), TypeScript (spec #21) |
 | Backend | ASP.NET Core Web API, BackgroundService, SignalR |
-| Data access | Entity Framework Core 8 + Npgsql + NetTopologySuite (spatial types) |
+| Data access | Entity Framework Core 10 + Npgsql + NetTopologySuite (spatial types); binary COPY for ingest (ADR 0004) |
 | Database | PostgreSQL 16 + PostGIS |
 | Messaging | MQTT 3.1.1/5 with Eclipse Mosquitto, MQTTnet client |
-| Frontend | Angular 17+, Leaflet (+ Leaflet.draw for geofences), Chart.js or ngx-charts |
+| Frontend | Angular 22, Leaflet 1.9 (+ Leaflet-Geoman for Geofences), Chart.js (spec #21) |
 | Auth | ASP.NET Core Identity + JWT bearer, role-based policies |
-| Testing | xUnit, FluentAssertions, Testcontainers for .NET, k6 |
+| Testing | xUnit v3, Shouldly, Testcontainers for .NET, Vitest, Playwright, k6 (spec #21) |
 | Observability | OpenTelemetry .NET, Application Insights / Prometheus + Grafana |
 | Containers | Docker, Docker Compose |
 | Cloud | Microsoft Azure |
@@ -206,7 +208,7 @@ Measure each of these with a repeatable script, record the result in `docs/RESUL
 | **Alert false positives** | Noisy sensor data near thresholds, with vs without hysteresis | X% fewer false alerts with hysteresis |
 | **Test coverage** | Coverlet report from xUnit | 80%+ on domain + rules |
 | **Infra provisioning time** | Time `terraform apply` from empty subscription to running app | Record it |
-| **Cloud cost** | Azure cost analysis for a week of running | Record $/day |
+| **Cloud cost** | Azure Cost Management per demo session and per idle day; a week of running would drain the free grant (spec #21) | Record $/demo session and $/idle day |
 
 ---
 
@@ -238,7 +240,7 @@ Hard rule: the project must never cost real money. Everything is built and bench
 
 ### 11.1 Free by default (local development)
 
-All of these are open source or free: .NET 8, ASP.NET Core, EF Core, PostgreSQL + PostGIS, Eclipse Mosquitto, MQTTnet, Angular, Leaflet, Grafana, Prometheus, k6, xUnit, Testcontainers, Docker Desktop (free for personal/education use), Terraform. GitHub, GitHub Actions, and GitHub Container Registry are free for public repositories.
+All of these are open source or free: .NET 10, ASP.NET Core, EF Core, PostgreSQL + PostGIS, Eclipse Mosquitto, MQTTnet, Angular, Leaflet, Grafana, Prometheus, k6, xUnit, Testcontainers, Docker Desktop (free for personal/education use), Terraform. GitHub, GitHub Actions, and GitHub Container Registry are free for public repositories.
 
 The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquitto, API, Angular, Grafana). All benchmarks in section 8 are run locally, so the numbers never depend on paid cloud capacity.
 
@@ -254,7 +256,7 @@ The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquit
 |---|---|
 | Angular dashboard | Azure Static Web Apps, Free plan |
 | API + ingest worker | Azure Container Apps consumption plan, `min_replicas = 0` for the API so it scales to zero (covered by the monthly free grant at demo traffic) |
-| MQTT broker | HiveMQ Cloud free tier (managed MQTT) instead of an always-on broker container, which would use up the Container Apps free grant |
+| MQTT broker | Mosquitto as a Container App on the Consumption profile, reached over MQTT over WebSockets (spec #21; replaces the HiveMQ Cloud plan) |
 | Database | Azure PostgreSQL Flexible Server Burstable B1ms only while deployed (covered by free/student hours); destroyed after each demo. Free fallback: a free-tier hosted Postgres that supports PostGIS (Neon or Supabase) |
 | Container images | GitHub Container Registry (free), not Azure Container Registry |
 | Monitoring | Application Insights with sampling turned on to stay inside the free monthly data allowance; Grafana locally for benchmarks |
@@ -269,4 +271,4 @@ The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquit
 - Publish `docs/RESULTS.md` with the local benchmark numbers.
 - In interviews, say the whole environment is created and destroyed with Terraform in minutes. That is a real skill and explains why it is not always online.
 
-Free-tier limits change. Before deploying, confirm the current limits on the Azure for Students, Container Apps, Static Web Apps, PostgreSQL Flexible Server, and HiveMQ Cloud pricing pages.
+Free-tier limits change. Before deploying, confirm the current limits on the Azure for Students, Container Apps, Static Web Apps, and PostgreSQL Flexible Server pricing pages.
