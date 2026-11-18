@@ -25,9 +25,10 @@ public sealed class CloudBrokerTests
         _cloudConfig.ShouldContain(line => line.StartsWith("password_file ", StringComparison.Ordinal));
     }
 
+    // A deployed image is pinned by index digest as well as tag, so a re-pushed tag cannot change it silently.
     [Fact]
-    public void The_cloud_broker_image_builds_on_the_tested_Mosquitto_image() =>
-        Lines("mosquitto-cloud/Dockerfile").ShouldContain($"FROM {TestImages.Mosquitto}");
+    public void The_cloud_broker_image_builds_on_the_tested_Mosquitto_image_pinned_by_digest() =>
+        Lines("mosquitto-cloud/Dockerfile").ShouldContain(line => line.StartsWith($"FROM {TestImages.Mosquitto}@sha256:", StringComparison.Ordinal));
 
     private static string[] Lines(string file) =>
         [.. File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, file)).Select(line => line.Trim())];
