@@ -67,8 +67,20 @@ public sealed class Alert
     public DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>
-    /// True when one ingest batch both raised and resolved it, as when a Coverage gap's backlog arrives: the
-    /// condition came and went while nobody could see it, so it was never Active.
+    /// True when its condition Cleared, by Device time, more than <see cref="BacklogMargin"/> before the platform created
+    /// it, as when a breach comes and goes during a Coverage gap: nobody could have seen it while it held. A property of
+    /// the Readings' times, not of how ingest batched them (GLOSSARY: From backlog).
     /// </summary>
     public bool FromBacklog { get; set; }
+
+    /// <summary>
+    /// How long before <see cref="CreatedAt"/> the condition must have Cleared for the Alert to be From backlog: room for
+    /// delivery latency and a Device clock running a little behind. Skew beyond that misleads the tag: a clock more than
+    /// this far behind can tag a short live breach, and a clock running ahead (ingest accepts up to 5 minutes) can leave
+    /// a short Coverage gap breach untagged.
+    /// </summary>
+    public static readonly TimeSpan BacklogMargin = TimeSpan.FromSeconds(10);
+
+    /// <summary>Whether a Clear at <paramref name="clearedAt"/> (Device time) makes this Alert From backlog.</summary>
+    public bool ClearedFromBacklog(DateTimeOffset clearedAt) => clearedAt < CreatedAt - BacklogMargin;
 }

@@ -69,14 +69,14 @@ public static class RuleEvaluator
             }
             else if (!breached && wasBreached)
             {
-                // A breach raised by an earlier Reading of these clears together with it (a backlog); otherwise
+                // A breach raised by an earlier Reading of these clears together with it (a backlog, or a blip shorter than one batch); otherwise
                 // the breach predates them, and so does its Alert.
                 if (raised.LastOrDefault() is { Status: AlertStatus.Open } backlog)
                 {
                     backlog.Status = AlertStatus.Resolved;
                     backlog.ResolvedAt = stored.Reading.DeviceTime;
                     backlog.ResolveReason = ResolveReason.Cleared;
-                    backlog.FromBacklog = true;
+                    backlog.FromBacklog = backlog.ClearedFromBacklog(stored.Reading.DeviceTime);
                 }
                 else
                 {

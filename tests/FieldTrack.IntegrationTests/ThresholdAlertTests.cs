@@ -92,12 +92,52 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(f
     }
 
     [Fact]
-    public async Task A_backlog_breach_that_clears_inside_one_batch_is_stored_raised_and_resolved_from_backlog()
+    public async Task A_Coverage_gap_backlog_published_one_Reading_at_a_time_resolves_its_breach_from_backlog()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        await AttachedLongAgoAsync();
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var gap = DateTimeOffset.UtcNow.AddMinutes(-3);
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        // The breach came and went during the gap; the Device sends its backlog after it, waiting for each PUBACK, so
+        // the raise and the clear land in different batches.
+        await publisher.PublishAsync("TRK-007", Temp(0, gap, 90));
+        await publisher.PublishAsync("TRK-007", Temp(1, gap.AddSeconds(30), 110));
+        await AlertsWhenAsync(admin, alerts => alerts.Length == 1);
+        await publisher.PublishAsync("TRK-007", Temp(2, gap.AddSeconds(60), 95));
+        var alerts = await AlertsWhenAsync(admin, alerts => alerts.Any(alert => alert.GetProperty("status").GetString() == "Resolved"));
+
+        var alert = alerts.ShouldHaveSingleItem();
+        alert.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
+        alert.GetProperty("fromBacklog").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_live_breach_that_clears_inside_one_batch_is_resolved_but_not_from_backlog()
     {
         using var admin = await AdminClientAsync();
         var (_, asset) = await AttachedDeviceAsync(admin);
         await CreateAsync(admin, "/alert-rules", Overheat(asset));
         var t = DateTimeOffset.UtcNow;
+
+        await WriteAsync([Received(0, t, 110), Received(1, t.AddMilliseconds(100), 95)]);
+
+        var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
+        alert.GetProperty("status").GetString().ShouldBe("Resolved");
+        alert.GetProperty("fromBacklog").GetBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_backlog_breach_that_clears_inside_one_batch_is_stored_raised_and_resolved_from_backlog()
+    {
+        using var admin = await AdminClientAsync();
+        var (_, asset) = await AttachedDeviceAsync(admin);
+        await AttachedLongAgoAsync();
+        await CreateAsync(admin, "/alert-rules", Overheat(asset));
+        var t = DateTimeOffset.UtcNow.AddMinutes(-3);
 
         // One batch, as a Coverage gap's backlog arrives, and not in Sequence number order.
         await using (var writer = await ReadingWriter.OpenAsync(Fixture.Api.Services.GetRequiredService<NpgsqlDataSource>(), TimeProvider.System, CancellationToken))
@@ -161,6 +201,13 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(f
         (await ListAsync(admin, "/alerts")).ShouldBeEmpty();
         await using var database = await OpenDatabaseAsync();
         (await SqlAsync(database, "SELECT asset_id FROM readings WHERE seq = 1")).ShouldBe(Guid.Parse(asset));
+    }
+
+    // Readings are stamped only after the Attachment's attached_at, so a backlog from minutes ago needs an older one.
+    private async Task AttachedLongAgoAsync()
+    {
+        await using var database = await OpenDatabaseAsync();
+        await SqlAsync(database, "UPDATE attachments SET attached_at = now() - interval '1 hour'");
     }
 
     private static async Task<JsonElement[]> AlertsWhenAsync(HttpClient admin, Func<JsonElement[], bool> done)

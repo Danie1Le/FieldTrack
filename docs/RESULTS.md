@@ -73,6 +73,4 @@ the GPX routes, 31 daily partitions, seeded in 63 s.
 - **Replay is thinned to 1,500 points.** The Asset detail replay draws at most 1,500 points per range: a 24 h route keeps
   a vertex about every 600 m, and a range of 1,500 Readings or fewer shows every Reading. At 3,000 points the readings p95
   sat on the 150 ms bar, so the cap was halved; a 24 h route is coarser as a result.
-- **Known gap: From backlog tag.** The tag that marks backlogged Readings on the dashboard never shows; tracked in
-  [#146](https://github.com/Danie1Le/FieldTrack/issues/146). The demo shows the backlog in History instead.
 - **Coverage** is from CI, not a bench run: the Domain was at 97.4% when the gate landed (#49); CI fails a pull request below 80%.

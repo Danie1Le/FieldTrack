@@ -96,6 +96,10 @@ _Avoid_: Ack, accept, claim
 To end an Alert, done by the platform when its condition clears or by a user at any time; a Resolved Alert never reopens.
 _Avoid_: Close, dismiss, clear
 
+**From backlog**:
+Said of an Alert whose condition Cleared, by Device time, more than 10 seconds before the platform created the Alert, as when a breach comes and goes during a Coverage gap: nobody could have seen it while it held. It depends only on the Readings' times, never on how ingest batched them. Device clock skew can mislead it: a clock more than 10 seconds behind can tag a short live breach, and a clock running ahead (ingest accepts up to 5 minutes) can leave a short Coverage gap breach untagged.
+_Avoid_: Late alert, historical alert, offline alert
+
 **Latch**:
 What holds an Alert Rule quiet after a user Resolves its Alert while the condition still holds: the rule raises nothing new for that Asset until the condition clears and breaches again.
 _Avoid_: Snooze, mute, suppression

@@ -84,7 +84,9 @@ public sealed record AlertRuleResponse(
 /// condition cleared and breached again.
 /// </param>
 /// <param name="CreatedAt">When the platform created it.</param>
-/// <param name="FromBacklog">True when one ingest batch raised and resolved it, so it was never Active.</param>
+/// <param name="FromBacklog">
+/// True when its condition Cleared, by Device time, well before the platform created it, as in a Coverage gap (GLOSSARY).
+/// </param>
 public sealed record AlertResponse(
     Guid Id,
     Guid AlertRuleId,
