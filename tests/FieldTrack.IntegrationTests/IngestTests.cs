@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using FieldTrack.Api.Assets;
@@ -31,7 +32,7 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         var first = history[0];
         first.GetProperty("deviceSerialNumber").GetString().ShouldBe("TRK-007");
         first.GetProperty("boot").GetInt32().ShouldBe(1);
-        first.GetProperty("deviceTime").GetDateTimeOffset().ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(t.ToUnixTimeMilliseconds()));
+        first.GetProperty("deviceTime").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t));
         first.GetProperty("latitude").GetDouble().ShouldBe(-33.865143, tolerance: 1e-9);
         first.GetProperty("longitude").GetDouble().ShouldBe(151.2099, tolerance: 1e-9);
         first.GetProperty("speedKph").GetSingle().ShouldBe(61.5f);
@@ -42,6 +43,23 @@ public sealed class IngestTests(FieldTrackFixture fixture) : IntegrationTest(fix
         history[1].GetProperty("speedKph").ValueKind.ShouldBe(JsonValueKind.Null);
         history[1].GetProperty("fuelPct").GetSingle().ShouldBe(47.5f);
         history.ShouldAllBe(reading => reading.GetProperty("receivedTime").GetDateTimeOffset() > DateTimeOffset.UtcNow.AddMinutes(-1));
+    }
+
+    [Fact]
+    public async Task A_Reading_taken_at_the_instant_its_Device_was_attached_belongs_to_the_Asset()
+    {
+        await using var api = await StartIngestAsync();
+        using var admin = await AdminClientAsync(api);
+        var device = await CreateAsync(admin, "/devices", new { serialNumber = "TRK-007" });
+        var asset = await CreateAsync(admin, "/assets", new { name = "Haul truck 7", type = "Truck" });
+        using var attached = await admin.PostAsJsonAsync("/attachments", new { deviceId = device, assetId = asset }, CancellationToken);
+        var attachedAt = (await attached.Content.ReadFromJsonAsync<JsonElement>(CancellationToken)).GetProperty("attachedAt").GetDateTimeOffset();
+        await using var publisher = await TelemetryPublisher.ConnectAsync(Fixture);
+
+        // A test that publishes right after attaching can land in the attach's own millisecond (#142).
+        await publisher.PublishAsync("TRK-007", TelemetryPublisher.Payload(1, 0, attachedAt));
+
+        await HistoryWhenAsync(admin, asset, count: 1);
     }
 
     [Fact]
