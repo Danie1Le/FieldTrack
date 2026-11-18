@@ -62,6 +62,20 @@ public sealed class ObservabilityTests(FieldTrackFixture fixture) : IntegrationT
     }
 
     [Fact]
+    public async Task The_Azure_Monitor_sampling_ratio_comes_from_configuration()
+    {
+        await using var api = Fixture.Api.WithWebHostBuilder(builder => builder
+            .UseSetting("APPLICATIONINSIGHTS_CONNECTION_STRING", "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=http://127.0.0.1:1/")
+            .UseSetting("AzureMonitor:DisableOfflineStorage", "true")
+            .UseSetting(ObservabilityExtensions.SamplingRatioKey, "0.25"));
+        using var client = api.CreateClient();
+
+        var options = api.Services.GetRequiredService<IOptions<AzureMonitorOptions>>().Value;
+        options.SamplingRatio.ShouldBe(0.25f);
+        options.TracesPerSecond.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task The_host_refuses_to_start_when_the_URL_query_redaction_is_switched_off()
     {
         await using var api = Fixture.Api.WithWebHostBuilder(builder =>
