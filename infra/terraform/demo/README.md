@@ -43,14 +43,14 @@ To rotate, bump `secrets_version` in `main.tf` and apply: every secret and the d
 
 ### Images
 
-Public GHCR images published by #157. Pass an immutable tag (a commit SHA) per session; the defaults track `main`:
+Public GHCR images, published by the Images workflow (`.github/workflows/images.yml`) on every push to `main` with three tags: the commit SHA, `main` and `latest`. Pass an immutable tag (a commit SHA) per session, as Apply demo does; the defaults track `main`:
 
 | Variable | Default | Built from |
 |---|---|---|
 | `api_image` | `ghcr.io/danie1le/fieldtrack-api:main` | `src/FieldTrack.Api/Dockerfile` |
 | `dashboard_image` | `ghcr.io/danie1le/fieldtrack-dashboard:main` | `web/Dockerfile` (reads `FIELDTRACK_API_URL`) |
 | `mosquitto_image` | `ghcr.io/danie1le/fieldtrack-mosquitto:main` | `docker/mosquitto/cloud/Dockerfile` |
-| `simulator_image` | `ghcr.io/danie1le/fieldtrack-simulator:main` | `src/FieldTrack.Simulator`: its entrypoint must run the simulator CLI (this stack passes `demo --fleet fleets/demo.json …` as arguments) with `fleets/` in the working directory |
+| `simulator_image` | `ghcr.io/danie1le/fieldtrack-simulator:main` | `src/FieldTrack.Simulator/Dockerfile`: its entrypoint runs the simulator CLI (this stack passes `demo --fleet fleets/demo.json …` as arguments) with `fleets/` in the working directory |
 
 ### Broker persistence
 
@@ -58,7 +58,9 @@ The broker keeps its persistence file on the replica's own ephemeral storage, no
 
 ## Apply
 
-Normally from the **Apply demo** workflow on `main` (#157). From the laptop (signed in with `az login` as the subscription owner, with Storage Blob Data Contributor on the state account, see the bootstrap README):
+Normally from the **Apply demo** workflow (`.github/workflows/demo-apply.yml`, Actions → Apply demo → Run workflow, on `main` only). It signs in as the apply identity with OIDC, checks that the four images exist and are public at the chosen tag (input `image_tag`, default the run's commit SHA), applies, then polls `<dashboard_url>/api/health` until the dashboard, API and database answer. The job summary records the apply time, the time from apply start until the dashboard answers (#51's provisioning time) and the dashboard URL. It reads the repository variables listed in the bootstrap README (After apply), including `DEMO_ADMIN_EMAIL` for `admin_email`.
+
+From the laptop (signed in with `az login` as the subscription owner, with Storage Blob Data Contributor on the state account, see the bootstrap README):
 
 ```powershell
 cd infra/terraform/demo
@@ -92,16 +94,18 @@ One session only:
 terraform destroy -var "admin_email=<your email>" -var "deployer_principal_type=User"
 ```
 
+Normally from the **Destroy demo** workflow (`.github/workflows/demo-destroy.yml`, on `main` only), which records the destroy time in its job summary and then does the leftover check below itself: it deletes the Smart Detection action group if Azure created it, and fails, listing them, if any other resource remains in the group. From the laptop, as above.
+
 Destroy removes everything above, purges the Key Vault (soft delete would otherwise hold its name for 7 days) and leaves the empty resource group to the bootstrap stack. Then check for leftovers Azure created outside Terraform:
 
 ```powershell
 az resource list --resource-group rg-fieldtrack-demo --output table
 ```
 
-The provider deletes Application Insights' generated "Failure Anomalies" rule (`disable_generated_rule`), but Azure may also have added the action group "Application Insights Smart Detection". Neither is billable, but either blocks the bootstrap's delete of the group, so delete what is listed (`az monitor action-group delete --resource-group rg-fieldtrack-demo --name "Application Insights Smart Detection"`; the Destroy workflow (#157) runs the same check). Nothing billable remains: confirm in the portal (the group lists no resources) and under **Cost Management** the next day.
+The provider deletes Application Insights' generated "Failure Anomalies" rule (`disable_generated_rule`), but Azure may also have added the action group "Application Insights Smart Detection". Neither is billable, but either blocks the bootstrap's delete of the group, so delete what is listed (`az monitor action-group delete --resource-group rg-fieldtrack-demo --name "Application Insights Smart Detection"`). Nothing billable remains: confirm in the portal (the group lists no resources) and under **Cost Management** the next day.
 
 ## Checks
 
 CI's `terraform` job runs, for every stack under `infra/terraform`: `terraform fmt -check`, `init -backend=false`, `validate` and `terraform test` (offline, mocked azurerm provider).
 
-**Pull-request plans while a session is live.** Planning this stack against its live state needs Key Vault data access twice: refreshing the secrets (`-refresh=false` avoids that) and opening the ephemeral `db-password` read, which `-refresh=false` does not avoid. The read-only plan identity deliberately has no Key Vault data role, so #157's pull-request plan job runs `plan -refresh=false` and skips this stack while it has state (a session is applied), where `-refresh=false` alone would still fail. Do not grant the plan identity secret read to make it pass.
+**Pull-request plans while a session is live.** Planning this stack against its live state needs Key Vault data access twice: refreshing the secrets (`-refresh=false` avoids that) and opening the ephemeral `db-password` read, which `-refresh=false` does not avoid. The read-only plan identity deliberately has no Key Vault data role, so the pull-request plan (`.github/workflows/terraform-plan.yml`, job `plan-demo`) runs `plan -lock=false -refresh=false` and skips this stack while a session is applied, where `-refresh=false` alone would still fail. "Applied" means `terraform state list` shows any managed resource (not `data.`): destroy leaves the state file behind, empty, so the file's existence is not the signal, and nobody has to remember to flip a variable. The job reads state with the plan identity's Storage Blob Data Reader and notes the skip in its summary. Do not grant the plan identity secret read to make it pass.
