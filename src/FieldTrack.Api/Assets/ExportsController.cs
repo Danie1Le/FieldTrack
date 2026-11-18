@@ -41,10 +41,10 @@ public sealed class ExportsController(FieldTrackDbContext db, TimeProvider time)
     {
         // Npgsql writes timestamptz from UTC values only.
         var (from, to) = (request.From!.Value.ToUniversalTime(), request.To!.Value.ToUniversalTime());
-        if (to <= from || to - from > ReadingsController.MaxRange)
+        if (to <= from || to - from > ReadingCsvExport.MaxRange)
         {
             ModelState.AddModelError(nameof(request.To),
-                $"The range must end after it starts and span at most {ReadingsController.MaxRange.Days} days; split a longer range into several exports.");
+                $"The range must end after it starts and span at most {ReadingCsvExport.MaxRange.Days} days; split a longer range into several exports.");
             return ValidationProblem(ModelState);
         }
 
@@ -78,6 +78,9 @@ public sealed class ExportsController(FieldTrackDbContext db, TimeProvider time)
     /// <summary>
     /// Downloads an export as CSV, streamed from the database as it is read (chunked, no length), named after the Asset
     /// and range. The URL is the credential: it works once, within <see cref="UrlLifetime"/> of being issued.
+    /// The <c>device_serial</c> column holds the Device's serial, except that a serial starting with <c>-</c> is
+    /// prefixed with <c>'</c> (so <c>-A1</c> is exported as <c>'-A1</c>) to stop a spreadsheet reading it as a formula;
+    /// strip a leading <c>'</c> before joining the file to <c>/devices</c>.
     /// </summary>
     /// <response code="404">An unknown, used or expired URL.</response>
     /// <response code="429">The user who asked for it already runs <see cref="ReadingCsvExport.MaxRunningPerUser"/> exports; the URL stays unused.</response>
@@ -123,6 +126,8 @@ public sealed class ExportsController(FieldTrackDbContext db, TimeProvider time)
         disposition.SetHttpFileName(FileName(assetName, ticket.RangeStart, ticket.RangeEnd));
         Response.ContentType = "text/csv; charset=utf-8";
         Response.Headers.ContentDisposition = disposition.ToString();
+        // Tells nginx to pass bytes on as they arrive instead of spooling a slow download to a temp file.
+        Response.Headers["X-Accel-Buffering"] = "no";
         await ReadingCsvExport.CopyAsync(connection, ticket.AssetId, ticket.RangeStart, ticket.RangeEnd, Response.Body, cancellationToken);
         return new EmptyResult();
     }
