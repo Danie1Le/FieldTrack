@@ -222,6 +222,97 @@ describe('AssetDetail', () => {
     expect(page.textContent).not.toContain('Engine temp 108');
   });
 
+  it('exports the chosen range as CSV through the browser download of a single-use URL', async () => {
+    await load();
+    const clicked: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this);
+    });
+    page.querySelector<HTMLInputElement>('#from')!.value = '2026-10-20T00:00';
+
+    button('Export CSV').click();
+    const request = api.expectOne('/api/assets/truck-7/exports');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ from: new Date(2026, 9, 20).toISOString(), to: '2026-11-17T12:00:00.000Z' });
+    request.flush({ url: '/exports?token=abc', expiresAt: '2026-11-17T12:01:00Z' });
+    await settled();
+
+    expect(clicked.map((a) => [a.getAttribute('href'), a.hasAttribute('download')])).toEqual([['/api/exports?token=abc', true]]);
+    expect(page.querySelector('[role=alert]')).toBeNull();
+  });
+
+  it('shows why an export was refused as text', async () => {
+    await load();
+
+    button('Export CSV').click();
+    api.expectOne('/api/assets/truck-7/exports').flush(
+      { title: 'Too Many Requests', detail: 'You already run <b>2</b> exports; wait for one to finish.' },
+      { status: 429, statusText: 'Too Many Requests' },
+    );
+    await settled();
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('You already run <b>2</b> exports; wait for one to finish.');
+  });
+
+  it('shows the validation message when an export range is refused with 400', async () => {
+    await load();
+
+    button('Export CSV').click();
+    api.expectOne('/api/assets/truck-7/exports').flush(
+      { title: 'One or more validation errors occurred.', errors: { to: ['The range must span at most 31 days; split a longer range into several exports.'] } },
+      { status: 400, statusText: 'Bad Request' },
+    );
+    await settled();
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('split a longer range into several exports.');
+  });
+
+  it('says no Asset has this id when an export gets 404', async () => {
+    await load();
+
+    button('Export CSV').click();
+    api.expectOne('/api/assets/truck-7/exports').flush(null, { status: 404, statusText: 'Not Found' });
+    await settled();
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('No Asset has this id.');
+  });
+
+  it('says the export could not be started, not that the history could not be read, when it fails', async () => {
+    await load();
+
+    button('Export CSV').click();
+    api.expectOne('/api/assets/truck-7/exports').flush(null, { status: 500, statusText: 'Server Error' });
+    await settled();
+
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('The export could not be started. Try again.');
+  });
+
+  it('asks for both times, and sends nothing, when an export bound is empty', async () => {
+    await load();
+    page.querySelector<HTMLInputElement>('#to')!.value = '';
+
+    button('Export CSV').click();
+    await settled();
+
+    api.expectNone('/api/assets/truck-7/exports');
+    expect(page.querySelector('[role=alert]')!.textContent).toContain('Pick a start and end time.');
+  });
+
+  it('makes one export per click run: a second click while the first is in flight sends nothing', async () => {
+    await load();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    button('Export CSV').click();
+    button('Export CSV').click();
+    const request = api.expectOne('/api/assets/truck-7/exports');
+    fixture.detectChanges();
+    expect(button('Export CSV').disabled).toBe(true);
+    request.flush({ url: '/exports?token=abc', expiresAt: '2026-11-17T12:01:00Z' });
+    await settled();
+
+    expect(button('Export CSV').disabled).toBe(false);
+  });
+
   it('says so when the range has no Readings', async () => {
     await load([]);
 
