@@ -487,3 +487,12 @@ simulator-state.json.lock
 manifest-*.json
 bench/results/*
 !bench/results/.gitkeep
+
+# Terraform: state (the bootstrap stack keeps its state locally), provider cache, real variable values and plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+*.tfplan

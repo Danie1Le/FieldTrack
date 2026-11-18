@@ -164,9 +164,12 @@ internal static class SimulatorCli
         Console.WriteLine($"Published {published} Readings and injected {injected}. Manifest: {Path.GetFullPath(run.ManifestPath)}");
     }
 
-    /// <summary>Reads the options of <c>run</c>, loading its Scenario against <paramref name="fleet"/>.</summary>
+    /// <summary>
+    /// Reads the options of <c>run</c>, loading its Scenario against <paramref name="fleet"/>. Secrets come from
+    /// <paramref name="environment"/> (the process environment by default), so tests never share one through it.
+    /// </summary>
     /// <exception cref="SimulatorException">An option is missing, out of range, or its file is unusable.</exception>
-    internal static RunOptions RunOptionsFrom(Options options, FleetFile fleet)
+    internal static RunOptions RunOptionsFrom(Options options, FleetFile fleet, Func<string, string?>? environment = null)
     {
         var rate = options.Get("rate") switch
         {
@@ -181,7 +184,7 @@ internal static class SimulatorCli
         }
 
         return new RunOptions(
-            BrokerFrom(options),
+            BrokerFrom(options, environment),
             rate,
             seconds is { } duration ? TimeSpan.FromSeconds(duration) : null,
             options.Get("state") ?? "simulator-state.json",
@@ -192,7 +195,7 @@ internal static class SimulatorCli
 
     /// <summary>The broker of <c>run</c>: <c>--mqtt-transport tcp</c> (default), <c>ws</c> or <c>wss</c>, with its host, port, path and user.</summary>
     /// <exception cref="SimulatorException">An option is out of range, or a password would cross the network unencrypted.</exception>
-    private static MqttBroker BrokerFrom(Options options)
+    private static MqttBroker BrokerFrom(Options options, Func<string, string?>? environment)
     {
         var transport = options.Get("mqtt-transport") ?? "tcp";
         var (scheme, defaultPort) = transport switch
@@ -221,7 +224,7 @@ internal static class SimulatorCli
             throw new SimulatorException($"The broker password goes only over wss to a host other than this machine; got {address}.");
         }
 
-        return new MqttBroker(address, username, Credential(null, "FIELDTRACK_MQTT_PASSWORD", options));
+        return new MqttBroker(address, username, Credential(null, "FIELDTRACK_MQTT_PASSWORD", options, environment));
     }
 
     private static double PerHour(Options options, string name) =>
@@ -238,7 +241,7 @@ internal static class SimulatorCli
         : uri;
 
     // The password only comes from the environment: a command-line argument lands in shell history and process lists.
-    internal static string Credential(string? option, string variable, Options options) =>
-        (option is null ? null : options.Get(option)) ?? Environment.GetEnvironmentVariable(variable)
+    internal static string Credential(string? option, string variable, Options options, Func<string, string?>? environment = null) =>
+        (option is null ? null : options.Get(option)) ?? (environment ?? Environment.GetEnvironmentVariable)(variable)
             ?? throw new SimulatorException($"Set {variable}{(option is null ? string.Empty : $" or pass --{option}")}.");
 }
