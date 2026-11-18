@@ -1,0 +1,66 @@
+name: Images
+
+# Publishes the four images the Azure demo runs (infra/terraform/demo README: Images) on every main commit, tagged
+# with the commit SHA (what Apply demo deploys), main (the demo stack's default) and latest.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+# One publish at a time, so main and latest end on the newest commit; a run is never cancelled halfway through a push.
+concurrency:
+  group: images
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep equal to the image list in demo-apply.yml and the *_image variables in infra/terraform/demo/variables.tf.
+        include:
+          - image: fieldtrack-api
+            context: .
+            dockerfile: src/FieldTrack.Api/Dockerfile
+          - image: fieldtrack-dashboard
+            context: web
+            dockerfile: web/Dockerfile
+          - image: fieldtrack-mosquitto
+            context: docker/mosquitto/cloud
+            dockerfile: docker/mosquitto/cloud/Dockerfile
+          - image: fieldtrack-simulator
+            context: .
+            dockerfile: src/FieldTrack.Simulator/Dockerfile
+    env:
+      IMAGE: ${{ matrix.image }}
+      CONTEXT: ${{ matrix.context }}
+      DOCKERFILE: ${{ matrix.dockerfile }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # GHCR names are lower case. The source label links the package to this repository, so later runs may push to it.
+      - name: Build
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE"
+          echo "REPOSITORY=$image" >> "$GITHUB_ENV"
+          docker build --file "$DOCKERFILE" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image:$GITHUB_SHA" --tag "$image:main" --tag "$image:latest" \
+            "$CONTEXT"
+
+      - name: Push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push --all-tags "$REPOSITORY"
+          echo "- \`$REPOSITORY:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"

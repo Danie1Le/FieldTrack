@@ -1,0 +1,117 @@
+name: Apply demo
+
+# Applies infra/terraform/demo by hand from the default branch (#157, session in #51), as the apply identity, whose
+# federated credential trusts only refs/heads/main. Records how long apply and start-up take in the job summary.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy: a main commit SHA the Images workflow published. Empty: this run's commit."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  # The OIDC token azurerm exchanges for the apply identity's Azure token; no Azure secret is stored.
+  id-token: write
+
+# One Apply at a time, never cancelled mid-way. GitHub keeps one pending run per group, so a newer dispatch replaces a
+# waiting Apply. Destroy demo has its own group, so an Apply can never replace a waiting Destroy; the state blob's lease
+# keeps the two from changing the stack at once (infra/terraform/demo README: Destroy). Apply does not wait for that
+# lease: started while Destroy holds it, it fails at once.
+concurrency:
+  group: demo-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: infra/terraform/demo
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      # azurerm signs in with the job's OIDC token and fetches a new one when needed, so a long apply never outlives it.
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_admin_email: ${{ vars.DEMO_ADMIN_EMAIL }}
+      TF_VAR_resource_group_name: ${{ vars.DEMO_RESOURCE_GROUP }}
+      IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          # Keep equal to ci.yml (terraform job), terraform-plan.yml and demo-destroy.yml.
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      # Container Apps pulls without registry credentials, so every image must exist and be public. Checked without
+      # signing in to GHCR, before a long apply could fail on the pull.
+      - name: Check the images are public
+        run: |
+          [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "::error::Not an image tag: $IMAGE_TAG"; exit 1; }
+          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          # Keep equal to the images.yml matrix and the *_image variables in infra/terraform/demo/variables.tf.
+          for name in api dashboard mosquitto simulator; do
+            image="$registry/fieldtrack-$name:$IMAGE_TAG"
+            docker manifest inspect "$image" > /dev/null \
+              || { echo "::error::$image cannot be pulled anonymously: wait for the Images workflow, or make the package public."; exit 1; }
+            echo "TF_VAR_${name}_image=$image" >> "$GITHUB_ENV"
+          done
+
+      - name: Init
+        env:
+          TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+          TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=$TF_STATE_RESOURCE_GROUP" \
+            -backend-config="storage_account_name=$TF_STATE_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TF_STATE_CONTAINER"
+
+      - name: Apply
+        run: |
+          echo "### Apply demo (images \`$IMAGE_TAG\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Step | Seconds | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          start=$(date +%s)
+          echo "STARTED=$start" >> "$GITHUB_ENV"
+          status=0
+          terraform apply -auto-approve || status=$?
+          echo "| terraform apply | $(( $(date +%s) - start )) | $([ "$status" = 0 ] && echo ok || echo "failed ($status)") |" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      # "The dashboard answers" (#51) = the API's health check through the dashboard's proxy: dashboard, API and
+      # database are all up. Container Apps may still be pulling images when apply returns.
+      - name: Wait for the dashboard
+        run: |
+          url=$(terraform output -raw dashboard_url)
+          echo "::notice::Dashboard: $url"
+          deadline=$(( $(date +%s) + 900 ))
+          result=ok
+          until curl --fail --silent --show-error --output /dev/null --max-time 10 "$url/api/health"; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              result="timed out"
+              break
+            fi
+            sleep 10
+          done
+          # One row either way, and the URL even on a timeout, when it is most needed.
+          {
+            echo "| until the dashboard answers (from apply start) | $(( $(date +%s) - STARTED )) | $result |"
+            echo ""
+            echo "Dashboard: $url"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$result" != ok ]; then
+            echo "::error::$url/api/health did not answer within 15 minutes of apply."
+            exit 1
+          fi

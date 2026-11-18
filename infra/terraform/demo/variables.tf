@@ -27,6 +27,7 @@ variable "deployer_principal_type" {
 }
 
 # Images from public GHCR (ADR 0006), published by the image workflow (#157). Pass an immutable tag or digest per session.
+# Keep these four equal to the images.yml matrix and the image list in demo-apply.yml.
 variable "api_image" {
   description = "API image, ingest worker inside (src/FieldTrack.Api/Dockerfile)."
   type        = string
