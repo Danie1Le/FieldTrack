@@ -120,7 +120,7 @@ jobs:
           echo "::add-mask::$key"
           echo "FIELDTRACK_AUTH_SIGNING_KEY=$key" >> "$GITHUB_ENV"
 
-      # Also builds both images, as the old single job's "Build images" step did. lgtm is left out: nothing here reads it.
+      # Builds both images, so a broken Dockerfile fails this job. lgtm is left out: nothing here reads it.
       - name: Start the stack
         run: docker compose up --detach --build postgres mosquitto api web
 
