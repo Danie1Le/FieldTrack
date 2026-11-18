@@ -601,6 +601,58 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("FieldTrack.Infrastructure.Persistence.ExportTicket", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_id");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateTimeOffset>("RangeEnd")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("range_end");
+
+                    b.Property<DateTimeOffset>("RangeStart")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("range_start");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("token_hash");
+
+                    b.Property<bool>("Used")
+                        .HasColumnType("boolean")
+                        .HasColumnName("used");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_export_tickets");
+
+                    b.HasIndex("AssetId")
+                        .HasDatabaseName("ix_export_tickets_asset_id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_export_tickets_token_hash");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_export_tickets_user_id");
+
+                    b.ToTable("export_tickets", (string)null);
+                });
+
             modelBuilder.Entity("FieldTrack.Infrastructure.Persistence.Geofence", b =>
                 {
                     b.Property<Guid>("Id")
@@ -900,6 +952,23 @@ namespace FieldTrack.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_alert_rule_states_assets_asset_id");
+                });
+
+            modelBuilder.Entity("FieldTrack.Infrastructure.Persistence.ExportTicket", b =>
+                {
+                    b.HasOne("FieldTrack.Domain.Assets.Asset", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_export_tickets_assets_asset_id");
+
+                    b.HasOne("FieldTrack.Infrastructure.Identity.FieldTrackUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_export_tickets_users_user_id");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>

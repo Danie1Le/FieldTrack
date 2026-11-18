@@ -49,6 +49,9 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
     /// <summary>Telemetry messages ingest refused, with their reasons.</summary>
     public DbSet<RejectedMessage> RejectedMessages => Set<RejectedMessage>();
 
+    /// <summary>Single-use CSV export downloads, stored hashed (#42).</summary>
+    public DbSet<ExportTicket> ExportTickets => Set<ExportTicket>();
+
     /// <summary>
     /// Bumps the Alert Rule version (ADR 0005) in the caller's transaction, so the ingest worker reloads its rules and
     /// rule state before its next batch. Call it once in any transaction that changes what ingest evaluates or caches
@@ -310,6 +313,14 @@ public sealed class FieldTrackDbContext(DbContextOptions<FieldTrackDbContext> op
                 "(last_device_id IS NULL) = (last_boot IS NULL) AND (last_boot IS NULL) = (last_sequence_number IS NULL)"));
             state.HasOne<AlertRule>().WithMany().HasForeignKey(s => s.AlertRuleId).OnDelete(DeleteBehavior.Cascade);
             state.HasOne<Asset>().WithMany().HasForeignKey(s => s.AssetId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ExportTicket>(ticket =>
+        {
+            ticket.HasIndex(t => t.TokenHash).IsUnique();
+            // A ticket is worth nothing without its user or Asset, so it goes with either.
+            ticket.HasOne<FieldTrackUser>().WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
+            ticket.HasOne<Asset>().WithMany().HasForeignKey(t => t.AssetId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<RejectedMessage>(rejected =>
