@@ -30,6 +30,9 @@
     <None Include="..\..\docker\mosquitto\mosquitto.conf" Link="mosquitto.conf" CopyToOutputDirectory="PreserveNewest" />
     <!-- CloudBroker builds the Container Apps broker image from these. -->
     <None Include="..\..\docker\mosquitto\cloud\**" LinkBase="mosquitto-cloud" CopyToOutputDirectory="PreserveNewest" />
+    <!-- DashboardProxyTests runs web/nginx.conf.template on web/Dockerfile's runtime image and settings. -->
+    <None Include="..\..\web\Dockerfile" Link="web\Dockerfile" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\web\nginx.conf.template" Link="web\nginx.conf.template" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
