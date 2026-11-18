@@ -5,7 +5,7 @@ variable "resource_group_name" {
 }
 
 variable "admin_email" {
-  description = "Email of the first Admin, who signs in with the temporary password from Key Vault. Set it in terraform.tfvars (gitignored) or the workflow, never in a committed file."
+  description = "Email of the first Admin, whose temporary password the simulator replaces with admin-password at its first start. Set it in terraform.tfvars (gitignored) or the workflow, never in a committed file."
   type        = string
 }
 

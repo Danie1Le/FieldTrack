@@ -25,7 +25,8 @@ mock_provider "azurerm" {
 
   mock_resource "azurerm_key_vault_secret" {
     defaults = {
-      versionless_id = "https://kv-fieldtrack-000000.vault.azure.net/secrets/mock"
+      versionless_id          = "https://kv-fieldtrack-000000.vault.azure.net/secrets/mock"
+      resource_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-fieldtrack-demo/providers/Microsoft.KeyVault/vaults/kv-fieldtrack-000000/secrets/mock"
     }
   }
 
@@ -142,14 +143,17 @@ run "runs_one_api_and_one_broker" {
 run "keeps_passwords_out_of_state" {
   command = apply
 
+  # A value set through value or administrator_password instead (from a non-ephemeral source; validate refuses an
+  # ephemeral one there) has no *_wo_version, so these fail. The provider keeps a secret's value out of state only while
+  # value_wo_version is set.
   assert {
-    condition     = alltrue([for secret in azurerm_key_vault_secret.demo : secret.value == null])
-    error_message = "Key Vault secrets must be written with value_wo, never value."
+    condition     = alltrue([for secret in concat(values(azurerm_key_vault_secret.demo), [azurerm_key_vault_secret.db_password]) : secret.value_wo_version >= 1])
+    error_message = "Every Key Vault secret needs value_wo_version 1 or more, or its value lands in state."
   }
 
   assert {
-    condition     = azurerm_postgresql_flexible_server.demo.administrator_password == null
-    error_message = "The database password must be written with administrator_password_wo."
+    condition     = azurerm_postgresql_flexible_server.demo.administrator_password_wo_version >= 1
+    error_message = "The database password needs administrator_password_wo_version 1 or more."
   }
 
   assert {
@@ -167,6 +171,23 @@ run "keeps_passwords_out_of_state" {
   }
 }
 
+run "lets_the_simulator_run_unattended" {
+  command = plan
+
+  assert {
+    condition = (
+      [for env in azurerm_container_app.simulator.template[0].container[0].env : env.secret_name if env.name == "FIELDTRACK_ADMIN_TEMPORARY_PASSWORD"] == ["admin-temporary-password"] &&
+      [for env in azurerm_container_app.simulator.template[0].container[0].env : env.secret_name if env.name == "FIELDTRACK_ADMIN_PASSWORD"] == ["admin-password"]
+    )
+    error_message = "The simulator replaces the Admin's temporary password itself, so it needs both."
+  }
+
+  assert {
+    condition     = strcontains(join(" ", azurerm_container_app.simulator.template[0].container[0].args), "--first-boot clock")
+    error_message = "The simulator's state file does not survive a restart; only clock Boots keep new Readings from being duplicates."
+  }
+}
+
 run "grants_only_the_roles_the_bootstrap_allows" {
   command = plan
 
@@ -181,8 +202,17 @@ run "grants_only_the_roles_the_bootstrap_allows" {
   assert {
     condition = (
       azurerm_role_assignment.apps_read_secrets.principal_type == "ServicePrincipal" &&
-      azurerm_role_assignment.deployer_writes_secrets.principal_type == "ServicePrincipal"
+      azurerm_role_assignment.deployer_writes_secrets.principal_type == "ServicePrincipal" &&
+      alltrue([for grant in azurerm_role_assignment.broker_reads_mqtt_secrets : grant.principal_type == "ServicePrincipal" && grant.role_definition_name == "Key Vault Secrets User"])
     )
     error_message = "From GitHub, every grant must name a service principal (bootstrap condition)."
+  }
+
+  assert {
+    condition = (
+      toset(keys(azurerm_role_assignment.broker_reads_mqtt_secrets)) == toset(["mqtt-ingest-password", "mqtt-simulator-password"]) &&
+      azurerm_container_app.mosquitto.identity[0].identity_ids == toset([azurerm_user_assigned_identity.broker.id])
+    )
+    error_message = "The internet-facing broker reads only the two MQTT passwords, with an identity of its own."
   }
 }

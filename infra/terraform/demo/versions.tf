@@ -27,7 +27,14 @@ terraform {
 }
 
 provider "azurerm" {
-  features {}
+  features {
+    # Azure adds a "Failure Anomalies" Smart Detection rule beside every Application Insights component, outside
+    # Terraform; with this the provider deletes it on create, so it neither emails the subscription's owners nor stays
+    # behind after destroy (README: Destroy covers the Smart Detection action group it may leave).
+    application_insights {
+      disable_generated_rule = true
+    }
+  }
 
   # The state account has shared-key access off; reach any Storage data plane with Entra ID too.
   storage_use_azuread = true

@@ -23,7 +23,7 @@ locals {
       "Host=${azurerm_postgresql_flexible_server.demo.fqdn}",
       "Database=fieldtrack",
       "Username=${local.database_login}",
-      "Password=${ephemeral.random_password.secret["db"].result}",
+      "Password=${ephemeral.azurerm_key_vault_secret.db_password.value}",
       # Azure requires TLS; check the server's certificate and name too.
       "SSL Mode=VerifyFull",
       # The aspnet image has no Kerberos library (docker-compose.yml says the same).
@@ -37,13 +37,18 @@ locals {
     "demo-password"            = ephemeral.random_password.secret["demo"].result
   }
 
-  # Bump to write freshly generated values for every secret and the database password on the next apply.
+  # Bump to write freshly generated values for every secret and the database password on the next apply. Never 0: the
+  # provider keeps a secret's value out of state only while its value_wo_version is non-zero.
   secrets_version = 1
+
+  # The broker reads only these.
+  broker_secrets = ["mqtt-ingest-password", "mqtt-simulator-password"]
 }
 
 # --- Secrets ---------------------------------------------------------------------------------------------------------
 
-# New values on every run, but write-only arguments send them only when secrets_version changes (or on create).
+# New values on every run, but write-only arguments send them only when secrets_version changes (or on create). The
+# database password is therefore drawn once into Key Vault and read back from there (below).
 ephemeral "random_password" "secret" {
   for_each = toset(["db", "mqtt-ingest", "mqtt-simulator", "admin-temporary", "admin", "demo"])
 
@@ -75,7 +80,7 @@ resource "azurerm_key_vault" "demo" {
   soft_delete_retention_days = 7
 }
 
-# The apps' identity reads secrets; Container Apps resolves the Key Vault references with it.
+# The API's and simulator's identity reads secrets; Container Apps resolves the Key Vault references with it.
 resource "azurerm_user_assigned_identity" "apps" {
   name                = "id-fieldtrack-apps"
   location            = local.location
@@ -115,6 +120,49 @@ resource "azurerm_key_vault_secret" "demo" {
   depends_on = [time_sleep.role_propagation]
 }
 
+# The one source of the database password. The server and db-connection-string both take the value read back from
+# here, so a re-apply after a failed one cannot leave them different: a fresh ephemeral password is drawn every run,
+# but this secret is written only on create or when secrets_version changes.
+resource "azurerm_key_vault_secret" "db_password" {
+  name             = "db-password"
+  key_vault_id     = azurerm_key_vault.demo.id
+  value_wo         = ephemeral.random_password.secret["db"].result
+  value_wo_version = local.secrets_version
+
+  depends_on = [time_sleep.role_propagation]
+}
+
+# Opened again whenever it is needed and never stored. Pinned to the version just written, so a rotation reads its new
+# value. Reading it needs Key Vault data access, which the read-only plan identity lacks (README: Checks).
+ephemeral "azurerm_key_vault_secret" "db_password" {
+  name         = azurerm_key_vault_secret.db_password.name
+  key_vault_id = azurerm_key_vault.demo.id
+  version      = azurerm_key_vault_secret.db_password.version
+}
+
+# The internet-facing broker gets an identity of its own that can read only its two passwords, so code running in it
+# cannot fetch the signing key, the connection string or the Admin's password.
+resource "azurerm_user_assigned_identity" "broker" {
+  name                = "id-fieldtrack-broker"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.demo.name
+}
+
+resource "azurerm_role_assignment" "broker_reads_mqtt_secrets" {
+  for_each = toset(local.broker_secrets)
+
+  scope                = azurerm_key_vault_secret.demo[each.key].resource_versionless_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.broker.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# The broker's grants need the secrets, so they wait in a sleep of their own.
+resource "time_sleep" "broker_role_propagation" {
+  create_duration = "60s"
+  depends_on      = [azurerm_role_assignment.broker_reads_mqtt_secrets]
+}
+
 # --- Database --------------------------------------------------------------------------------------------------------
 
 resource "azurerm_postgresql_flexible_server" "demo" {
@@ -127,7 +175,7 @@ resource "azurerm_postgresql_flexible_server" "demo" {
   storage_mb = 32768 # the smallest size Flexible Server offers
 
   administrator_login               = local.database_login
-  administrator_password_wo         = ephemeral.random_password.secret["db"].result
+  administrator_password_wo         = ephemeral.azurerm_key_vault_secret.db_password.value
   administrator_password_wo_version = local.secrets_version
 
   # Public access, limited by the firewall rule below; no VNet or private endpoint (paid-feature guardrails).
@@ -145,8 +193,9 @@ resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
   value     = "POSTGIS"
 }
 
-# 0.0.0.0 to 0.0.0.0 is Azure's "allow public access from Azure services" rule: Container Apps reach the server,
-# the internet does not.
+# 0.0.0.0 to 0.0.0.0 is Azure's "allow public access from Azure services" rule. It admits every Azure IP address, other
+# tenants' VMs and functions included, not only this environment: the 24-character password and TLS (VerifyFull)
+# protect the server, not network isolation. Acceptable for a demo that lives a few hours.
 resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services" {
   name             = "AllowAllAzureServicesAndResourcesWithinAzureIps"
   server_id        = azurerm_postgresql_flexible_server.demo.id

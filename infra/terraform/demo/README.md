@@ -9,13 +9,14 @@ All in the bootstrap's resource group `rg-fieldtrack-demo`, which this stack rea
 | Resource | Name | Notes |
 |---|---|---|
 | Container Apps environment | `cae-fieldtrack-demo` | Consumption only (no workload profile), logs to Log Analytics |
-| Container App: API | `fieldtrack-api` | Ingest worker inside, exactly 1 replica (ADR 0005), internal ingress only, migrates the database at startup |
+| Container App: API | `fieldtrack-api` | Ingest worker inside, exactly 1 replica (ADR 0005), internal ingress only, migrates the database at startup (`Database__MigrateOnStartup`; EF Core's migration lock covers a revision rollover's second replica) |
 | Container App: broker | `fieldtrack-mosquitto` | `docker/mosquitto/cloud`, external HTTPS ingress, MQTT over `wss://…/mqtt`, users `ingest` and `simulator`, exactly 1 replica |
 | Container App: dashboard | `fieldtrack-dashboard` | nginx, the one public web address; proxies `/api/` (REST and the SignalR hub) to the API's internal address |
-| Container App: simulator | `fieldtrack-simulator` | `demo` at 5 Readings/s over `wss` |
-| PostgreSQL Flexible Server | `psql-fieldtrack-<suffix>` | B1ms (1 vCore, 2 GiB), PostgreSQL 16, 32 GiB, `azure.extensions = POSTGIS`, public access limited to Azure services; no HA, geo-redundant backup or maintenance window |
+| Container App: simulator | `fieldtrack-simulator` | `demo` at 5 Readings/s over `wss`; replaces the Admin's temporary password at its first start; `--first-boot clock`, because its state file does not survive a restart |
+| PostgreSQL Flexible Server | `psql-fieldtrack-<suffix>` | B1ms (1 vCore, 2 GiB), PostgreSQL 16, 32 GiB, `azure.extensions = POSTGIS`, public access from any Azure IP address (every tenant's, not only this environment's: the 24-character password and TLS protect it); no HA, geo-redundant backup or maintenance window |
 | Key Vault | `kv-fieldtrack-<suffix>` | RBAC mode, purged on destroy; holds every generated secret |
-| User-assigned identity | `id-fieldtrack-apps` | Key Vault Secrets User; the apps resolve their Key Vault references with it |
+| User-assigned identity | `id-fieldtrack-apps` | Key Vault Secrets User on the vault; the API and simulator resolve their Key Vault references with it |
+| User-assigned identity | `id-fieldtrack-broker` | Key Vault Secrets User on the two MQTT passwords only: the internet-facing broker cannot read the other secrets |
 | Log Analytics workspace | `log-fieldtrack-demo` | 30-day retention, daily cap (`log_daily_cap_gb`, default 0.5 GB) |
 | Application Insights | `appi-fieldtrack-demo` | Workspace-based, same daily cap; the API gets its connection string and `AzureMonitor__SamplingRatio` |
 
@@ -29,15 +30,16 @@ Terraform generates every secret with ephemeral `random_password` / `random_byte
 
 | Key Vault secret | Used by |
 |---|---|
-| `db-connection-string` | API (`ConnectionStrings__FieldTrack`, TLS `VerifyFull`); the same password is the server's admin password |
+| `db-password` | nobody at runtime: drawn once and read back (ephemeral, never stored) for both the server's admin password and `db-connection-string`, so a re-apply after a failed apply cannot give them different values |
+| `db-connection-string` | API (`ConnectionStrings__FieldTrack`, TLS `VerifyFull`) |
 | `auth-signing-key` | API (`Auth__SigningKey`, 32 random bytes, base64) |
 | `mqtt-ingest-password` | broker and API (`Broker__Password`) |
 | `mqtt-simulator-password` | broker and simulator (`FIELDTRACK_MQTT_PASSWORD`) |
-| `admin-temporary-password` | API (`FIELDTRACK_ADMIN_PASSWORD`): the first Admin's temporary password |
-| `admin-password` | simulator (`FIELDTRACK_ADMIN_PASSWORD`): what the Admin's password is changed to after the first sign-in |
+| `admin-temporary-password` | API (`FIELDTRACK_ADMIN_PASSWORD`) and simulator (`FIELDTRACK_ADMIN_TEMPORARY_PASSWORD`): the first Admin's temporary password |
+| `admin-password` | simulator (`FIELDTRACK_ADMIN_PASSWORD`): the Admin's password once the simulator has replaced the temporary one |
 | `demo-password` | API (`FIELDTRACK_DEMO_PASSWORD`); the login page shows it |
 
-To rotate, bump `secrets_version` in `main.tf` and apply: every secret and the database password get new values together.
+To rotate, bump `secrets_version` in `main.tf` and apply: every secret and the database password get new values together. Ephemeral passwords are drawn afresh on every run but sent only on create or when `secrets_version` changes, which is why the database password goes through `db-password` rather than straight from the generator to both places.
 
 ### Images
 
@@ -67,39 +69,21 @@ terraform init `
 terraform apply -var "admin_email=<your email>" -var "deployer_principal_type=User"
 ```
 
-The `<...>` values are the bootstrap outputs. `admin_email` has no default, so no address is committed; put it in a gitignored `terraform.tfvars` if you prefer. Outputs: `dashboard_url`, `mqtt_url` (`wss://…/mqtt`) and `key_vault_name`.
+The `<...>` values are the bootstrap outputs. `admin_email` has no default, so no address is committed: copy `terraform.tfvars.example` to the gitignored `terraform.tfvars` and fill it in instead of passing `-var`. Outputs: `dashboard_url`, `mqtt_url` (`wss://…/mqtt`) and `key_vault_name`.
 
 ## After apply
 
-The API seeds the first Admin with a temporary password that must be replaced at the first sign-in (#61). The simulator signs in as that Admin with `admin-password`, so it fails and restarts until you have done this once:
+Nothing is manual. The API seeds the first Admin with `admin-temporary-password`, which must be replaced before the Admin can sign in (#61). The simulator does that at its first start (`FIELDTRACK_ADMIN_TEMPORARY_PASSWORD`, then `change-password` to `admin-password`), seeds the demo fleet, Geofence and Alert Rules, and the demo Scenario plays on the dashboard within five minutes. On later restarts the temporary password no longer signs in and the simulator signs in with `admin-password`; that success resets the failed-attempt count, so restarts never lock the Admin out. If neither password signs in, it logs why and waits instead of exiting, because every restart would cost two more failed sign-ins.
 
-1. Give yourself read access to the vault (Key Vault is in RBAC mode, so even the subscription owner needs a data role; the deploy identity cannot grant roles to users):
-
-   ```powershell
-   $vault = terraform output -raw key_vault_name
-   az role assignment create --role "Key Vault Secrets User" --assignee (az ad signed-in-user show --query id -o tsv) `
-     --scope (az keyvault show --name $vault --query id -o tsv)
-   ```
-
-2. Read the two Admin passwords (they stay in your terminal; do not paste them anywhere else):
-
-   ```powershell
-   az keyvault secret show --vault-name $vault --name admin-temporary-password --query value -o tsv
-   az keyvault secret show --vault-name $vault --name admin-password --query value -o tsv
-   ```
-
-3. Open `dashboard_url`, sign in as `admin_email` with the temporary password, and set the new password to `admin-password`.
-4. The simulator succeeds on its next restart (or restart it: `az containerapp revision restart`); the demo Scenario then plays on the dashboard within five minutes.
-
-Visitors sign in as the Demo Operator, whose email and password the login page shows.
+Visitors sign in as the Demo Operator, whose email and password the login page shows. To sign in as the Admin yourself, read `admin-password` from the vault; that needs a Key Vault data role you grant yourself (`az role assignment create --role "Key Vault Secrets User" …`) and remove again before destroy, since this stack does not own it.
 
 ## The session (#51)
 
 One session only:
 
 1. Check the remaining credit, apply the bootstrap stack, then **Apply demo**. Record the time from apply until the dashboard answers.
-2. Do the steps in [After apply](#after-apply), run the demo, record the evidence. On this first deploy also check: the WebSocket idle behaviour of MQTT and SignalR through ingress (request timeout 240 s), a 31-day CSV export through ingress, that migrations ran (`SELECT * FROM "__EFMigrationsHistory"`, `SELECT extversion FROM pg_extension WHERE extname = 'postgis'`, expect 3.6.x), and the Postgres memory against the Reading key index (`SHOW shared_buffers`, `pg_relation_size` of the key table's index).
-3. **Destroy demo**, record the time, and confirm the group is empty: `az resource list --resource-group rg-fieldtrack-demo --output table`.
+2. Run the demo and record the evidence. On this first deploy also check: the WebSocket idle behaviour of MQTT and SignalR through ingress (request timeout 240 s), a 31-day CSV export through ingress, that migrations ran (`SELECT * FROM "__EFMigrationsHistory"`, `SELECT extversion FROM pg_extension WHERE extname = 'postgis'`, expect 3.6.x), and the Postgres memory against the Reading key index (`SHOW shared_buffers`, `pg_relation_size` of the key table's index).
+3. **Destroy demo**, record the time, and check for leftovers as in [Destroy](#destroy).
 4. Destroy the bootstrap stack (its README: Tear down).
 
 ## Destroy
@@ -108,8 +92,16 @@ One session only:
 terraform destroy -var "admin_email=<your email>" -var "deployer_principal_type=User"
 ```
 
-Destroy removes everything above, purges the Key Vault (soft delete would otherwise hold its name for 7 days) and leaves the empty resource group to the bootstrap stack. Nothing billable remains: confirm in the portal (the group lists no resources) and under **Cost Management** the next day.
+Destroy removes everything above, purges the Key Vault (soft delete would otherwise hold its name for 7 days) and leaves the empty resource group to the bootstrap stack. Then check for leftovers Azure created outside Terraform:
+
+```powershell
+az resource list --resource-group rg-fieldtrack-demo --output table
+```
+
+The provider deletes Application Insights' generated "Failure Anomalies" rule (`disable_generated_rule`), but Azure may also have added the action group "Application Insights Smart Detection". Neither is billable, but either blocks the bootstrap's delete of the group, so delete what is listed (`az monitor action-group delete --resource-group rg-fieldtrack-demo --name "Application Insights Smart Detection"`; the Destroy workflow (#157) runs the same check). Nothing billable remains: confirm in the portal (the group lists no resources) and under **Cost Management** the next day.
 
 ## Checks
 
 CI's `terraform` job runs, for every stack under `infra/terraform`: `terraform fmt -check`, `init -backend=false`, `validate` and `terraform test` (offline, mocked azurerm provider).
+
+**Pull-request plans while a session is live.** Planning this stack against its live state needs Key Vault data access twice: refreshing the secrets (`-refresh=false` avoids that) and opening the ephemeral `db-password` read, which `-refresh=false` does not avoid. The read-only plan identity deliberately has no Key Vault data role, so #157's pull-request plan job runs `plan -refresh=false` and skips this stack while it has state (a session is applied), where `-refresh=false` alone would still fail. Do not grant the plan identity secret read to make it pass.

@@ -1,6 +1,6 @@
 # Container Apps (ADR 0006). Every app runs exactly one replica: the API because the ingest worker must be a single
-# instance and SignalR has no backplane (ADR 0005), the broker because two replicas would split MQTT sessions, the
-# others because one is enough for a demo.
+# instance and SignalR has no backplane (ADR 0005, ADR 0006), the broker because two replicas would split MQTT
+# sessions, the others because one is enough for a demo.
 
 # Consumption only: no workload_profile block, so no dedicated (paid) profile can be added by accident.
 resource "azurerm_container_app_environment" "demo" {
@@ -27,21 +27,22 @@ resource "azurerm_container_app" "mosquitto" {
   resource_group_name          = data.azurerm_resource_group.demo.name
   revision_mode                = "Single"
 
+  # Its own identity, which can read only the two MQTT passwords (main.tf).
   identity {
     type         = "UserAssigned"
-    identity_ids = [local.identity_id]
+    identity_ids = [azurerm_user_assigned_identity.broker.id]
   }
 
   dynamic "secret" {
-    for_each = toset(["mqtt-ingest-password", "mqtt-simulator-password"])
+    for_each = toset(local.broker_secrets)
     content {
       name                = secret.key
-      identity            = local.identity_id
+      identity            = azurerm_user_assigned_identity.broker.id
       key_vault_secret_id = azurerm_key_vault_secret.demo[secret.key].versionless_id
     }
   }
 
-  # HTTP ingress carries WebSockets; external TCP ingress would need a VNet. Request timeout 240 s (NOTES: clients ping
+  # HTTP ingress carries WebSockets; external TCP ingress would need a VNet. Request timeout 240 s (#154: clients ping
   # every 15 s or less).
   ingress {
     external_enabled = true
@@ -72,6 +73,8 @@ resource "azurerm_container_app" "mosquitto" {
       }
     }
   }
+
+  depends_on = [time_sleep.broker_role_propagation]
 }
 
 resource "azurerm_container_app" "api" {
@@ -124,7 +127,8 @@ resource "azurerm_container_app" "api" {
         name        = "ConnectionStrings__FieldTrack"
         secret_name = "db-connection-string"
       }
-      # No release pipeline runs migrations here; one replica means no two hosts race.
+      # No release pipeline runs migrations here. One replica; during a revision rollover EF Core's migration lock
+      # serializes the old and new replica's migrations (Program.MigrateOnStartupKey).
       env {
         name  = "Database__MigrateOnStartup"
         value = "true"
@@ -165,7 +169,7 @@ resource "azurerm_container_app" "api" {
         name  = "FIELDTRACK_ADMIN_EMAIL"
         value = var.admin_email
       }
-      # Temporary: the first sign-in must replace it (README: After apply).
+      # Temporary: the simulator replaces it with admin-password at its first start (README: After apply).
       env {
         name        = "FIELDTRACK_ADMIN_PASSWORD"
         secret_name = "admin-temporary-password"
@@ -232,7 +236,8 @@ resource "azurerm_container_app" "dashboard" {
 }
 
 # Seeds the demo fleet, Geofence and Alert Rules as the Admin, then publishes the demo Scenario at demo rate over wss.
-# It fails and restarts until the Admin has replaced the temporary password (README: After apply).
+# At its first start it replaces the Admin's temporary password with admin-password (#61), so no step is manual; if
+# neither password signs in, it waits instead of restarting into a lockout.
 resource "azurerm_container_app" "simulator" {
   name                         = "fieldtrack-simulator"
   container_app_environment_id = azurerm_container_app_environment.demo.id
@@ -245,7 +250,7 @@ resource "azurerm_container_app" "simulator" {
   }
 
   dynamic "secret" {
-    for_each = toset(["admin-password", "mqtt-simulator-password"])
+    for_each = toset(["admin-temporary-password", "admin-password", "mqtt-simulator-password"])
     content {
       name                = secret.key
       identity            = local.identity_id
@@ -271,14 +276,20 @@ resource "azurerm_container_app" "simulator" {
         "--mqtt-transport", "wss",
         "--mqtt-host", local.mosquitto_host,
         "--mqtt-username", "simulator",
-        # The image's working directory may be read-only.
+        # The image's working directory may be read-only, and /tmp does not survive a restart or a new revision:
+        # --first-boot clock starts every Device above the Boots an earlier container published (ADR 0001).
         "--state", "/tmp/simulator-state.json",
+        "--first-boot", "clock",
         "--manifest", "/tmp/manifest.json",
       ]
 
       env {
         name  = "FIELDTRACK_ADMIN_EMAIL"
         value = var.admin_email
+      }
+      env {
+        name        = "FIELDTRACK_ADMIN_TEMPORARY_PASSWORD"
+        secret_name = "admin-temporary-password"
       }
       env {
         name        = "FIELDTRACK_ADMIN_PASSWORD"
