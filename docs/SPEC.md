@@ -258,7 +258,7 @@ The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquit
 | Angular dashboard | nginx dashboard Container App, Consumption profile (no Static Web Apps) |
 | API + ingest worker | Azure Container Apps consumption plan, the API with the ingest worker at exactly 1 replica while deployed (the worker must stay connected to the broker), covered by the credit at demo traffic |
 | MQTT broker | Mosquitto as a Container App on the Consumption profile, reached over MQTT over WebSockets with password auth (spec #21, ADR 0006; replaces the HiveMQ Cloud plan) |
-| Database | Azure PostgreSQL Flexible Server Burstable B1ms only while deployed PostgreSQL 16 with PostGIS (covered by the free account's 12-month hours); destroyed after each demo. Free fallback: a free-tier hosted Postgres that supports PostGIS (Neon or Supabase) |
+| Database | Azure PostgreSQL Flexible Server Burstable B1ms (PostgreSQL 16 with PostGIS), only while deployed (covered by the free account's 12-month hours); destroyed after each demo. Free fallback: a free-tier hosted Postgres that supports PostGIS (Neon or Supabase) |
 | Container images | GitHub Container Registry (free), not Azure Container Registry |
 | Monitoring | Application Insights through the Azure Monitor OpenTelemetry Distro, with sampling and a daily cap on; Grafana locally for benchmarks |
 | Secrets | Azure Key Vault, read by managed identity (fractions of a cent, covered by credit) |
