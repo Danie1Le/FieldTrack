@@ -8,6 +8,7 @@ using FieldTrack.Api.Observability;
 using FieldTrack.Infrastructure.Messaging;
 using FieldTrack.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Scalar.AspNetCore;
@@ -60,6 +61,20 @@ builder.Services.AddSignalR()
     .AddJsonProtocol(options => options.PayloadSerializerOptions.Converters.Add(new EnumNameConverter()));
 builder.Services.AddSingleton<IngestMetrics>();
 builder.Services.AddSingleton<LivePush>();
+// In Azure a browser's request reaches the API through two proxies (ADR 0006): the dashboard's nginx, which sends the
+// client's address as the only X-Forwarded-For entry, and the API's own Container Apps ingress, which appends nginx's
+// address and connects from inside the environment. So believe at most two entries, and each only while the address
+// in front of it is a trusted proxy: a client cannot push its own claim past nginx, and a peer outside the trusted
+// networks is never believed. Loopback stays trusted (the ASP.NET Core default).
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+    options.ForwardLimit = 2;
+    foreach (var network in builder.Configuration.GetSection(Program.TrustedProxyNetworksKey).Get<string[]>() ?? [])
+    {
+        options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
+    }
+});
 
 var app = builder.Build();
 
@@ -72,6 +87,7 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>(Program.
 
 await UserSeeder.SeedAsync(app.Services);
 
+app.UseForwardedHeaders();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
@@ -96,4 +112,10 @@ public partial class Program
     /// replica (ADR 0006). A revision rollover briefly runs two, and EF Core's migration lock serializes their migrations.
     /// </summary>
     public const string MigrateOnStartupKey = "Database:MigrateOnStartup";
+
+    /// <summary>
+    /// Configuration key listing the networks (CIDR) of the reverse proxies in front of the API, whose X-Forwarded-For
+    /// it believes so the sign-in rate limit is per client rather than per proxy (#169). Unset, the header is ignored.
+    /// </summary>
+    public const string TrustedProxyNetworksKey = "ForwardedHeaders:TrustedNetworks";
 }
