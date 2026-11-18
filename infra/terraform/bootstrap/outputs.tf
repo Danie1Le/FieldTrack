@@ -2,8 +2,18 @@
 # so no secret is ever copied out of this stack.
 
 output "AZURE_CLIENT_ID" {
-  description = "Client id of the deploy identity (azure/login client-id)."
+  description = "Client id of the apply/destroy identity (azure/login client-id on main)."
   value       = azurerm_user_assigned_identity.github.client_id
+}
+
+output "AZURE_PLAN_CLIENT_ID" {
+  description = "Client id of the read-only plan identity (azure/login client-id on pull requests)."
+  value       = azurerm_user_assigned_identity.github_plan.client_id
+}
+
+output "DEMO_RESOURCE_GROUP" {
+  description = "Resource group the demo stack deploys into."
+  value       = azurerm_resource_group.demo.name
 }
 
 output "AZURE_TENANT_ID" {

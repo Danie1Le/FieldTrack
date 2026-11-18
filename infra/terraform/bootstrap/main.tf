@@ -1,13 +1,11 @@
 data "azurerm_subscription" "current" {}
 
 locals {
-  # Issue #155: only this repository's pull requests (plan) and default branch (apply/destroy) may sign in.
+  # Issue #155: only this repository may sign in. Pull requests get the read-only plan identity; only the
+  # default branch (protected: changes land through reviewed pull requests) gets the apply/destroy identity.
   # The demo workflows use no GitHub environment: a job with `environment:` gets the subject
   # `repo:<repo>:environment:<name>` instead and would need its own credential here.
-  github_subjects = {
-    pull-request = "repo:Danie1Le/FieldTrack:pull_request"
-    main         = "repo:Danie1Le/FieldTrack:ref:refs/heads/main"
-  }
+  github_repo = "repo:Danie1Le/FieldTrack"
 
   # Built-in Key Vault data roles the demo stack may grant to managed identities (its apps read secrets,
   # the deploy identity writes them). Role definition ids are the same in every tenant.
@@ -45,25 +43,50 @@ resource "azurerm_storage_container" "state" {
   storage_account_id = azurerm_storage_account.state.id
 }
 
-# A managed identity rather than an Entra app registration: the subscription sits in the university
+# The demo stack deploys into this group and never creates or deletes it, so the conditional RBAC
+# Administrator assignment below can be scoped to it. Destroying the demo stack leaves it empty (free);
+# destroying this stack removes it.
+resource "azurerm_resource_group" "demo" {
+  name     = var.demo_resource_group_name
+  location = var.location
+}
+
+# Managed identities rather than an Entra app registration: the subscription sits in the university
 # directory, where students may not register apps. Federated credentials mean no stored secret.
+
+# Apply/destroy identity: trusted only from the default branch.
 resource "azurerm_user_assigned_identity" "github" {
   name                = "id-fieldtrack-github"
   resource_group_name = azurerm_resource_group.bootstrap.name
   location            = azurerm_resource_group.bootstrap.location
 }
 
-resource "azurerm_federated_identity_credential" "github" {
-  for_each = local.github_subjects
-
-  name                      = "github-${each.key}"
+resource "azurerm_federated_identity_credential" "github_main" {
+  name                      = "github-main"
   user_assigned_identity_id = azurerm_user_assigned_identity.github.id
   audience                  = ["api://AzureADTokenExchange"]
   issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = each.value
+  subject                   = "${local.github_repo}:ref:refs/heads/main"
 }
 
-# The demo stack creates and destroys its own resource group each session, so it needs the subscription.
+# Plan identity: trusted from pull requests, which run branch code (the workflow file, a data "external",
+# a provider), so it holds only read roles and nothing it could use to widen its own access.
+resource "azurerm_user_assigned_identity" "github_plan" {
+  name                = "id-fieldtrack-github-plan"
+  resource_group_name = azurerm_resource_group.bootstrap.name
+  location            = azurerm_resource_group.bootstrap.location
+}
+
+resource "azurerm_federated_identity_credential" "github_pull_request" {
+  name                      = "github-pull-request"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_plan.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "${local.github_repo}:pull_request"
+}
+
+# Subscription rather than the demo group: the azurerm provider registers the resource providers the demo
+# stack uses, which is a subscription-level action.
 resource "azurerm_role_assignment" "github_contributor" {
   scope                = data.azurerm_subscription.current.id
   role_definition_name = "Contributor"
@@ -78,11 +101,27 @@ resource "azurerm_role_assignment" "github_state" {
   principal_type       = "ServicePrincipal"
 }
 
+resource "azurerm_role_assignment" "github_plan_reader" {
+  scope                = data.azurerm_subscription.current.id
+  role_definition_name = "Reader"
+  principal_id         = azurerm_user_assigned_identity.github_plan.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# Read only, so plans run with -lock=false: the state lock is a blob lease, which needs write access.
+resource "azurerm_role_assignment" "github_plan_state" {
+  scope                = azurerm_storage_container.state.id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_user_assigned_identity.github_plan.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
 # Contributor cannot write role assignments. Instead of User Access Administrator, this lets the identity
 # create and delete only Key Vault data-role assignments, and only for service principals (managed
-# identities), so it can never grant Owner or anything to a user or group.
+# identities), so it can never grant Owner or anything to a user or group. Scoped to the demo group, so
+# no grant reaches anything outside the demo stack.
 resource "azurerm_role_assignment" "github_grant_key_vault_roles" {
-  scope                = data.azurerm_subscription.current.id
+  scope                = azurerm_resource_group.demo.id
   role_definition_name = "Role Based Access Control Administrator"
   principal_id         = azurerm_user_assigned_identity.github.principal_id
   principal_type       = "ServicePrincipal"
@@ -115,19 +154,23 @@ resource "azurerm_role_assignment" "github_grant_key_vault_roles" {
 }
 
 # Thresholds are percents of the amount; a $100 budget makes them read as dollars (1% is $1). Budgets count
-# usage before credits, so these fire while the $200 free credit is still paying. Annual, not monthly:
-# the credit window spans two calendar months and a monthly budget would reset halfway through it.
+# usage before credits, so these fire while the $200 free credit is still paying. The credit runs
+# 2026-11-18 to 2026-12-18: a quarter from 2026-11-01 holds that whole window in one period (a monthly
+# budget would reset on 2026-12-01), so the forecast projects over at most a quarter, not a year. The
+# budget ends with the year, after the credit.
 resource "azurerm_consumption_budget_subscription" "credit" {
   name            = "fieldtrack-credit"
   subscription_id = data.azurerm_subscription.current.id
   amount          = 100
-  time_grain      = "Annually"
+  time_grain      = "Quarterly"
 
   time_period {
-    # The free credit runs 2026-11-18 to 2026-12-18; a budget must start on the first of a month.
+    # A budget must start on the first of a month.
     start_date = "2026-11-01T00:00:00Z"
+    end_date   = "2026-12-31T00:00:00Z"
   }
 
+  # Early warning: the first dollar of usage.
   notification {
     operator       = "GreaterThanOrEqualTo"
     threshold      = 1
@@ -135,6 +178,7 @@ resource "azurerm_consumption_budget_subscription" "credit" {
     contact_emails = [var.budget_alert_email]
   }
 
+  # Near the end of the $200 credit, spent or projected.
   notification {
     operator       = "GreaterThanOrEqualTo"
     threshold      = 150

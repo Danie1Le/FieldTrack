@@ -169,12 +169,13 @@ jobs:
       - name: Check formatting
         run: terraform fmt -check -recursive -diff infra/terraform
 
-      # Every stack under infra/terraform, so the demo stack is checked once it lands.
+      # Validate and test every stack under infra/terraform (tests run against a mocked provider).
       - name: Validate
         run: |
           for stack in infra/terraform/*/; do
             echo "::group::$stack"
             terraform -chdir="$stack" init -backend=false -input=false
             terraform -chdir="$stack" validate
+            terraform -chdir="$stack" test
             echo "::endgroup::"
           done
