@@ -63,9 +63,17 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
         return client;
     }
 
-    /// <summary>A contract payload with the required fields and any extra JSON members in <paramref name="more"/>.</summary>
+    /// <summary>A contract payload with the required fields and any extra JSON members in <paramref name="more"/>; its Device time is <see cref="MillisUp"/>.</summary>
     public static string Payload(int boot, long seq, DateTimeOffset deviceTime, double lat = 51.5, double lon = -0.12, string more = "") =>
-        string.Create(CultureInfo.InvariantCulture, $"{{\"boot\":{boot},\"seq\":{seq},\"ts\":{deviceTime.ToUnixTimeMilliseconds()},\"lat\":{lat},\"lon\":{lon}{more}}}");
+        string.Create(CultureInfo.InvariantCulture, $"{{\"boot\":{boot},\"seq\":{seq},\"ts\":{MillisUp(deviceTime).ToUnixTimeMilliseconds()},\"lat\":{lat},\"lon\":{lon}{more}}}");
+
+    /// <summary>
+    /// What a Device time keeps at the contract's millisecond precision: rounded up, never down. An Attachment covers only
+    /// Device times at or after its own (microsecond) instant, so a Reading taken right after an attach, often in the same
+    /// millisecond on a fast runner, must not truncate to before it and miss the Asset (#142).
+    /// </summary>
+    public static DateTimeOffset MillisUp(DateTimeOffset time) =>
+        DateTimeOffset.FromUnixTimeMilliseconds((time.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks + TimeSpan.TicksPerMillisecond - 1) / TimeSpan.TicksPerMillisecond);
 
     public Task PublishAsync(string serialNumber, string payload) => PublishToAsync(TopicOf(serialNumber), payload);
 

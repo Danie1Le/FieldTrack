@@ -32,11 +32,11 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(f
         open.GetProperty("reading").GetProperty("sequenceNumber").GetInt64().ShouldBe(0);
         open.GetProperty("severity").GetString().ShouldBe("Critical");
         open.GetProperty("message").GetString().ShouldBe("Engine temp 108.4 °C, above 105 (clears below 100)");
-        open.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(Millis(t));
+        open.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t));
         open.GetProperty("createdAt").GetDateTimeOffset().ShouldBeGreaterThan(t.AddMinutes(-1));
         var closed = resolved.Single();
         closed.GetProperty("id").GetString().ShouldBe(open.GetProperty("id").GetString());
-        closed.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(Millis(t.AddSeconds(2)));
+        closed.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t.AddSeconds(2)));
         closed.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
         closed.GetProperty("fromBacklog").GetBoolean().ShouldBeFalse();
     }
@@ -63,7 +63,7 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(f
 
         var alert = alerts.ShouldHaveSingleItem();
         alert.GetProperty("reading").GetProperty("sequenceNumber").GetInt64().ShouldBe(0);
-        alert.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(Millis(t.AddSeconds(2)));
+        alert.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t.AddSeconds(2)));
     }
 
     [Fact]
@@ -107,8 +107,8 @@ public sealed class ThresholdAlertTests(FieldTrackFixture fixture) : AlertTest(f
 
         var alert = (await ListAsync(admin, "/alerts")).ShouldHaveSingleItem();
         alert.GetProperty("status").GetString().ShouldBe("Resolved");
-        alert.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(MillisUp(t.AddSeconds(1)));
-        alert.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(MillisUp(t.AddSeconds(2)));
+        alert.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t.AddSeconds(1)));
+        alert.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t.AddSeconds(2)));
         alert.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
         alert.GetProperty("fromBacklog").GetBoolean().ShouldBeTrue();
     }
