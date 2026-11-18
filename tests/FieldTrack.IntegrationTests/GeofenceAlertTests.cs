@@ -36,9 +36,9 @@ public sealed class GeofenceAlertTests(FieldTrackFixture fixture) : AlertTest(fi
         open.GetProperty("reading").GetProperty("sequenceNumber").GetInt64().ShouldBe(2);
         open.GetProperty("message").GetString().ShouldBe("Left Geofence Depot");
         open.GetProperty("severity").GetString().ShouldBe("Warning");
-        open.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(Millis(t.AddSeconds(2)));
+        open.GetProperty("raisedAt").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t.AddSeconds(2)));
         var closed = resolved.ShouldHaveSingleItem();
-        closed.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(Millis(t.AddSeconds(3)));
+        closed.GetProperty("resolvedAt").GetDateTimeOffset().ShouldBe(TelemetryPublisher.MillisUp(t.AddSeconds(3)));
         closed.GetProperty("resolveReason").GetString().ShouldBe("Cleared");
     }
 
