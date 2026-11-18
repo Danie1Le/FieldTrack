@@ -17,7 +17,10 @@ public static class ReadingCsvExport
     /// <summary>The most exports one user runs at once (spec #21).</summary>
     public const int MaxRunningPerUser = 2;
 
-    /// <summary>The longest Device-time range one export covers (#19: 31 days, no row cap).</summary>
+    /// <summary>
+    /// The longest Device-time range one export, or one history read (<c>GET /assets/{id}/readings</c>), covers
+    /// (#19: 31 days, no row cap for an export).
+    /// </summary>
     public static readonly TimeSpan MaxRange = TimeSpan.FromDays(31);
 
     private const int BufferSize = 64 * 1024;

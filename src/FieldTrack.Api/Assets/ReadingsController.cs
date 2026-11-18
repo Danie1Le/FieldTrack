@@ -13,9 +13,6 @@ namespace FieldTrack.Api.Assets;
 [Authorize(Policy = Policies.Read)]
 public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
 {
-    /// <summary>The longest range one request may ask for, the same bound as a CSV export (spec #21).</summary>
-    public static readonly TimeSpan MaxRange = TimeSpan.FromDays(31);
-
     /// <summary>
     /// The most Readings one request returns. This read is materialized in the process that also runs ingest,
     /// so a busy Asset's long range is refused instead of filling memory; the streamed CSV export (#42) has no cap.
@@ -53,9 +50,10 @@ public sealed class ReadingsController(FieldTrackDbContext db) : ControllerBase
     {
         // Npgsql writes timestamptz from UTC values only.
         var (start, end) = (from!.Value.ToUniversalTime(), to!.Value.ToUniversalTime());
-        if (end <= start || end - start > MaxRange)
+        // The same bound as a CSV export.
+        if (end <= start || end - start > ReadingCsvExport.MaxRange)
         {
-            ModelState.AddModelError(nameof(to), $"The range must end after it starts and span at most {MaxRange.Days} days.");
+            ModelState.AddModelError(nameof(to), $"The range must end after it starts and span at most {ReadingCsvExport.MaxRange.Days} days.");
             return ValidationProblem(ModelState);
         }
 
