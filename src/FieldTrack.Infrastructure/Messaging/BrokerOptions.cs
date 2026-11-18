@@ -16,11 +16,20 @@ public sealed class BrokerOptions : IValidatableObject
     [Required]
     public string Host { get; set; } = "";
 
-    /// <summary>Broker TCP port.</summary>
+    /// <summary>Broker port: 1883 for the local broker, 443 for the Container Apps one.</summary>
     [Range(1, 65535)]
     public int Port { get; set; } = 1883;
 
-    /// <summary>Whether to connect over TLS. Credentials are sent only over TLS unless the broker is the local stack.</summary>
+    /// <summary>MQTT over TCP (the default) or over WebSockets.</summary>
+    public BrokerTransport Transport { get; set; } = BrokerTransport.Tcp;
+
+    /// <summary>The HTTP path of the broker's WebSockets endpoint, for <see cref="BrokerTransport.WebSockets"/>.</summary>
+    public string WebSocketPath { get; set; } = "/mqtt";
+
+    /// <summary>
+    /// Whether to connect over TLS (<c>wss</c> with <see cref="BrokerTransport.WebSockets"/>). Credentials are sent only over TLS unless
+    /// the broker is the local stack.
+    /// </summary>
     public bool UseTls { get; set; }
 
     /// <summary>

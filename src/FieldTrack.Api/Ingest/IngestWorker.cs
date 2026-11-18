@@ -336,15 +336,24 @@ public sealed partial class IngestWorker(
     }
 
     /// <summary>The MQTT options the worker connects with; internal so a test can check the socket buffers (#116).</summary>
-    internal MqttClientOptions ClientOptions() => new MqttClientOptionsBuilder()
-        .WithBroker(broker.Value)
-        .WithClientId(options.Value.ClientId)
-        .WithCleanStart(false)
-        .WithSessionExpiryInterval(SessionExpirySeconds)
-        // The broker sends at most this many unacknowledged messages, so a full batch never waits on its own acks.
-        .WithReceiveMaximum(2 * BatchSize)
-        .WithTcpServer(tcp => tcp.BufferSize = SocketBufferSize)
-        .Build();
+    internal MqttClientOptions ClientOptions()
+    {
+        var builder = new MqttClientOptionsBuilder()
+            .WithBroker(broker.Value)
+            .WithClientId(options.Value.ClientId)
+            .WithCleanStart(false)
+            .WithSessionExpiryInterval(SessionExpirySeconds)
+            // The broker sends at most this many unacknowledged messages, so a full batch never waits on its own acks.
+            .WithReceiveMaximum(2 * BatchSize);
+        // Only MQTTnet's TCP channel pins the socket buffers small. Over WebSockets .NET opens the socket with the OS defaults,
+        // which Linux auto-tunes, so there is nothing to raise.
+        if (broker.Value.Transport == BrokerTransport.Tcp)
+        {
+            builder.WithTcpServer(tcp => tcp.BufferSize = SocketBufferSize);
+        }
+
+        return builder.Build();
+    }
 
     /// <summary>
     /// The next batch, or an empty one once <paramref name="sweepIn"/> passes with no message, so the loop can sweep.
