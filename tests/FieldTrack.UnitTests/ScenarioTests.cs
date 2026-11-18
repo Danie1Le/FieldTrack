@@ -1,3 +1,4 @@
+using FieldTrack.Domain.Assets;
 using FieldTrack.Simulator;
 
 namespace FieldTrack.UnitTests;
@@ -93,14 +94,33 @@ public sealed class ScenarioTests : IDisposable
         Should.Throw<SimulatorException>(() => Scenario.Parse(json, Fleet)).Message.ShouldContain(reason);
     }
 
-    [Fact]
-    public void The_committed_demo_Scenario_fits_the_demo_fleet()
+    private static IEnumerable<(string Serial, Injection Injection)> DemoInjections()
     {
         var fleet = FleetFile.Load(Path.Combine(AppContext.BaseDirectory, "fleets", "demo.json"));
-
         var scenario = Scenario.Load(Path.Combine(AppContext.BaseDirectory, "fleets", "demo-scenario.json"), fleet);
+        return fleet.Devices.SelectMany(device => scenario.InjectionsFor(device.Serial).Select(injection => (device.Serial, injection)));
+    }
 
-        fleet.Devices.Sum(device => scenario.InjectionsFor(device.Serial).Count).ShouldBeGreaterThan(3);
+    [Fact]
+    public void The_demo_Scenario_silences_one_Device_by_a_Power_off_and_one_by_a_Coverage_gap_for_longer_than_Asset_Status_waits_to_show_Offline()
+    {
+        var silences = DemoInjections()
+            .Where(demo => demo.Injection.Kind is InjectionKind.PowerOff or InjectionKind.CoverageGap)
+            .Where(demo => demo.Injection.End - demo.Injection.Start > AssetStatuses.OfflineAfter)
+            .ToList();
+
+        silences.Select(demo => demo.Injection.Kind).ShouldBe([InjectionKind.PowerOff, InjectionKind.CoverageGap], ignoreOrder: true);
+        silences.Select(demo => demo.Serial).Distinct().Count().ShouldBe(2);
+    }
+
+    [Fact]
+    public void The_demo_Scenario_overheats_a_Device_wholly_inside_its_Coverage_gap_so_the_Alert_arrives_with_the_backlog()
+    {
+        var injections = DemoInjections().ToList();
+
+        injections.ShouldContain(overheat => overheat.Injection.Kind == InjectionKind.Overheat && injections.Any(gap =>
+            gap.Serial == overheat.Serial && gap.Injection.Kind == InjectionKind.CoverageGap
+            && gap.Injection.Start <= overheat.Injection.Start && overheat.Injection.End <= gap.Injection.End));
     }
 
     [Fact]

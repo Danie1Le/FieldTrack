@@ -30,6 +30,11 @@ internal static class SimulatorCli
               runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP without credentials: point it only at a local or
               trusted-network broker.
 
+          demo --fleet fleets/demo.json --scenario fleets/demo-scenario.json --rate 5 [--duration 300] [run's other options]
+              The scripted demo: seeds the fleet, adds the Geofence "North yard" and the demo's Alert Rules (skipping those that exist by
+              name), then runs as `run` does. The demo Scenario shows an Overheat, a Geofence exit, an Offline Device and a Coverage gap
+              backlog on the dashboard within five minutes.
+
           bench throughput|flood|crash|duplicates --fleet <file> [--rate <readings per second>] [--duration <seconds>]
               Seeds the fleet, then measures telemetry ingest against the running compose stack and writes JSON (metrics plus git SHA,
               CPU, RAM, OS, Docker limits, Postgres settings and image tags) to --out (bench/results). `throughput` holds --rate
@@ -93,6 +98,11 @@ internal static class SimulatorCli
                 case ["run", .. var rest]:
                     await RunAsync(Options.Parse(rest), cancellation.Token);
                     return 0;
+                case ["demo", .. var rest]:
+                    var demo = Options.Parse(rest);
+                    await SeedAsync(demo, cancellation.Token, setUpDemo: true);
+                    await RunAsync(demo, cancellation.Token);
+                    return 0;
                 case ["bench", var kind, .. var rest]:
                     return await BenchCli.RunAsync(kind, Options.Parse(rest), cancellation.Token) ? 0 : 3;
                 default:
@@ -126,12 +136,16 @@ internal static class SimulatorCli
         }
     }
 
-    private static async Task SeedAsync(Options options, CancellationToken cancellationToken)
+    private static async Task SeedAsync(Options options, CancellationToken cancellationToken, bool setUpDemo = false)
     {
         var fleet = FleetFile.Load(options.Require("fleet"));
         using var http = new HttpClient { BaseAddress = ApiAddress(options.Get("api") ?? "http://localhost:8080") };
         var api = await FieldTrackApi.SignInAsync(http, Credential("email", "FIELDTRACK_ADMIN_EMAIL", options), Credential(null, "FIELDTRACK_ADMIN_PASSWORD", options), cancellationToken);
         await Seeder.SeedAsync(api, fleet, Console.Out, cancellationToken);
+        if (setUpDemo)
+        {
+            await DemoSetup.ApplyAsync(api, Console.Out, cancellationToken);
+        }
     }
 
     private static async Task RunAsync(Options options, CancellationToken cancellationToken)
