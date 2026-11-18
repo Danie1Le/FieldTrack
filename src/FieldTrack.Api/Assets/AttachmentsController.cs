@@ -70,6 +70,7 @@ public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider t
         db.Attachments.Add(attachment);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await live.PushAsync([assetId], [], [], cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ToResponse(attachment));
     }
 
@@ -112,7 +113,7 @@ public sealed class AttachmentsController(FieldTrackDbContext db, TimeProvider t
         var now = time.GetUtcNow();
         var resolved = await db.EndOpenAttachmentsAsync(a => a.Id == id, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await live.AlertsUpdatedAsync(resolved, cancellationToken);
+        await live.PushAsync([attachment.AssetId], [], resolved, cancellationToken);
         return ToResponse(attachment) with { DetachedAt = now };
     }
 
