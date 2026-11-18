@@ -13,6 +13,7 @@
     <label for="to">To</label>
     <input id="to" #to type="datetime-local" required [value]="localInput(this.to())" />
     <button type="submit" class="btn">Show</button>
+    <button type="button" class="btn" (click)="export(from.value, to.value)">Export CSV</button>
   </form>
 </header>
 
