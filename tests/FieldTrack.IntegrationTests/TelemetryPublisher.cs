@@ -69,7 +69,7 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
 
     /// <summary>
     /// What a Device time keeps at the contract's millisecond precision: rounded up, never down. An Attachment covers only
-    /// Device times at or after its own (microsecond) instant, so a Reading taken right after an attach, often in the same
+    /// Device times at or after its own (microsecond) instant, so a Reading taken right after an attach, sometimes in the same
     /// millisecond on a fast runner, must not truncate to before it and miss the Asset (#142).
     /// </summary>
     public static DateTimeOffset MillisUp(DateTimeOffset time) =>
