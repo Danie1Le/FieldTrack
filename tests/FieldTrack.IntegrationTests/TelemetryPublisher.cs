@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
 using FieldTrack.Api.Ingest;
+using FieldTrack.Api.Messaging;
+using FieldTrack.Infrastructure.Messaging;
 using MQTTnet;
 using MQTTnet.Protocol;
 
@@ -25,9 +27,16 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     /// <paramref name="topicFilter"/>, so messages published from now on wait for it however long it takes to connect.
     /// Resuming a session a crashed worker left behind acknowledges nothing, so the next worker gets its messages.
     /// </summary>
-    public static async Task CreateIngestSessionAsync(FieldTrackFixture fixture, string clientId, string topicFilter = IngestWorker.TopicFilter)
+    public static Task CreateIngestSessionAsync(FieldTrackFixture fixture, string clientId, string topicFilter = IngestWorker.TopicFilter) =>
+        CreateIngestSessionAsync(Options(fixture, clientId), topicFilter);
+
+    /// <summary>Creates the ingest session of <paramref name="clientId"/> on another broker, connecting the way ingest does.</summary>
+    public static Task CreateIngestSessionAsync(BrokerOptions broker, string clientId) =>
+        CreateIngestSessionAsync(new MqttClientOptionsBuilder().WithBroker(broker).WithClientId(clientId), IngestWorker.TopicFilter);
+
+    private static async Task CreateIngestSessionAsync(MqttClientOptionsBuilder options, string topicFilter)
     {
-        using var client = await ConnectWithoutAcknowledgingAsync(fixture, clientId);
+        using var client = await ConnectWithoutAcknowledgingAsync(options);
         await client.SubscribeAsync(topicFilter, MqttQualityOfServiceLevel.AtLeastOnce, TestContext.Current.CancellationToken);
         await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
     }
@@ -47,11 +56,11 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
     /// </summary>
     public static async Task TakeOverIngestSessionAsync(FieldTrackFixture fixture, string clientId)
     {
-        using var client = await ConnectWithoutAcknowledgingAsync(fixture, clientId);
+        using var client = await ConnectWithoutAcknowledgingAsync(Options(fixture, clientId));
         await client.DisconnectAsync(cancellationToken: TestContext.Current.CancellationToken);
     }
 
-    private static async Task<IMqttClient> ConnectWithoutAcknowledgingAsync(FieldTrackFixture fixture, string clientId)
+    private static async Task<IMqttClient> ConnectWithoutAcknowledgingAsync(MqttClientOptionsBuilder options)
     {
         var client = new MqttClientFactory().CreateMqttClient();
         client.ApplicationMessageReceivedAsync += args =>
@@ -59,7 +68,8 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
             args.AutoAcknowledge = false;
             return Task.CompletedTask;
         };
-        await client.ConnectAsync(IngestSessionOptions(fixture, clientId), TestContext.Current.CancellationToken);
+        await client.ConnectAsync(
+            options.WithCleanStart(false).WithSessionExpiryInterval(IngestWorker.SessionExpirySeconds).Build(), TestContext.Current.CancellationToken);
         return client;
     }
 
@@ -95,9 +105,6 @@ internal sealed class TelemetryPublisher : IAsyncDisposable
         await _client.DisconnectAsync();
         _client.Dispose();
     }
-
-    private static MqttClientOptions IngestSessionOptions(FieldTrackFixture fixture, string clientId) =>
-        Options(fixture, clientId).WithCleanStart(false).WithSessionExpiryInterval(IngestWorker.SessionExpirySeconds).Build();
 
     private static MqttClientOptionsBuilder Options(FieldTrackFixture fixture, string clientId) =>
         new MqttClientOptionsBuilder().WithTcpServer(fixture.BrokerHost, fixture.BrokerPort).WithClientId(clientId);
