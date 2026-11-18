@@ -20,13 +20,14 @@ internal static class SimulatorCli
 
           run --fleet <file> --rate <readings per second | max> [--duration <seconds>] [--mqtt-host localhost] [--mqtt-port 1883]
               [--mqtt-transport tcp|ws|wss] [--mqtt-path /mqtt] [--mqtt-username <user>]
-              [--state simulator-state.json] [--manifest manifest-<time>.json]
+              [--state simulator-state.json] [--first-boot clock] [--manifest manifest-<time>.json]
               [--scenario <file>] [--fault-rate <n>] [--power-off-rate <n>] [--coverage-gap-rate <n>]
               Publishes Readings for every Device at the target aggregate rate, spread evenly across Devices, until
               --duration passes or Ctrl+C. --rate max publishes as fast as the broker acknowledges, with noise and no
               injections. Each start raises every Device's Boot (kept in --state) and restarts its Sequence numbers
-              at 0. --scenario injects the Faults, Power offs, Coverage gaps and clock problems a file scripts (seconds
-              from the start); the three rates (events per Device-hour) inject them at random, dropping a draw that
+              at 0. A Device --state does not know starts at Boot 1, or with --first-boot clock at the seconds since 2026,
+              so a simulator whose --state does not survive a restart (a container) still starts above every earlier Boot.
+              --scenario injects the Faults, Power offs, Coverage gaps and clock problems a file scripts (seconds from the start); the three rates (events per Device-hour) inject them at random, dropping a draw that
               would overlap one already running, so long windows at high rates come in under their rate. Only paced
               runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP by
               default; ws and wss are MQTT over WebSockets at --mqtt-path (port 80 or 443 unless --mqtt-port is given), wss with TLS,
@@ -79,7 +80,9 @@ internal static class SimulatorCli
               Device's Boot. Use a stack not shared with another benchmark: Alerts from earlier runs and rules stay in the database.
 
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
-        FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password.
+        FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password, unless
+        FIELDTRACK_ADMIN_TEMPORARY_PASSWORD holds it: then the simulator replaces it with FIELDTRACK_ADMIN_PASSWORD itself, and
+        when neither signs in it waits until stopped instead of exiting (a restart loop would lock the Admin out).
         """;
 
     public static async Task<int> Main(string[] args)
@@ -143,11 +146,41 @@ internal static class SimulatorCli
     {
         var fleet = FleetFile.Load(options.Require("fleet"));
         using var http = new HttpClient { BaseAddress = ApiAddress(options.Get("api") ?? "http://localhost:8080") };
-        var api = await FieldTrackApi.SignInAsync(http, Credential("email", "FIELDTRACK_ADMIN_EMAIL", options), Credential(null, "FIELDTRACK_ADMIN_PASSWORD", options), cancellationToken);
+        var api = await SignInAsync(http, options, Console.Error, cancellationToken);
         await Seeder.SeedAsync(api, fleet, Console.Out, cancellationToken);
         if (setUpDemo)
         {
             await DemoSetup.ApplyAsync(api, Console.Out, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Signs in as the Admin. With FIELDTRACK_ADMIN_TEMPORARY_PASSWORD set, as in the Azure demo, an Admin still on that
+    /// password is first moved to FIELDTRACK_ADMIN_PASSWORD (#61), and a refused sign-in waits until stopped instead of
+    /// exiting: the platform restarts a simulator that exits, and every restart's failed sign-ins count towards locking
+    /// the Admin out. Secrets come from <paramref name="environment"/> (the process environment by default).
+    /// </summary>
+    internal static async Task<FieldTrackApi> SignInAsync(
+        HttpClient http, Options options, TextWriter error, CancellationToken cancellationToken, Func<string, string?>? environment = null)
+    {
+        var email = Credential("email", "FIELDTRACK_ADMIN_EMAIL", options, environment);
+        var password = Credential(null, "FIELDTRACK_ADMIN_PASSWORD", options, environment);
+        if ((environment ?? Environment.GetEnvironmentVariable)("FIELDTRACK_ADMIN_TEMPORARY_PASSWORD") is not { } temporary)
+        {
+            return await FieldTrackApi.SignInAsync(http, email, password, cancellationToken);
+        }
+
+        try
+        {
+            return await FieldTrackApi.SignInReplacingTemporaryPasswordAsync(http, email, temporary, password, cancellationToken);
+        }
+        catch (SignInRefusedException exception)
+        {
+            await error.WriteLineAsync(
+                $"{exception.Message} Neither FIELDTRACK_ADMIN_TEMPORARY_PASSWORD nor FIELDTRACK_ADMIN_PASSWORD signs in; waiting until stopped, "
+                + "because restarting would lock the Admin out.");
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw;
         }
     }
 
@@ -190,7 +223,13 @@ internal static class SimulatorCli
             options.Get("state") ?? "simulator-state.json",
             options.Get("manifest") ?? $"manifest-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssZ}.json",
             options.Get("scenario") is { } scenario ? Scenario.Load(scenario, fleet) : null,
-            new RandomRates(PerHour(options, "fault-rate"), PerHour(options, "power-off-rate"), PerHour(options, "coverage-gap-rate")));
+            new RandomRates(PerHour(options, "fault-rate"), PerHour(options, "power-off-rate"), PerHour(options, "coverage-gap-rate")),
+            FirstBoot: options.Get("first-boot") switch
+            {
+                null => 1,
+                "clock" => BootState.ClockBoot(DateTimeOffset.UtcNow),
+                var other => throw new SimulatorException($"--first-boot must be clock, got '{other}'."),
+            });
     }
 
     /// <summary>The broker of <c>run</c>: <c>--mqtt-transport tcp</c> (default), <c>ws</c> or <c>wss</c>, with its host, port, path and user.</summary>

@@ -19,5 +19,6 @@ ENV NGINX_ENVSUBST_FILTER=^(FIELDTRACK_|NGINX_LOCAL_RESOLVERS)
 # Exports NGINX_LOCAL_RESOLVERS, the nameservers in /etc/resolv.conf.
 ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 # Where /api/ goes: the compose api service by default; Container Apps passes the API's internal address (#156).
+# scheme://host[:port]; nginx.conf.template drops any path or trailing slash.
 ENV FIELDTRACK_API_URL=http://api:8080
 COPY --from=build /src/dist/fieldtrack-web/browser /usr/share/nginx/html

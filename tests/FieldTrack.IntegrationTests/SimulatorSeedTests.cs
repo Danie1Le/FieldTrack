@@ -132,6 +132,55 @@ public sealed class SimulatorSeedTests(FieldTrackFixture fixture) : IntegrationT
     }
 
     [Fact]
+    public async Task Signing_in_with_the_temporary_password_replaces_it_with_the_final_one()
+    {
+        const string final = "Final-password-1!";
+        await WithUsersAsync(async users =>
+        {
+            var admin = (await users.FindByEmailAsync(FieldTrackApiFactory.AdminEmail)).ShouldNotBeNull();
+            admin.MustChangePassword = true;
+            (await users.UpdateAsync(admin)).Succeeded.ShouldBeTrue();
+        });
+
+        var api = await FieldTrackApi.SignInReplacingTemporaryPasswordAsync(
+            Fixture.Api.CreateClient(), FieldTrackApiFactory.AdminEmail, FieldTrackApiFactory.AdminPassword, final, CancellationToken);
+
+        (await api.ListAssetsAsync(CancellationToken)).ShouldBeEmpty();
+        await FieldTrackApi.SignInAsync(Fixture.Api.CreateClient(), FieldTrackApiFactory.AdminEmail, final, CancellationToken);
+    }
+
+    [Fact]
+    public async Task Signing_in_with_a_temporary_password_already_replaced_signs_in_with_the_final_one_and_leaves_no_failed_attempt()
+    {
+        var api = await FieldTrackApi.SignInReplacingTemporaryPasswordAsync(
+            Fixture.Api.CreateClient(), FieldTrackApiFactory.AdminEmail, "Old-temporary-1!", FieldTrackApiFactory.AdminPassword, CancellationToken);
+
+        (await api.ListAssetsAsync(CancellationToken)).ShouldBeEmpty();
+        // Restarts sign in this way every time; failed attempts that stayed counted would lock the Admin out.
+        await WithUsersAsync(async users =>
+            (await users.FindByEmailAsync(FieldTrackApiFactory.AdminEmail)).ShouldNotBeNull().AccessFailedCount.ShouldBe(0));
+    }
+
+    [Fact]
+    public async Task An_unattended_simulator_whose_sign_in_is_refused_waits_until_stopped_instead_of_exiting()
+    {
+        var environment = new Dictionary<string, string>
+        {
+            ["FIELDTRACK_ADMIN_PASSWORD"] = "Wrong-password-1",
+            ["FIELDTRACK_ADMIN_TEMPORARY_PASSWORD"] = "Wrong-password-2",
+        };
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
+        stop.CancelAfter(TimeSpan.FromSeconds(3));
+        var error = new StringWriter();
+
+        // A container platform restarts a simulator that exits, and each restart's failed sign-ins count towards a lockout.
+        await Should.ThrowAsync<OperationCanceledException>(() => SimulatorCli.SignInAsync(
+            Fixture.Api.CreateClient(), Options.Parse(["--email", FieldTrackApiFactory.AdminEmail]), error, stop.Token, environment.GetValueOrDefault));
+
+        error.ToString().ShouldContain("waiting until stopped");
+    }
+
+    [Fact]
     public async Task Signing_in_with_a_wrong_password_is_refused()
     {
         var exception = await Should.ThrowAsync<SimulatorException>(() =>

@@ -91,8 +91,9 @@ await app.RunAsync();
 public partial class Program
 {
     /// <summary>
-    /// Configuration key that makes a host outside Development create and migrate its database at startup. The Azure demo
-    /// sets it: it has no release pipeline to migrate from, and its single API replica (ADR 0006) means no two hosts race.
+    /// Configuration key that makes a host outside Development create and migrate its database at startup; a failed
+    /// migration stops the host. The Azure demo sets it: it has no release pipeline to migrate from and runs a single API
+    /// replica (ADR 0006). A revision rollover briefly runs two, and EF Core's migration lock serializes their migrations.
     /// </summary>
     public const string MigrateOnStartupKey = "Database:MigrateOnStartup";
 }
