@@ -25,6 +25,10 @@ server {
     # with rewrite instead. nginx's resolver ignores search domains: FIELDTRACK_API_URL needs a name DNS answers as is.
     resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
     set $api ${FIELDTRACK_API_URL};
+    # proxy_pass with a variable sends any path in it as the whole request URI, so keep only scheme://host[:port].
+    if ($api ~ ^(?<api_origin>[^/]+//[^/]+)) {
+        set $api $api_origin;
+    }
 
     proxy_http_version 1.1;
     # The API's own host name, not the dashboard's: Container Apps routes internal requests on it (#156).
