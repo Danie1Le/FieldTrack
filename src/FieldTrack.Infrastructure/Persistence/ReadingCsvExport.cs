@@ -17,9 +17,9 @@ public static class ReadingCsvExport
     /// <summary>The most exports one user runs at once (spec #21).</summary>
     public const int MaxRunningPerUser = 2;
 
-    // Every time is UTC in ISO 8601 with a Z (spec #21).
     private const int BufferSize = 64 * 1024;
 
+    // Every time is UTC in ISO 8601 with a Z (spec #21).
     private const string IsoUtc = "YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"";
 
     /// <summary>How many exports <paramref name="userId"/> is running now, on any host.</summary>
@@ -54,16 +54,39 @@ public static class ReadingCsvExport
     }
 
     /// <summary>
+    /// How much Device time one COPY covers. A range spanning whole partitions makes the planner scan and sort them before
+    /// the first row: 31 days at demo rate (10.7 million Readings) sent no byte for over 30 s, so Npgsql's read timed out,
+    /// and the parallel sort starved ingest. A day sorts in about a second.
+    /// </summary>
+    private static readonly TimeSpan Chunk = TimeSpan.FromDays(1);
+
+    /// <summary>
     /// Writes the Readings stamped with <paramref name="assetId"/> whose Device time is in [<paramref name="from"/>,
     /// <paramref name="to"/>) to <paramref name="destination"/> as CSV with a header row, ordered by Device time.
     /// </summary>
     public static async Task CopyAsync(
         NpgsqlConnection connection, Guid assetId, DateTimeOffset from, DateTimeOffset to, Stream destination, CancellationToken cancellationToken)
     {
-        // COPY takes no parameters. Only a Guid and UTC times formatted here reach the SQL, never text a user typed.
-        // A serial starting with - (the only formula character a serial may hold) is prefixed with ' so a spreadsheet
-        // reads it as text (CSV injection); Asset names are not in the file.
-        var sql = string.Create(CultureInfo.InvariantCulture, $"""
+        await using var writer = new StreamWriter(destination, new UTF8Encoding(false), BufferSize, leaveOpen: true);
+        var buffer = new char[BufferSize];
+        for (var start = from; start < to; start += Chunk)
+        {
+            var end = start + Chunk < to ? start + Chunk : to;
+            // Npgsql's raw copy is binary only; a text export decodes and the writer encodes again, one buffer at a time.
+            using var csv = await connection.BeginTextExportAsync(CopyCommand(assetId, start, end, header: start == from), cancellationToken);
+            int read;
+            while ((read = await csv.ReadAsync(buffer, cancellationToken)) > 0)
+            {
+                await writer.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            }
+        }
+    }
+
+    // COPY takes no parameters. Only a Guid and UTC times formatted here reach the SQL, never text a user typed.
+    // A serial starting with - (the only formula character a serial may hold) is prefixed with ' so a spreadsheet
+    // reads it as text (CSV injection); Asset names are not in the file.
+    private static string CopyCommand(Guid assetId, DateTimeOffset from, DateTimeOffset to, bool header) =>
+        string.Create(CultureInfo.InvariantCulture, $"""
             COPY (
                 SELECT CASE WHEN d.serial_number ~ '^[-=+@]' THEN '''' || d.serial_number ELSE d.serial_number END AS device_serial,
                        r.boot, r.seq,
@@ -75,18 +98,8 @@ public static class ReadingCsvExport
                 JOIN devices d ON d.id = r.device_id
                 WHERE r.asset_id = '{assetId}' AND r.device_time >= '{from.UtcDateTime:O}' AND r.device_time < '{to.UtcDateTime:O}'
                 ORDER BY r.device_time, r.device_id, r.boot, r.seq
-            ) TO STDOUT WITH (FORMAT csv, HEADER)
+            ) TO STDOUT WITH (FORMAT csv{(header ? ", HEADER" : "")})
             """);
-        // Npgsql's raw copy is binary only; a text export decodes and the writer encodes again, one buffer at a time.
-        using var csv = await connection.BeginTextExportAsync(sql, cancellationToken);
-        await using var writer = new StreamWriter(destination, new UTF8Encoding(false), BufferSize, leaveOpen: true);
-        var buffer = new char[BufferSize];
-        int read;
-        while ((read = await csv.ReadAsync(buffer, cancellationToken)) > 0)
-        {
-            await writer.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        }
-    }
 
     private sealed class Slot(NpgsqlConnection connection, Guid userId, int slot) : IAsyncDisposable
     {
