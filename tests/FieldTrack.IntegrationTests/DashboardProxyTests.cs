@@ -71,6 +71,21 @@ public sealed partial class DashboardProxyTests : IAsyncLifetime
             .ShouldBe($"http {UpstreamAlias}:8080 /hubs/readings?id=1 sni= upgrade=websocket\n");
     }
 
+    [Fact]
+    public async Task Dashboard_forwards_only_the_client_address_its_ingress_added_to_X_Forwarded_For()
+    {
+        using var http = await StartDashboardAsync($"http://{UpstreamAlias}:8080");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/forwarded-for");
+        // The test talks to nginx from a private address, as Container Apps ingress does; ingress appends the address
+        // it accepted the connection from, after whatever the client wrote itself.
+        request.Headers.Add("X-Forwarded-For", "203.0.113.66, 198.51.100.7");
+
+        using var response = await http.SendAsync(request, TestContext.Current.CancellationToken);
+
+        // The API's sign-in rate limit is per client (#169): only the ingress's entry gets through, never the client's own.
+        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldBe("xff=198.51.100.7\n");
+    }
+
     /// <inheritdoc />
     public async ValueTask InitializeAsync()
     {
@@ -82,7 +97,8 @@ public sealed partial class DashboardProxyTests : IAsyncLifetime
         var certificateRequest = new CertificateRequest($"CN={UpstreamAlias}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         using var certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
 
-        // Stands in for the API over HTTP and HTTPS: echoes the scheme, Host header, path, TLS server name and Upgrade header.
+        // Stands in for the API over HTTP and HTTPS: echoes the scheme, Host header, path, TLS server name and Upgrade header,
+        // and at /forwarded-for the X-Forwarded-For header.
         var upstream = new ContainerBuilder(_runtimeImage)
             .WithNetwork(_network)
             .WithNetworkAliases(UpstreamAlias)
@@ -91,7 +107,8 @@ public sealed partial class DashboardProxyTests : IAsyncLifetime
             .WithResourceMapping(
                 Encoding.UTF8.GetBytes(
                     "server { listen 8080; listen 8443 ssl; ssl_certificate /etc/nginx/upstream.crt; ssl_certificate_key /etc/nginx/upstream.key; "
-                    + "location / { return 200 \"$scheme $http_host $request_uri sni=$ssl_server_name upgrade=$http_upgrade\\n\"; } }\n"),
+                    + "location / { return 200 \"$scheme $http_host $request_uri sni=$ssl_server_name upgrade=$http_upgrade\\n\"; } "
+                    + "location /forwarded-for { return 200 \"xff=$http_x_forwarded_for\\n\"; } }\n"),
                 "/etc/nginx/conf.d/default.conf")
             .Build();
         _containers.Add(upstream);
