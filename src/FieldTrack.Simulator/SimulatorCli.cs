@@ -29,9 +29,10 @@ internal static class SimulatorCli
               so a simulator whose --state does not survive a restart (a container) still starts above every earlier Boot.
               --scenario injects the Faults, Power offs, Coverage gaps and clock problems a file scripts (seconds from the start);
               the three rates (events per Device-hour) inject them at random, dropping a draw that would overlap one already
-              running, so long windows at high rates come in under their rate. Only paced runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP by
-              default; ws and wss are MQTT over WebSockets at --mqtt-path (port 80 or 443 unless --mqtt-port is given), wss with TLS,
-              as the Container Apps broker needs. With --mqtt-username the password is read from FIELDTRACK_MQTT_PASSWORD, and
+              running, so long windows at high rates come in under their rate. Only paced runs inject. The Manifest lists
+              what was published and every injection window the run applied. MQTT is plain TCP by default; ws and wss are
+              MQTT over WebSockets at --mqtt-path (port 80 or 443 unless --mqtt-port is given), wss with TLS, as the
+              Container Apps broker needs. With --mqtt-username the password is read from FIELDTRACK_MQTT_PASSWORD, and
               only wss may carry it beyond this machine.
 
           demo --fleet fleets/demo.json --scenario fleets/demo-scenario.json --rate 5 [--duration 300] [run's other options]
@@ -264,6 +265,8 @@ internal static class SimulatorCli
             return new MqttBroker(address);
         }
 
+        // The same rule as BrokerOptions.Validate in the API, minus its compose host: the simulator runs on the host,
+        // where "mosquitto" names nothing local, and references only Domain.
         if (scheme != "wss" && !address.IsLoopback)
         {
             throw new SimulatorException($"The broker password goes only over wss to a host other than this machine; got {address}.");

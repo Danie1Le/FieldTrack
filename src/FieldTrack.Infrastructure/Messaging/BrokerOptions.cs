@@ -52,6 +52,7 @@ public sealed class BrokerOptions : IValidatableObject
             yield return new ValidationResult("Broker:Password needs Broker:Username.", [nameof(Password)]);
         }
 
+        // SimulatorCli.BrokerFrom applies the same rule to the simulator, without the compose host, which it never reaches by name.
         if (!string.IsNullOrEmpty(Username) && !UseTls && !IsLocal(Host))
         {
             yield return new ValidationResult(
