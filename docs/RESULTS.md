@@ -1,14 +1,14 @@
 # Results
 
-The latest headline numbers, each linked to the JSON its run wrote. Methods and bars come from the benchmark method
-([#17](https://github.com/Danie1Le/FieldTrack/issues/17)) and spec [#21](https://github.com/Danie1Le/FieldTrack/issues/21);
-how to run each one is in the [README](../README.md#benchmarks). Every `bench` JSON file also records the git SHA,
-Docker limits, Postgres settings and image tags of its run. The two k6 summaries hold k6 metrics only: they record no SHA
-or environment, so the machine below and the commit named here are the only record of where the 2026-11-18 k6 run
-happened (the earlier #126 run's commit is not recorded).
+The latest headline numbers, each linked to the JSON its run wrote. The methods and bars come from the benchmark method
+([#17](https://github.com/Danie1Le/FieldTrack/issues/17)) and spec [#21](https://github.com/Danie1Le/FieldTrack/issues/21),
+and the [README](../README.md#benchmarks) says how to run each one. Every `bench` JSON file also records the git SHA,
+Docker limits, Postgres settings and image tags of its run. The two k6 summaries hold k6 metrics only, with no SHA or
+environment, so the machine below and the commit named here are the only record of where the 2026-11-18 k6 run
+happened. The commit of the earlier #126 run is not recorded.
 
-All curated runs below were taken on 2026-11-18 (UTC) from commit `8826c90`, each from an empty database, with no other
-stack, test suite or benchmark running on the machine.
+All local runs below were taken on 2026-11-18 (UTC) from commit `8826c90`, each from an empty database, with no other
+stack, test suite or benchmark running on the machine. The one cloud run is in [Azure demo](#azure-demo).
 
 ## Machine
 
@@ -19,8 +19,7 @@ stack, test suite or benchmark running on the machine.
 | Stack | `docker-compose.yml` + `bench/docker-compose.bench.yml` (`shared_buffers=1GB`, `max_wal_size=4GB`, `track_commit_timestamp=on`, `$SYS` every second); PostgreSQL 16.15 + PostGIS 3.6, Mosquitto 2.1.2 |
 | Load | The simulator ran on the host, publishing to the broker through Docker Desktop's port forwarding |
 
-These are laptop numbers: one machine runs the publishers, the broker, ingest and Postgres. No cloud runs are recorded
-yet.
+These are laptop numbers: one machine runs the publishers, the broker, ingest and Postgres.
 
 ## Headline numbers
 
@@ -37,7 +36,8 @@ yet.
 | History query time | report % difference | One Asset's 24 h (180 Readings): partitioned 0.55 ms vs unpartitioned 0.45 ms warm median, partitioned 22% slower (cold 27 vs 13 ms) | Reported | [history](../bench/results/history-20261118T022454Z.json) |
 | API load (k6, 50 Operators, 5 min) | p95 < 150 ms, < 0.1% failed | 24,613 requests, p95 13.7 ms, 0.000% failed; per endpoint p95: Asset list 6.9 ms, Active Alerts 4.4 ms, Alert history 7.3 ms, 24 h history 19.3 ms | **Pass** | [k6](../bench/results/k6-dashboard-2026-11-18T02-45-07-062Z.json) |
 | Test coverage | 80%+ lines on the Domain | 97.4% (191 of 196 coverable lines) when the gate landed, enforced on every pull request | **Pass** | CI (`build-and-test` job) |
-| Infra provisioning time, cloud cost | record them | Not measured: the Azure deployment (#51) is not built yet | Open | |
+| Infra provisioning time | record it | Azure demo from empty: `terraform apply` 12 min 19 s for 31 resources, dashboard healthy 11 s later; destroy 23 min 42 s | Recorded | [Azure demo](#azure-demo) |
+| Cloud cost per session | record it | Not measured: Cost Management had no data for the session yet | Open | [Azure demo](#azure-demo) |
 
 The query benchmarks ran on data from `bench seed-history`
 ([seed run](../bench/results/seed-history-20261118T022125Z.json)): 200 Assets x 30 days x one Reading per 8 minutes along
@@ -60,8 +60,8 @@ the GPX routes, 31 daily partitions, seeded in 63 s.
   is lower, although PUBACKs follow the commit, so the two clocks disagree by ~108 ms at p95 (112 ms against 4 ms). The page uses the
   stricter commit-timestamp number.
 - **Crash duplicates.** The broker received 10 more PUBLISHes than were stored: publisher retries after a PUBACK
-  timeout around a kill, dropped by the Reading key table as identical copies (`publisherRetryCopies`). Redeliveries are
-  not counted separately until ingest metrics are exported (#51).
+  timeout around a kill, dropped by the Reading key table as identical copies (`publisherRetryCopies`). The bench does
+  not count broker redeliveries separately.
 - **Geofence bar is shape-sensitive.** The bar applies to the headline square (5 positions). A 65-position circle of the
   same 1% took 52.4 ms warm with the index (8.8x faster than without): exact `ST_Covers` cost grows with vertices.
 - **History difference is planning time.** At 180 rows both reads take under a millisecond; partition pruning costs
@@ -74,3 +74,50 @@ the GPX routes, 31 daily partitions, seeded in 63 s.
   a vertex about every 600 m, and a range of 1,500 Readings or fewer shows every Reading. At 3,000 points the readings p95
   sat on the 150 ms bar, so the cap was halved; a 24 h route is coarser as a result.
 - **Coverage** is from CI, not a bench run: the Domain was at 97.4% when the gate landed (#49); CI fails a pull request below 80%.
+
+## Azure demo
+
+One session on 2026-11-19 (UTC): the demo stack was deployed from empty, from `main` at `3b646be`, into northcentralus.
+It ran the demo Scenario, was measured for about 11 minutes, and was destroyed. How to run it again, what it cost and
+the problems we hit are in [DEPLOY-AZURE.md](DEPLOY-AZURE.md). Every measurement ran from the laptop above over a
+residential internet connection.
+
+| Measured | Result | Status | Run |
+|---|---|---|---|
+| Alert latency (publish over `wss` to SignalR receive, through ingress and nginx) | 200 of 200 Alerts, 0 missed: p50 121.0 ms, p95 164.9 ms, p99 187.7 ms (server p95 117.6 ms, push p95 52.8 ms). The local run gives p95 97 ms | **Pass** (p95 < 500 ms) | [alert-latency](../bench/results/alert-latency-20261119T041936Z.json) |
+| Provisioning time | Apply demo workflow 13 min 01 s; `terraform apply` 12 min 19 s for 31 resources; dashboard and `/api/health` healthy 11 s after the apply | Recorded | Apply demo job summary |
+| Destroy time | Destroy demo's destroy step 23 min 42 s. The bootstrap stack (14 resources) applied in 101 s and destroyed in 39 s | Recorded | Workflow summaries |
+| MQTT over `wss` through Container Apps ingress | The bench's 410 Readings (10 Devices x 41) went from the laptop over `wss` and were all stored, and every breach raised an Alert. The simulator Container App's Readings arrived too: about 3,011 in the API's first 13 minutes, roughly one per second per Asset | Verified | Same alert-latency run |
+| Per-visitor sign-in rate limit behind ingress and nginx | From the laptop, sign-ins 1 to 10 got 401 and 11 to 12 got 429. In the same minute, a request from the Container Apps environment's own outbound address was not rate limited, so each visitor gets their own partition. The default trusted proxy networks needed no change | Verified | [Steps](DEPLOY-AZURE.md#5-measure) |
+| 31-day CSV export through nginx and ingress | 15 of 15 exports returned 200 with the full file. The largest was 633 rows (78,299 bytes), downloaded in 399 ms | Works at small size | [csv-export](../bench/results/csv-export-20261119T042511Z.json) |
+
+At p95 the cloud run is 68 ms slower than the local one. Push (Alert created to SignalR receive) went from 29 ms to
+53 ms at p95, and the server part (publish to Alert created) from 69 ms to 118 ms. The server part includes the
+publish's trip from the laptop to Azure.
+
+**The alert-latency JSON says `gitDirty: true`.** The bench could not reach a deployed stack until
+[#179](https://github.com/Danie1Le/FieldTrack/pull/179), which merged after the session. The run was made from a clone
+of `3b646be` with a local patch that did what #179 later added: publish over `wss` as broker user `simulator`, prefix
+the API and hub paths with `/api`, and take the clock offset by hand (14 ms; the laptop measured 13.2 to 15.0 ms behind
+NTP just before). The file is kept byte for byte. It still carries the laptop's Docker Desktop description, which the run
+did not use, and empty `containers` and `postgres`. The total latency uses the laptop's clock alone, so it is exact. The
+server and push split assumes the Azure hosts keep NTP time, so it is approximate. With #179 merged, the command in
+[DEPLOY-AZURE.md](DEPLOY-AZURE.md#5-measure) runs the same bench from `main`.
+
+The CSV export file is not a `bench` run. A one-off script signed in as the Admin, exported each Asset for the last 31
+days, and timed the export ticket, the first byte and the download. It records no environment.
+
+### Not measured
+
+- **The PostGIS version on Azure.** The server accepts connections only from Azure addresses, and the session did not
+  read the database password, so no SQL ran. The server reports PostgreSQL 16 with `azure.extensions = POSTGIS`. The
+  API migrates the database before it listens, and it started with the database healthy; the Scenario's Geofence Alert
+  was raised in the cloud. So the migrations ran and PostGIS works, but the extension's version is unknown.
+- **A real 31-day CSV export against the 240 s ingress timeout.** The stack was 13 minutes old. The exports above show
+  that the streamed download works through both proxies, and say nothing about the timeout. A real 31-day export at demo
+  rate is about 2.7 million Readings per Asset.
+- **Whether the Reading key index stays cached on B1ms** (ADR 0004) at demo volume, for the same reason.
+- **Cost per session.** Cost Management returned no rows for the session when checked, and its data lags 8 to 24 hours.
+  At Azure list prices the stack costs about $0.15 an hour before the Container Apps free grant
+  ([estimate](DEPLOY-AZURE.md#what-it-cost)). The free account was never upgraded, so the credit covered whatever it
+  cost.
