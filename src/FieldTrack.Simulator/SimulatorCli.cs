@@ -280,13 +280,17 @@ internal static class SimulatorCli
         : double.IsFinite(rate) && rate >= 0 ? rate
         : throw new SimulatorException($"--{name} must be a number from 0 up (events per Device-hour), got {rate}.");
 
-    /// <summary>The API's base address: https anywhere, plain http only on this machine (the Admin's password and token cross it).</summary>
+    /// <summary>
+    /// The API's base address: https anywhere, plain http only on this machine (the Admin's password and token cross it). A path is
+    /// kept as a prefix for every call, such as the Azure demo's <c>/api</c> behind the dashboard's proxy, so it always ends in a slash.
+    /// </summary>
     internal static Uri ApiAddress(string text) =>
         !Uri.TryCreate(text, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
             ? throw new SimulatorException($"--api must be an absolute http or https URL, got '{text}'.")
         : uri.Scheme == Uri.UriSchemeHttp && !uri.IsLoopback
             ? throw new SimulatorException($"--api {text} would send the Admin's password in cleartext; use https for a host other than this machine.")
-        : uri;
+        // The client's paths are relative, so they resolve under the prefix only when it ends in a slash.
+        : new UriBuilder(uri) { Path = uri.AbsolutePath.TrimEnd('/') + "/" }.Uri;
 
     // The password only comes from the environment: a command-line argument lands in shell history and process lists.
     internal static string Credential(string? option, string variable, Options options, Func<string, string?>? environment = null) =>

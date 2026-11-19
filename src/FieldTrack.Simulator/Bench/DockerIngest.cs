@@ -110,7 +110,7 @@ internal sealed class DockerIngest
     {
         try
         {
-            using var response = await _health.GetAsync("/health", cancellationToken);
+            using var response = await _health.GetAsync("health", cancellationToken);
             return response.IsSuccessStatusCode;
         }
         catch (HttpRequestException)

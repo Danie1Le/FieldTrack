@@ -21,7 +21,7 @@ internal static class AlertLatencyBench
     private const double Hysteresis = 5;
     private const double FaultTempC = 120;
     private const double NormalTempC = 85;
-    private const string HubPath = "/hubs/live";
+    private const string HubPath = "hubs/live";
 
     private static readonly TimeSpan _pushTimeout = TimeSpan.FromSeconds(15);
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
