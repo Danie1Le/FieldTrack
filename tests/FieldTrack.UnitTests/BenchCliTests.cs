@@ -82,4 +82,33 @@ public sealed class BenchCliTests
     {
         Should.Throw<SimulatorException>(() => BenchCli.HistoryWindow(days, interval));
     }
+
+    [Fact]
+    public void The_clock_offset_is_measured_unless_one_is_given()
+    {
+        BenchCli.ClockOffset(null).ShouldBeNull();
+        BenchCli.ClockOffset(14).ShouldBe(TimeSpan.FromMilliseconds(14));
+        BenchCli.ClockOffset(-3.5).ShouldBe(TimeSpan.FromMilliseconds(-3.5));
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(3_600_001.0)]
+    public void An_unusable_clock_offset_is_refused(double milliseconds)
+    {
+        Should.Throw<SimulatorException>(() => BenchCli.ClockOffset(milliseconds)).Message.ShouldContain("--clock-offset-ms");
+    }
+
+    [Theory]
+    [InlineData("throughput", "--mqtt-transport", "wss")]
+    [InlineData("offline", "--mqtt-transport", "ws")]
+    [InlineData("hysteresis", "--clock-offset-ms", "14")]
+    public async Task Only_alert_latency_runs_without_the_local_broker_and_database(string kind, string option, string value)
+    {
+        var refused = await Should.ThrowAsync<SimulatorException>(() => BenchCli.RunAsync(kind, Options.Parse([option, value]), CancellationToken.None));
+
+        refused.Message.ShouldContain(option);
+        refused.Message.ShouldContain("alert-latency");
+    }
 }

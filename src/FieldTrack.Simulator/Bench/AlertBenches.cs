@@ -36,7 +36,9 @@ internal static class AlertBenches
                 throw new SimulatorException("--devices and --alerts must be at least 1.");
             }
 
-            return await AlertLatencyBench.RunAsync(fleet, target, admin, token, api, alerts, devices, configureHub: null, Console.Out, cancellationToken);
+            return await AlertLatencyBench.RunAsync(
+                fleet, target, SimulatorCli.BrokerFrom(options, environment: null), BenchCli.ClockOffset(options.GetNumber("clock-offset-ms")), admin, token, api, alerts, devices,
+                configureHub: null, Console.Out, cancellationToken);
         }
 
         var scenario = Scenario.Load(options.Get("scenario") ?? Path.Combine(FleetDirectory, $"alerts-{kind}-scenario.json"), fleet);

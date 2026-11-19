@@ -39,7 +39,7 @@ public sealed class AlertBenchTests(FieldTrackFixture fixture) : IntegrationTest
         var token = await admin.CreateOperatorTokenAsync(ingest.CreateClient(), CancellationToken);
 
         var outcome = await AlertLatencyBench.RunAsync(
-            Fleet, Target, admin, token, ingest.Server.BaseAddress, trials: 6, devices: 2,
+            Fleet, Target, MqttBroker.Tcp(Fixture.BrokerHost, Fixture.BrokerPort), clockOffset: null, admin, token, ingest.Server.BaseAddress, trials: 6, devices: 2,
             options =>
             {
                 options.Transports = HttpTransportType.LongPolling;
@@ -51,6 +51,7 @@ public sealed class AlertBenchTests(FieldTrackFixture fixture) : IntegrationTest
         results.GetProperty("alertsExpected").GetInt32().ShouldBe(6);
         results.GetProperty("alertsReceived").GetInt32().ShouldBe(6);
         results.GetProperty("missed").GetInt32().ShouldBe(0);
+        results.GetProperty("clockOffsetSource").GetString().ShouldBe("database");
         var latency = results.GetProperty("latencyMs");
         latency.GetProperty("total").GetProperty("count").GetInt64().ShouldBe(6);
         latency.GetProperty("total").GetProperty("p95Ms").GetDouble().ShouldBeInRange(0, 10_000);

@@ -28,10 +28,12 @@ internal static class AlertLatencyBench
 
     /// <summary>
     /// Runs about <paramref name="trials"/> Alerts (spread over the first <paramref name="devices"/> Devices of <paramref name="fleet"/>, which must be seeded)
-    /// and writes the result file. <paramref name="configureHub"/> adjusts the SignalR connection (the integration tests reach an in-process server).
+    /// and writes the result file. The Devices publish to <paramref name="broker"/>. The server and push split uses <paramref name="clockOffset"/>
+    /// when given (a cloud database is out of reach), otherwise the offset measured on the database. <paramref name="configureHub"/> adjusts the
+    /// SignalR connection (the integration tests reach an in-process server).
     /// </summary>
     public static async Task<BenchOutcome> RunAsync(
-        FleetFile fleet, BenchTarget target, FieldTrackApi api, string operatorToken, Uri apiAddress, int trials, int devices,
+        FleetFile fleet, BenchTarget target, MqttBroker broker, TimeSpan? clockOffset, FieldTrackApi api, string operatorToken, Uri apiAddress, int trials, int devices,
         Action<HttpConnectionOptions>? configureHub, TextWriter log, CancellationToken cancellationToken)
     {
         var started = DateTimeOffset.UtcNow;
@@ -66,9 +68,9 @@ internal static class AlertLatencyBench
         var timings = new ConcurrentBag<AlertTiming>();
         var perDevice = (int)Math.Ceiling(trials / (double)used.Count);
         await log.WriteLineAsync($"{used.Count} Devices, {perDevice} Alerts each");
-        await Task.WhenAll(used.Select(device => RunDeviceAsync(device.Serial, assets[device.Serial], boots[device.Serial], perDevice, target, raised, resolved, timings, cancellationToken)));
+        await Task.WhenAll(used.Select(device => RunDeviceAsync(device.Serial, assets[device.Serial], boots[device.Serial], perDevice, broker, raised, resolved, timings, cancellationToken)));
 
-        var offset = await target.Database.ClockOffsetAsync(cancellationToken);
+        var offset = clockOffset ?? await target.Database.ClockOffsetAsync(cancellationToken);
         var latency = AlertLatency.Of([.. timings], offset);
         var missed = (perDevice * used.Count) - timings.Count;
         return await target.WriteResultAsync(
@@ -83,6 +85,7 @@ internal static class AlertLatencyBench
                 latencyMs = latency,
                 // Total is receive minus publish on one clock. Server and push are split at the platform's CreatedAt, corrected by this offset.
                 clockOffsetMs = offset.TotalMilliseconds,
+                clockOffsetSource = clockOffset is null ? "database" : "--clock-offset-ms",
                 basis = "publish starts before the PUBLISH is sent and includes broker, ingest batching, rule evaluation, commit, PUBACK and the SignalR push",
             },
             pass: missed == 0 && latency is { Total.P95Ms: < P95LimitMs },
@@ -90,11 +93,11 @@ internal static class AlertLatencyBench
     }
 
     private static async Task RunDeviceAsync(
-        string serial, Guid assetId, int boot, int count, BenchTarget target,
+        string serial, Guid assetId, int boot, int count, MqttBroker broker,
         ConcurrentDictionary<(Guid Asset, long Sequence), TaskCompletionSource<(JsonElement Alert, DateTimeOffset ReceivedAt)>> raised,
         ConcurrentDictionary<Guid, TaskCompletionSource> resolved, ConcurrentBag<AlertTiming> timings, CancellationToken cancellationToken)
     {
-        await using var publisher = new ReconnectingPublisher(MqttBroker.Tcp(target.BrokerHost, target.BrokerPort), serial, TextWriter.Null);
+        await using var publisher = new ReconnectingPublisher(broker, serial, TextWriter.Null);
         await publisher.ConnectAsync(cancellationToken);
         long sequence = 0;
 

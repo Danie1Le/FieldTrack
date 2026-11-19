@@ -72,7 +72,10 @@ internal static class SimulatorCli
               The alert benchmarks (#45), on a stack whose ingest is running; they seed the fleet (fleets/alerts.json) and create their own Alert
               Rules. `alert-latency` publishes --alerts (default 200) Readings that breach a Threshold rule, over the first --devices (default 10)
               Devices, and listens on SignalR as a new Operator: publish-to-receive p95 must be under 500 ms, split at CreatedAt into server and
-              push time. `offline` runs --scenario (default fleets/alerts-offline-scenario.json: long and short Power offs and Coverage gaps)
+              push time. Against a deployed stack, `alert-latency` takes run's broker options (--mqtt-transport wss --mqtt-host
+              --mqtt-username, password from FIELDTRACK_MQTT_PASSWORD), an --api with a path prefix (https://<dashboard>/api), and
+              --clock-offset-ms <platform clock minus this machine's> in place of the database measurement; only the split depends on it.
+              `offline` runs --scenario (default fleets/alerts-offline-scenario.json: long and short Power offs and Coverage gaps)
               against an Offline rule of --offline-seconds (default 20): every long dropout needs an Alert created within the last Received time
               plus those seconds plus 2 s, and any Alert without a long dropout is a false alarm. `hysteresis` runs --scenario (default
               fleets/alerts-hysteresis-scenario.json, noisy engine temperature) against two Threshold rules (above --threshold, default 90) with
@@ -239,9 +242,11 @@ internal static class SimulatorCli
             });
     }
 
-    /// <summary>The broker of <c>run</c>: <c>--mqtt-transport tcp</c> (default), <c>ws</c> or <c>wss</c>, with its host, port, path and user.</summary>
+    /// <summary>
+    /// The broker of <c>run</c> and <c>bench alert-latency</c>: <c>--mqtt-transport tcp</c> (default), <c>ws</c> or <c>wss</c>, with its host, port, path and user.
+    /// </summary>
     /// <exception cref="SimulatorException">An option is out of range, or a password would cross the network unencrypted.</exception>
-    private static MqttBroker BrokerFrom(Options options, Func<string, string?>? environment)
+    internal static MqttBroker BrokerFrom(Options options, Func<string, string?>? environment)
     {
         var transport = options.Get("mqtt-transport") ?? "tcp";
         var (scheme, defaultPort) = transport switch

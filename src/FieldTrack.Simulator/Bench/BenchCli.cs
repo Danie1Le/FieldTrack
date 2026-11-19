@@ -24,6 +24,12 @@ internal static class BenchCli
                 $"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates, seed-history, geofence, history, alert-latency, offline or hysteresis.");
         }
 
+        // The other benchmarks read the local broker's $SYS counters or the database, so only alert-latency can measure a stack in the cloud.
+        if (kind != "alert-latency" && (options.Get("mqtt-transport") is not (null or "tcp") || options.Get("clock-offset-ms") is not null))
+        {
+            throw new SimulatorException($"--mqtt-transport ws|wss and --clock-offset-ms apply to alert-latency only; {kind} needs the local stack's broker and database.");
+        }
+
         var alertBench = kind is "alert-latency" or "offline" or "hysteresis";
         var rate = options.GetNumber("rate") ?? (kind == "crash" ? 500 : alertBench ? AlertBenches.DefaultRate : 2000);
         var duration = TimeSpan.FromSeconds(options.GetNumber("duration") ?? (kind == "flood" ? 60 : alertBench ? AlertBenches.DefaultDurationSeconds : 600));
@@ -108,6 +114,18 @@ internal static class BenchCli
         return await HistorySeeder.SeedAsync(
             fleet, [.. routeFiles.Select(GpxRoute.Load)], target, DateTimeOffset.UtcNow, span, interval, Console.Out, cancellationToken);
     }
+
+    /// <summary>
+    /// The platform clock minus this machine's from <c>--clock-offset-ms</c>, or null to measure it on the database. A cloud database is out
+    /// of reach, so the offset is given instead (for example this machine against NTP, assuming the cloud hosts keep NTP time).
+    /// </summary>
+    /// <exception cref="SimulatorException">The value is not finite or more than an hour either way.</exception>
+    internal static TimeSpan? ClockOffset(double? milliseconds) => milliseconds switch
+    {
+        null => null,
+        { } ms when double.IsFinite(ms) && Math.Abs(ms) <= TimeSpan.FromHours(1).TotalMilliseconds => TimeSpan.FromMilliseconds(ms),
+        _ => throw new SimulatorException($"--clock-offset-ms must be a number of milliseconds within an hour either way, got {milliseconds}."),
+    };
 
     /// <summary>The history's length and spacing from <c>--days</c> and <c>--interval</c> (seconds), defaulting to 30 days and 480 s.</summary>
     /// <exception cref="SimulatorException">A value is not finite, <paramref name="days"/> is not positive, or <paramref name="intervalSeconds"/> is under one second.</exception>
