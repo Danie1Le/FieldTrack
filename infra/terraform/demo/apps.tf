@@ -192,7 +192,10 @@ resource "azurerm_container_app" "api" {
       }
       # Ingress and the dashboard's nginx reach the API from private addresses inside the environment; it believes
       # X-Forwarded-For only from them, so the sign-in rate limit is per visitor (Program.TrustedProxyNetworksKey, #169).
-      # Keep equal to set_real_ip_from in web/nginx.conf.template.
+      # Keep the private IPv4 ranges equal to set_real_ip_from in web/nginx.conf.template; loopback is ASP.NET Core's
+      # default and the environment reaches the API over IPv4. The source address Container Apps ingress uses is not
+      # documented, so this list cannot be proven before the first apply: #51 lists the post-apply check (two sign-ins from
+      # different networks must land in different rate-limit partitions). A wrong list fails safe, as one shared limit.
       dynamic "env" {
         for_each = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"]
         content {
