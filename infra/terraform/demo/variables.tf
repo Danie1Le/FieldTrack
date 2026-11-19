@@ -4,6 +4,15 @@ variable "resource_group_name" {
   default     = "rg-fieldtrack-demo"
 }
 
+variable "location" {
+  description = "Azure region for every demo resource. Independent of the resource group's location, which does not constrain its resources."
+  type        = string
+  # Free-account subscriptions get no PostgreSQL Flexible Server offer in some regions (westus2, eastus, eastus2 and
+  # southcentralus returned none: "ParameterOutOfRange ... 'Version' should be in: []"). Check a region before
+  # changing this: `az postgres flexible-server list-skus --location <region>` must list server versions and Standard_B1ms.
+  default = "westus3"
+}
+
 variable "admin_email" {
   description = "Email of the first Admin, whose temporary password the simulator replaces with admin-password at its first start. Set it in terraform.tfvars (gitignored) or the workflow, never in a committed file."
   type        = string

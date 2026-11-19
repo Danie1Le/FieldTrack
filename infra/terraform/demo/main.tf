@@ -10,7 +10,8 @@ data "azurerm_resource_group" "demo" {
 }
 
 locals {
-  location = data.azurerm_resource_group.demo.location
+  # var.location, not the resource group's: a group's location does not constrain its resources (see variables.tf).
+  location = var.location
   # Key Vault and PostgreSQL names are global DNS names; a suffix fixed per subscription keeps them unique and stable.
   suffix = substr(sha1(data.azurerm_resource_group.demo.id), 0, 6)
 
