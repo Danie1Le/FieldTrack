@@ -1,0 +1,156 @@
+{
+ "measuredAt": "2026-11-19T04:25:11.406842+00:00",
+ "client": "laptop, residential ISP, via dashboard nginx -> API internal ingress",
+ "exports": [
+  {
+   "asset": "Alert bench 001",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 276.9,
+   "ttfbMs": 353.0,
+   "downloadMs": 355.6
+  },
+  {
+   "asset": "Alert bench 002",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 242.9,
+   "ttfbMs": 287.7,
+   "downloadMs": 288.9
+  },
+  {
+   "asset": "Alert bench 003",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 209.4,
+   "ttfbMs": 291.2,
+   "downloadMs": 292.3
+  },
+  {
+   "asset": "Alert bench 004",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 216.5,
+   "ttfbMs": 264.3,
+   "downloadMs": 266.1
+  },
+  {
+   "asset": "Alert bench 005",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 211.2,
+   "ttfbMs": 306.5,
+   "downloadMs": 307.1
+  },
+  {
+   "asset": "Alert bench 006",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 204.0,
+   "ttfbMs": 282.1,
+   "downloadMs": 282.9
+  },
+  {
+   "asset": "Alert bench 007",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 226.5,
+   "ttfbMs": 287.9,
+   "downloadMs": 288.5
+  },
+  {
+   "asset": "Alert bench 008",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 215.8,
+   "ttfbMs": 270.6,
+   "downloadMs": 271.9
+  },
+  {
+   "asset": "Alert bench 009",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 219.9,
+   "ttfbMs": 286.1,
+   "downloadMs": 287.8
+  },
+  {
+   "asset": "Alert bench 010",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 3446,
+   "dataRows": 41,
+   "issueUrlMs": 214.3,
+   "ttfbMs": 274.7,
+   "downloadMs": 275.1
+  },
+  {
+   "asset": "Excavator 1",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 58410,
+   "dataRows": 482,
+   "issueUrlMs": 196.6,
+   "ttfbMs": 291.4,
+   "downloadMs": 400.7
+  },
+  {
+   "asset": "Generator 1",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 74991,
+   "dataRows": 632,
+   "issueUrlMs": 221.4,
+   "ttfbMs": 310.1,
+   "downloadMs": 420.0
+  },
+  {
+   "asset": "Haul truck 1",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 78299,
+   "dataRows": 633,
+   "issueUrlMs": 234.6,
+   "ttfbMs": 288.9,
+   "downloadMs": 399.2
+  },
+  {
+   "asset": "Haul truck 2",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 77962,
+   "dataRows": 632,
+   "issueUrlMs": 202.2,
+   "ttfbMs": 317.2,
+   "downloadMs": 428.0
+  },
+  {
+   "asset": "Substation sensor 1",
+   "rangeDays": 31,
+   "status": 200,
+   "bytes": 68739,
+   "dataRows": 632,
+   "issueUrlMs": 224.4,
+   "ttfbMs": 278.7,
+   "downloadMs": 390.7
+  }
+ ]
+}
