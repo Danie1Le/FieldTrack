@@ -5,7 +5,12 @@ locals {
   # default branch (protected: changes land through reviewed pull requests) gets the apply/destroy identity.
   # The demo workflows use no GitHub environment: a job with `environment:` gets the subject
   # `repo:<repo>:environment:<name>` instead and would need its own credential here.
-  github_repo = "repo:Danie1Le/FieldTrack"
+  #
+  # GitHub issues OIDC tokens for this repository with the immutable subject format, which embeds the
+  # numeric owner and repository ids, so a credential with the plain `repo:Danie1Le/FieldTrack` subject
+  # never matches (AADSTS700213).
+  # https://docs.github.com/en/actions/reference/security/oidc
+  github_repo = "repo:Danie1Le@${var.github_owner_id}/FieldTrack@${var.github_repository_id}"
 
   # Built-in Key Vault data roles the demo stack may grant to managed identities (its apps read secrets,
   # the deploy identity writes them). Role definition ids are the same in every tenant.

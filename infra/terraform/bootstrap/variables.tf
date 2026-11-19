@@ -24,3 +24,15 @@ variable "budget_alert_email" {
   description = "Address the budget alerts are sent to. Set it in terraform.tfvars, which is gitignored."
   type        = string
 }
+
+variable "github_owner_id" {
+  description = "Numeric id of the GitHub account Danie1Le (public: api.github.com/users/Danie1Le). Part of the immutable OIDC subject."
+  type        = number
+  default     = 157658847
+}
+
+variable "github_repository_id" {
+  description = "Numeric id of the GitHub repository Danie1Le/FieldTrack (public: api.github.com/repos/Danie1Le/FieldTrack). Part of the immutable OIDC subject."
+  type        = number
+  default     = 1458260786
+}

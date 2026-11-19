@@ -56,8 +56,13 @@ run "pull_requests_sign_in_only_as_the_read_only_plan_identity" {
   }
 
   assert {
-    condition     = azurerm_federated_identity_credential.github_main.subject == "repo:Danie1Le/FieldTrack:ref:refs/heads/main"
-    error_message = "The apply identity must trust only the main branch."
+    condition     = azurerm_federated_identity_credential.github_main.subject == "repo:Danie1Le@157658847/FieldTrack@1458260786:ref:refs/heads/main"
+    error_message = "The apply identity must trust only the main branch, in GitHub's immutable subject format."
+  }
+
+  assert {
+    condition     = azurerm_federated_identity_credential.github_pull_request.subject == "repo:Danie1Le@157658847/FieldTrack@1458260786:pull_request"
+    error_message = "The plan identity must trust pull requests, in GitHub's immutable subject format."
   }
 
   assert {
