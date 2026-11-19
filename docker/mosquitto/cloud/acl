@@ -1,0 +1,12 @@
+# Who may use which topic on the public broker (#169). Anything not listed is refused, so whoever holds the
+# simulator's password can neither read the fleet's telemetry nor end ingest's restart grace.
+
+# Ingest reads every version's telemetry (IngestWorker.TopicFilter) and publishes and reads back its own caught-up
+# marker (IngestWorker.CaughtUpTopic, ADR 0005 restart grace).
+user ingest
+topic read fieldtrack/+/devices/+/telemetry
+topic readwrite fieldtrack/ingest/caught-up
+
+# The simulator publishes v1 telemetry (TelemetryPublisher.TopicOf) and nothing else.
+user simulator
+topic write fieldtrack/v1/devices/+/telemetry
