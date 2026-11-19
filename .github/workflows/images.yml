@@ -1,8 +1,9 @@
 name: Images
 
-# Publishes the four images the Azure demo runs (infra/terraform/demo README: Images) for every main commit whose CI
-# passed, tagged with the commit SHA (what Apply demo deploys), main (the demo stack's default) and latest. A commit
-# whose build or tests failed gets no images, so Apply demo cannot deploy it (#169).
+# Publishes the four images the Azure demo runs (infra/terraform/demo README: Images) for main commits whose CI passed,
+# tagged with the commit SHA (what Apply demo deploys), main (the demo stack's default) and latest. A commit whose build
+# or tests failed gets no images, so Apply demo cannot deploy it (#169). A commit superseded while its publish waits in
+# the queue may be skipped (see concurrency below); Apply demo refuses a commit that has no images.
 on:
   workflow_run:
     workflows: [CI]
@@ -13,8 +14,10 @@ permissions:
   contents: read
   packages: write
 
-# One publish at a time, never cancelled halfway through a push. CI runs can finish out of order, so Push moves main and
-# latest only while the commit is still main's newest.
+# One publish at a time, never cancelled halfway through a push. GitHub keeps one waiting run per group and cancels an
+# older waiting one, which is the skipped commit above. CI runs can finish out of order, so Push moves main and latest
+# only while the commit is still main's newest; if the newest commit's CI failed, main and latest stay on the last
+# newest-at-the-time green commit until the next green one.
 concurrency:
   group: images
   cancel-in-progress: false

@@ -44,7 +44,7 @@ To rotate, bump `secrets_version` in `main.tf` and apply: every secret and the d
 
 ### Images
 
-Public GHCR images, published by the Images workflow (`.github/workflows/images.yml`) for every `main` commit whose CI passed, tagged with the commit SHA, and with `main` and `latest` while it is `main`'s newest commit. A commit whose CI failed gets no images, so Apply demo refuses to deploy it. Pass an immutable tag (a commit SHA) per session, as Apply demo does; the defaults track `main`:
+Public GHCR images, published by the Images workflow (`.github/workflows/images.yml`) for `main` commits whose CI passed, tagged with the commit SHA, and with `main` and `latest` while it is `main`'s newest commit. A commit whose CI failed gets no images, so Apply demo refuses to deploy it; so does a commit superseded while its publish waited in the queue (GitHub keeps one waiting run). If the newest commit's CI fails, `main` and `latest` stay on the last green commit that was newest when it published, until the next green commit. Pass an immutable tag (a commit SHA) per session, as Apply demo does; the defaults track `main`:
 
 | Variable | Default | Built from |
 |---|---|---|
