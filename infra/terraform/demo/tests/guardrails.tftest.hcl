@@ -125,6 +125,15 @@ run "stays_on_free_or_credit_covered_features" {
   }
 }
 
+run "deploys_where_flexible_server_is_offered" {
+  command = plan
+
+  assert {
+    condition     = azurerm_postgresql_flexible_server.demo.location == "westus3"
+    error_message = "The database must follow var.location, not the resource group's region (westus2 offers no Flexible Server on a free account)."
+  }
+}
+
 run "lets_the_first_migration_create_postgis" {
   command = plan
 
