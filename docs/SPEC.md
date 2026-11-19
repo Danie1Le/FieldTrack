@@ -126,7 +126,7 @@ Observability: OpenTelemetry -> Azure Monitor / App Insights (Grafana locally)
 | Device simulator | A second Container App at demo rate |
 | MQTT broker | Mosquitto everywhere: a container locally, a Container App reached over MQTT over WebSockets (`wss://…:443`) in Azure (spec #21, ADR 0006) |
 | Database | Azure Database for PostgreSQL Flexible Server, Burstable B1ms (PostgreSQL 16, PostGIS extension enabled), only while demoing |
-| Angular dashboard | The nginx dashboard container as a Container App, proxying `/api` and `/hubs` to the API (one HTTPS address, no CORS) |
+| Angular dashboard | The nginx dashboard container as a Container App, proxying `/api/` (REST and the SignalR hub) to the API (one HTTPS address, no CORS) |
 | Images | GitHub Container Registry (free for public repos) instead of Azure Container Registry |
 | Secrets | Azure Key Vault (managed identity access) |
 | Monitoring | Application Insights + Log Analytics (stay under the free monthly data allowance) |
@@ -250,7 +250,7 @@ The full system runs locally with `docker compose up` (Postgres/PostGIS, Mosquit
 1. **Use the Azure free account** ($200 credit for 30 days, 2026-11-18 to 2026-12-18, in the developer's own billing account). Azure for Students could not verify the school account (#8). The card on file is for identity only, and nothing is charged unless the account is upgraded. When the credit runs out or expires, services stop and the cloud demo is over (ADR 0006).
 2. **Never upgrade to Pay-As-You-Go.** Check the account plan (free) and the remaining credit before every apply.
 3. **Set budget alerts** (Cost Management > Budgets): an email at $1 of usage and another near the end of the credit, so any unexpected usage is visible right away. The budget lives in the `bootstrap` Terraform stack.
-4. **Deploy only to demo.** Run the `demo` stack's apply from GitHub Actions before a demo or recording, then destroy it right after. Only the `bootstrap` stack (state, identity, budget) stays.
+4. **Deploy only to demo.** Run the `demo` stack's apply from GitHub Actions before a demo or recording, then destroy it right after. There is one session (#51): the `bootstrap` stack (state, identities, budget) is applied just before it and destroyed after the demo stack, so nothing stays (ADR 0006, update of 2026-11-18).
 5. **Pick free tiers in Terraform:**
 
 | Component | $0 choice |
