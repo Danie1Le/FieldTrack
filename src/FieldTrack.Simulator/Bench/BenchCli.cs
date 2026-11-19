@@ -24,25 +24,24 @@ internal static class BenchCli
                 $"Unknown benchmark '{kind}'. Use throughput, flood, crash, duplicates, seed-history, geofence, history, alert-latency, offline or hysteresis.");
         }
 
+        // The other benchmarks read the local broker's $SYS counters or the database, so only alert-latency can measure a stack in the cloud.
+        string[] cloudOnly = ["clock-offset-ms", "mqtt-username", "mqtt-path"];
+        if (kind != "alert-latency" && (options.Get("mqtt-transport") is not (null or "tcp") || cloudOnly.Any(name => options.Get(name) is not null)))
+        {
+            throw new SimulatorException(
+                $"--mqtt-transport ws|wss, --clock-offset-ms, --mqtt-username and --mqtt-path apply to alert-latency only; {kind} needs the local stack's broker and database.");
+        }
+
         var alertBench = kind is "alert-latency" or "offline" or "hysteresis";
         var rate = options.GetNumber("rate") ?? (kind == "crash" ? 500 : alertBench ? AlertBenches.DefaultRate : 2000);
         var duration = TimeSpan.FromSeconds(options.GetNumber("duration") ?? (kind == "flood" ? 60 : alertBench ? AlertBenches.DefaultDurationSeconds : 600));
-        var brokerHost = options.Get("mqtt-host") ?? "localhost";
-        var brokerPort = (int)(options.GetNumber("mqtt-port") ?? 1883);
-        var database = DatabaseConnection(options.Get("db"), Environment.GetEnvironmentVariable("FIELDTRACK_DB_PASSWORD"));
-        // No default: on a shared machine a default project name points the result's environment (and a crash run's kills) at someone else's stack.
-        var composeProject = options.Require("compose-project");
+        await using var target = TargetFor(kind, options);
 
         // Before a run that may take ten minutes: a result whose SHA does not identify the code that produced it cannot be reproduced.
         if (options.Get("allow-dirty") != "true" && await BenchEnvironment.GitDirtyAsync(cancellationToken))
         {
             throw new SimulatorException("The working tree has uncommitted changes, so the git SHA in the result would not identify the code measured. Commit them, or pass --allow-dirty true for a trial run.");
         }
-
-        await using var dataSource = NpgsqlDataSource.Create(database);
-        var target = new BenchTarget(
-            brokerHost, brokerPort, new BenchDatabase(dataSource), options.Get("state") ?? "simulator-state.json",
-            options.Get("out") ?? Path.Combine("bench", "results"), composeProject);
 
         if (kind is "seed-history" or "geofence" or "history")
         {
@@ -65,6 +64,30 @@ internal static class BenchCli
             _ => await ThroughputBench.SustainedAsync(fleet, target, rate, duration, Console.Out, cancellationToken),
         };
         return Report(outcome);
+    }
+
+    /// <summary>
+    /// What the benchmark <paramref name="kind"/> measures. An alert-latency run whose <c>--api</c> is not on this machine measures a deployed
+    /// platform: it has no database or compose project, so neither option is needed and the result describes no local stack.
+    /// </summary>
+    /// <exception cref="SimulatorException">An option is unusable, or a remote run has no <c>--clock-offset-ms</c>.</exception>
+    internal static BenchTarget TargetFor(string kind, Options options)
+    {
+        var (host, port) = (options.Get("mqtt-host") ?? "localhost", (int)(options.GetNumber("mqtt-port") ?? 1883));
+        var state = options.Get("state") ?? "simulator-state.json";
+        var output = options.Get("out") ?? Path.Combine("bench", "results");
+        if (kind == "alert-latency" && !ApiAddress(options).IsLoopback)
+        {
+            // Without a database the offset between the platform's clock and this machine's cannot be measured, so it must be given.
+            return options.Get("clock-offset-ms") is null
+                ? throw new SimulatorException("--api is not on this machine, so there is no database to measure the clock offset on: pass --clock-offset-ms.")
+                : new BenchTarget(host, port, LocalDatabase: null, state, output, LocalComposeProject: null);
+        }
+
+        var connection = DatabaseConnection(options.Get("db"), Environment.GetEnvironmentVariable("FIELDTRACK_DB_PASSWORD"));
+        // No default: on a shared machine a default project name points the result's environment (and a crash run's kills) at someone else's stack.
+        var composeProject = options.Require("compose-project");
+        return new BenchTarget(host, port, new BenchDatabase(NpgsqlDataSource.Create(connection)), state, output, composeProject);
     }
 
     // The history is seeded once (30 days of Device time, 200 Devices, a Reading every 8 minutes: 1.08 million); geofence and history then read it.
@@ -108,6 +131,18 @@ internal static class BenchCli
         return await HistorySeeder.SeedAsync(
             fleet, [.. routeFiles.Select(GpxRoute.Load)], target, DateTimeOffset.UtcNow, span, interval, Console.Out, cancellationToken);
     }
+
+    /// <summary>
+    /// The platform clock minus this machine's from <c>--clock-offset-ms</c>, or null to measure it on the database. A cloud database is out
+    /// of reach, so the offset is given instead (for example this machine against NTP, assuming the cloud hosts keep NTP time).
+    /// </summary>
+    /// <exception cref="SimulatorException">The value is not finite or more than an hour either way.</exception>
+    internal static TimeSpan? ClockOffset(double? milliseconds) => milliseconds switch
+    {
+        null => null,
+        { } ms when double.IsFinite(ms) && Math.Abs(ms) <= TimeSpan.FromHours(1).TotalMilliseconds => TimeSpan.FromMilliseconds(ms),
+        _ => throw new SimulatorException($"--clock-offset-ms must be a number of milliseconds within an hour either way, got {milliseconds}."),
+    };
 
     /// <summary>The history's length and spacing from <c>--days</c> and <c>--interval</c> (seconds), defaulting to 30 days and 480 s.</summary>
     /// <exception cref="SimulatorException">A value is not finite, <paramref name="days"/> is not positive, or <paramref name="intervalSeconds"/> is under one second.</exception>

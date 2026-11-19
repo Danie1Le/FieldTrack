@@ -98,6 +98,34 @@ public sealed class SimulatorOptionsTests
     }
 
     [Theory]
+    [InlineData("https://dashboard.example/api")]
+    [InlineData("https://dashboard.example/api/")]
+    public async Task An_API_behind_a_path_prefix_gets_every_call_under_that_prefix(string address)
+    {
+        var requested = new List<string>();
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            requested.Add(request.RequestUri!.AbsoluteUri);
+            return request.Method == HttpMethod.Post ? """{ "accessToken": "token" }""" : "[]";
+        }))
+        { BaseAddress = SimulatorCli.ApiAddress(address) };
+
+        var api = await FieldTrackApi.SignInAsync(http, "admin@example.com", "password", CancellationToken.None);
+        await api.ListAssetsAsync(CancellationToken.None);
+
+        requested.ShouldBe(["https://dashboard.example/api/auth/sign-in", "https://dashboard.example/api/assets"]);
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, string> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(respond(request), System.Text.Encoding.UTF8, "application/json"),
+            });
+    }
+
+    [Theory]
     [InlineData("http://fieldtrack.example.com", "cleartext")]
     [InlineData("localhost:8080", "absolute http or https")]
     [InlineData("ftp://localhost", "absolute http or https")]

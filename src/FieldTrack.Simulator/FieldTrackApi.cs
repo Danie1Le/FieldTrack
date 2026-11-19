@@ -40,7 +40,7 @@ internal sealed class FieldTrackApi
     /// </summary>
     public static async Task<FieldTrackApi> SignInAsync(HttpClient http, string email, string password, CancellationToken cancellationToken)
     {
-        using var response = await http.PostAsJsonAsync("/auth/sign-in", new { email, password }, cancellationToken);
+        using var response = await http.PostAsJsonAsync("auth/sign-in", new { email, password }, cancellationToken);
         if (response.StatusCode == HttpStatusCode.Forbidden)
         {
             throw new SimulatorException(
@@ -62,7 +62,7 @@ internal sealed class FieldTrackApi
     {
         // The temporary password fails once the Admin has moved on; that failure counts towards lockout, but the
         // successful sign-in right after it resets the count.
-        using var response = await http.PostAsJsonAsync("/auth/sign-in", new { email, password = temporaryPassword }, cancellationToken);
+        using var response = await http.PostAsJsonAsync("auth/sign-in", new { email, password = temporaryPassword }, cancellationToken);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             return await SignInAsync(http, email, password, cancellationToken);
@@ -73,46 +73,46 @@ internal sealed class FieldTrackApi
             return await SignedInAsync(http, response, "Sign-in", cancellationToken);
         }
 
-        using var changed = await http.PostAsJsonAsync("/auth/change-password", new { email, currentPassword = temporaryPassword, newPassword = password }, cancellationToken);
+        using var changed = await http.PostAsJsonAsync("auth/change-password", new { email, currentPassword = temporaryPassword, newPassword = password }, cancellationToken);
         return await SignedInAsync(http, changed, "Change password", cancellationToken);
     }
 
     /// <summary>Lists the Assets that are not Archived.</summary>
-    public Task<ApiAsset[]> ListAssetsAsync(CancellationToken cancellationToken) => GetAsync<ApiAsset[]>("/assets", cancellationToken);
+    public Task<ApiAsset[]> ListAssetsAsync(CancellationToken cancellationToken) => GetAsync<ApiAsset[]>("assets", cancellationToken);
 
     /// <summary>Lists every Device, Archived ones too: an Archived serial stays reserved.</summary>
     public Task<ApiDevice[]> ListDevicesAsync(CancellationToken cancellationToken) =>
-        GetAsync<ApiDevice[]>("/devices?includeArchived=true", cancellationToken);
+        GetAsync<ApiDevice[]>("devices?includeArchived=true", cancellationToken);
 
     /// <summary>Lists every Attachment, newest first: one call however large the fleet.</summary>
     public Task<ApiAttachment[]> ListAttachmentsAsync(CancellationToken cancellationToken) =>
-        GetAsync<ApiAttachment[]>("/attachments", cancellationToken);
+        GetAsync<ApiAttachment[]>("attachments", cancellationToken);
 
     /// <summary>Creates an Asset.</summary>
     public Task<ApiAsset> CreateAssetAsync(string name, AssetType type, CancellationToken cancellationToken) =>
-        PostAsync<ApiAsset>("/assets", new { name, type }, cancellationToken);
+        PostAsync<ApiAsset>("assets", new { name, type }, cancellationToken);
 
     /// <summary>Registers a Device.</summary>
     public Task<ApiDevice> CreateDeviceAsync(string serialNumber, CancellationToken cancellationToken) =>
-        PostAsync<ApiDevice>("/devices", new { serialNumber }, cancellationToken);
+        PostAsync<ApiDevice>("devices", new { serialNumber }, cancellationToken);
 
     /// <summary>Attaches a Device to an Asset from now on.</summary>
     public Task<ApiAttachment> AttachAsync(Guid deviceId, Guid assetId, CancellationToken cancellationToken) =>
-        PostAsync<ApiAttachment>("/attachments", new { deviceId, assetId }, cancellationToken);
+        PostAsync<ApiAttachment>("attachments", new { deviceId, assetId }, cancellationToken);
 
     /// <summary>Lists every Alert Rule.</summary>
-    public Task<ApiAlertRule[]> ListAlertRulesAsync(CancellationToken cancellationToken) => GetAsync<ApiAlertRule[]>("/alert-rules", cancellationToken);
+    public Task<ApiAlertRule[]> ListAlertRulesAsync(CancellationToken cancellationToken) => GetAsync<ApiAlertRule[]>("alert-rules", cancellationToken);
 
     /// <summary>Lists every Geofence.</summary>
-    public Task<ApiGeofence[]> ListGeofencesAsync(CancellationToken cancellationToken) => GetAsync<ApiGeofence[]>("/geofences", cancellationToken);
+    public Task<ApiGeofence[]> ListGeofencesAsync(CancellationToken cancellationToken) => GetAsync<ApiGeofence[]>("geofences", cancellationToken);
 
     /// <summary>Creates a Geofence from <paramref name="request"/>, the JSON of <c>POST /geofences</c>.</summary>
     public Task<ApiGeofence> CreateGeofenceAsync(object request, CancellationToken cancellationToken) =>
-        PostAsync<ApiGeofence>("/geofences", request, cancellationToken);
+        PostAsync<ApiGeofence>("geofences", request, cancellationToken);
 
     /// <summary>Creates an Alert Rule from <paramref name="request"/>, the JSON of <c>POST /alert-rules</c>.</summary>
     public Task<ApiAlertRule> CreateAlertRuleAsync(object request, CancellationToken cancellationToken) =>
-        PostAsync<ApiAlertRule>("/alert-rules", request, cancellationToken);
+        PostAsync<ApiAlertRule>("alert-rules", request, cancellationToken);
 
     /// <summary>
     /// Creates an Operator (the role of a dashboard user) with a random password and returns its access token, so a benchmark can listen
@@ -123,8 +123,8 @@ internal sealed class FieldTrackApi
         var email = $"bench-{Guid.NewGuid():N}@bench.example";
         var temporary = $"Tmp-{Guid.NewGuid():N}-aA1!";
         var password = $"Pw-{Guid.NewGuid():N}-aA1!";
-        await PostAsync<JsonElement>("/users", new { email, displayName = "Bench Operator", role = "Operator", temporaryPassword = temporary }, cancellationToken);
-        using var response = await anonymous.PostAsJsonAsync("/auth/change-password", new { email, currentPassword = temporary, newPassword = password }, cancellationToken);
+        await PostAsync<JsonElement>("users", new { email, displayName = "Bench Operator", role = "Operator", temporaryPassword = temporary }, cancellationToken);
+        using var response = await anonymous.PostAsJsonAsync("auth/change-password", new { email, currentPassword = temporary, newPassword = password }, cancellationToken);
         await EnsureSuccessAsync(response, "Change password");
         return (await response.Content.ReadFromJsonAsync<TokenResponse>(_json, cancellationToken))!.AccessToken;
     }

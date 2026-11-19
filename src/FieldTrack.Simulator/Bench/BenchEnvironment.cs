@@ -19,9 +19,13 @@ internal static class BenchEnvironment
         "max_parallel_workers_per_gather", "jit", "random_page_cost",
     ];
 
-    /// <summary>Captures the environment of a benchmark of the compose project <paramref name="composeProject"/> and its database.</summary>
-    public static async Task<object> CaptureAsync(string composeProject, BenchDatabase database, CancellationToken cancellationToken) => new
+    /// <summary>
+    /// Captures the environment of a benchmark of the compose project <paramref name="composeProject"/> and its database; both are null for a
+    /// remote platform, whose containers and settings are out of reach, so only this machine (the load generator) is described.
+    /// </summary>
+    public static async Task<object> CaptureAsync(string? composeProject, BenchDatabase? database, CancellationToken cancellationToken) => new
     {
+        target = database is null ? "remote" : "local",
         gitSha = await TryAsync(() => Shell.RunAsync("git", cancellationToken, "rev-parse", "HEAD")),
         // Uncommitted changes mean the SHA alone does not identify the code that was measured.
         gitDirty = await GitDirtyAsync(cancellationToken),
@@ -29,9 +33,9 @@ internal static class BenchEnvironment
         cpu = new { model = CpuModel(), logicalCores = Environment.ProcessorCount },
         ramBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
         dotnet = RuntimeInformation.FrameworkDescription,
-        docker = await TryAsync(() => DockerAsync(cancellationToken)),
-        containers = await TryAsync(() => ContainersAsync(composeProject, cancellationToken)) ?? [],
-        postgres = await TryAsync(() => database.SettingsAsync(_postgresSettings, cancellationToken)),
+        docker = database is null ? null : await TryAsync(() => DockerAsync(cancellationToken)),
+        containers = composeProject is null ? [] : await TryAsync(() => ContainersAsync(composeProject, cancellationToken)) ?? [],
+        postgres = database is null ? null : await TryAsync(() => database.SettingsAsync(_postgresSettings, cancellationToken)),
     };
 
     /// <summary>Whether the working tree has uncommitted changes; false when git cannot say.</summary>

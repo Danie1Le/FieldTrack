@@ -82,4 +82,77 @@ public sealed class BenchCliTests
     {
         Should.Throw<SimulatorException>(() => BenchCli.HistoryWindow(days, interval));
     }
+
+    [Fact]
+    public void The_clock_offset_is_measured_unless_one_is_given()
+    {
+        BenchCli.ClockOffset(null).ShouldBeNull();
+        BenchCli.ClockOffset(14).ShouldBe(TimeSpan.FromMilliseconds(14));
+        BenchCli.ClockOffset(-3.5).ShouldBe(TimeSpan.FromMilliseconds(-3.5));
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(3_600_001.0)]
+    public void An_unusable_clock_offset_is_refused(double milliseconds)
+    {
+        Should.Throw<SimulatorException>(() => BenchCli.ClockOffset(milliseconds)).Message.ShouldContain("--clock-offset-ms");
+    }
+
+    [Theory]
+    [InlineData("throughput", "--mqtt-transport", "wss")]
+    [InlineData("offline", "--mqtt-transport", "ws")]
+    [InlineData("hysteresis", "--clock-offset-ms", "14")]
+    [InlineData("flood", "--mqtt-username", "simulator")]
+    [InlineData("crash", "--mqtt-path", "/ws")]
+    public async Task Only_alert_latency_runs_without_the_local_broker_and_database(string kind, string option, string value)
+    {
+        var refused = await Should.ThrowAsync<SimulatorException>(() => BenchCli.RunAsync(kind, Options.Parse([option, value]), CancellationToken.None));
+
+        refused.Message.ShouldContain(option);
+        refused.Message.ShouldContain("alert-latency");
+    }
+
+    [Fact]
+    public async Task A_remote_API_needs_neither_a_compose_project_nor_a_database()
+    {
+        await using var target = BenchCli.TargetFor("alert-latency", Options.Parse(["--api", "https://demo.example/api", "--clock-offset-ms", "14"]));
+
+        target.Remote.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_local_API_still_requires_the_compose_project()
+    {
+        Should.Throw<SimulatorException>(() => BenchCli.TargetFor("alert-latency", Options.Parse(["--api", "http://localhost:8080"]))).Message.ShouldContain("--compose-project");
+    }
+
+    [Fact]
+    public void A_remote_run_without_a_clock_offset_is_refused_because_there_is_no_database_to_measure_it_on()
+    {
+        Should.Throw<SimulatorException>(() => BenchCli.TargetFor("alert-latency", Options.Parse(["--api", "https://demo.example/api"]))).Message.ShouldContain("--clock-offset-ms");
+    }
+
+    [Fact]
+    public async Task A_remote_result_records_the_target_and_captures_no_local_stack()
+    {
+        var directory = Directory.CreateTempSubdirectory("ft-51-").FullName;
+        try
+        {
+            await using var target = BenchCli.TargetFor("alert-latency", Options.Parse(["--api", "https://demo.example/api", "--clock-offset-ms", "14", "--out", directory]));
+
+            var outcome = await target.WriteResultAsync("alert-latency", DateTimeOffset.UtcNow, new { }, new { }, pass: true, CancellationToken.None);
+
+            var environment = System.Text.Json.JsonDocument.Parse(outcome.Json).RootElement.GetProperty("environment");
+            environment.GetProperty("target").GetString().ShouldBe("remote");
+            environment.GetProperty("containers").GetArrayLength().ShouldBe(0);
+            environment.GetProperty("postgres").ValueKind.ShouldBe(System.Text.Json.JsonValueKind.Null);
+            environment.GetProperty("docker").ValueKind.ShouldBe(System.Text.Json.JsonValueKind.Null);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }
