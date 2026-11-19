@@ -39,7 +39,8 @@ jobs:
       ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      TF_VAR_admin_email: ${{ vars.DEMO_ADMIN_EMAIL }}
+      # A secret, so GitHub masks it in this public repository's logs; the variable is sensitive, so plan output hides it too.
+      TF_VAR_admin_email: ${{ secrets.DEMO_ADMIN_EMAIL }}
       TF_VAR_resource_group_name: ${{ vars.DEMO_RESOURCE_GROUP }}
       IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
     steps:
@@ -52,6 +53,10 @@ jobs:
           # Keep equal to ci.yml (terraform job), terraform-plan.yml and demo-destroy.yml.
           terraform_version: 1.17.0
           terraform_wrapper: false
+
+      # A missing secret reads as empty; stop before a long apply rather than seed the API with no Admin email.
+      - name: Check the Admin email is set
+        run: '[ -n "$TF_VAR_admin_email" ] || { echo "::error::Set the repository secret DEMO_ADMIN_EMAIL (bootstrap README: After apply)."; exit 1; }'
 
       # Container Apps pulls without registry credentials, so every image must exist and be public. Checked without
       # signing in to GHCR, before a long apply could fail on the pull.

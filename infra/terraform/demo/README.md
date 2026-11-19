@@ -9,14 +9,15 @@ All in the bootstrap's resource group `rg-fieldtrack-demo`, which this stack rea
 | Resource | Name | Notes |
 |---|---|---|
 | Container Apps environment | `cae-fieldtrack-demo` | Consumption only (no workload profile), logs to Log Analytics |
-| Container App: API | `fieldtrack-api` | Ingest worker inside, exactly 1 replica (ADR 0005), internal ingress only, migrates the database at startup (`Database__MigrateOnStartup`; EF Core's migration lock covers a revision rollover's second replica) |
-| Container App: broker | `fieldtrack-mosquitto` | `docker/mosquitto/cloud`, external HTTPS ingress, MQTT over `wss://…/mqtt`, users `ingest` and `simulator`, exactly 1 replica |
+| Container App: API | `fieldtrack-api` | Ingest worker inside, exactly 1 replica (ADR 0005), internal ingress only, migrates the database at startup (`Database__MigrateOnStartup`; EF Core's migration lock covers a revision rollover's second replica), believes `X-Forwarded-For` only from private addresses (ingress and nginx), so the sign-in rate limit is per visitor |
+| Container App: broker | `fieldtrack-mosquitto` | `docker/mosquitto/cloud`, external HTTPS ingress, MQTT over `wss://…/mqtt`, users `ingest` (reads telemetry) and `simulator` (only publishes it), exactly 1 replica |
 | Container App: dashboard | `fieldtrack-dashboard` | nginx, the one public web address; proxies `/api/` (REST and the SignalR hub) to the API's internal address |
 | Container App: simulator | `fieldtrack-simulator` | `demo` at 5 Readings/s over `wss`; replaces the Admin's temporary password at its first start; `--first-boot clock`, because its state file does not survive a restart |
 | PostgreSQL Flexible Server | `psql-fieldtrack-<suffix>` | B1ms (1 vCore, 2 GiB), PostgreSQL 16, 32 GiB, `azure.extensions = POSTGIS`, public access from any Azure IP address (every tenant's, not only this environment's: the 24-character password and TLS protect it); no HA, geo-redundant backup or maintenance window |
 | Key Vault | `kv-fieldtrack-<suffix>` | RBAC mode, purged on destroy; holds every generated secret |
-| User-assigned identity | `id-fieldtrack-apps` | Key Vault Secrets User on the vault; the API and simulator resolve their Key Vault references with it |
+| User-assigned identity | `id-fieldtrack-apps` | Key Vault Secrets User on the vault; the API resolves its Key Vault references with it |
 | User-assigned identity | `id-fieldtrack-broker` | Key Vault Secrets User on the two MQTT passwords only: the internet-facing broker cannot read the other secrets |
+| User-assigned identity | `id-fieldtrack-simulator` | Key Vault Secrets User on `admin-temporary-password`, `admin-password` and `mqtt-simulator-password` only: the simulator cannot read the signing key, the connection string or the ingest password |
 | Log Analytics workspace | `log-fieldtrack-demo` | 30-day retention, daily cap (`log_daily_cap_gb`, default 0.5 GB) |
 | Application Insights | `appi-fieldtrack-demo` | Workspace-based, same daily cap; the API gets its connection string and `AzureMonitor__SamplingRatio` |
 
@@ -43,7 +44,7 @@ To rotate, bump `secrets_version` in `main.tf` and apply: every secret and the d
 
 ### Images
 
-Public GHCR images, published by the Images workflow (`.github/workflows/images.yml`) on every push to `main` with three tags: the commit SHA, `main` and `latest`. Pass an immutable tag (a commit SHA) per session, as Apply demo does; the defaults track `main`:
+Public GHCR images, published by the Images workflow (`.github/workflows/images.yml`) for `main` commits whose CI passed, tagged with the commit SHA, and with `main` and `latest` while it is `main`'s newest commit. A commit whose CI failed gets no images, so Apply demo refuses to deploy it; so does a commit superseded while its publish waited in the queue (GitHub keeps one waiting run). If the newest commit's CI fails, `main` and `latest` stay on the last green commit that was newest when it published, until the next green commit. Pass an immutable tag (a commit SHA) per session, as Apply demo does; the defaults track `main`:
 
 | Variable | Default | Built from |
 |---|---|---|
@@ -58,7 +59,7 @@ The broker keeps its persistence file on the replica's own ephemeral storage, no
 
 ## Apply
 
-Normally from the **Apply demo** workflow (`.github/workflows/demo-apply.yml`, Actions → Apply demo → Run workflow, on `main` only). It signs in as the apply identity with OIDC, checks that the four images exist and are public at the chosen tag (input `image_tag`, default the run's commit SHA), applies, then polls `<dashboard_url>/api/health` until the dashboard, API and database answer. The job summary records the apply time, the time from apply start until the dashboard answers (#51's provisioning time) and the dashboard URL. It reads the repository variables listed in the bootstrap README (After apply), including `DEMO_ADMIN_EMAIL` for `admin_email`.
+Normally from the **Apply demo** workflow (`.github/workflows/demo-apply.yml`, Actions → Apply demo → Run workflow, on `main` only). It signs in as the apply identity with OIDC, checks that the four images exist and are public at the chosen tag (input `image_tag`, default the run's commit SHA), applies, then polls `<dashboard_url>/api/health` until the dashboard, API and database answer. The job summary records the apply time, the time from apply start until the dashboard answers (#51's provisioning time) and the dashboard URL. It reads the repository variables listed in the bootstrap README (After apply), and the repository secret `DEMO_ADMIN_EMAIL` for `admin_email` (a secret and a sensitive variable, so the public run logs never show it).
 
 From the laptop (signed in with `az login` as the subscription owner, with Storage Blob Data Contributor on the state account, see the bootstrap README):
 
@@ -75,7 +76,7 @@ The `<...>` values are the bootstrap outputs. `admin_email` has no default, so n
 
 ## After apply
 
-Nothing is manual. The API seeds the first Admin with `admin-temporary-password`, which must be replaced before the Admin can sign in (#61). The simulator does that at its first start (`FIELDTRACK_ADMIN_TEMPORARY_PASSWORD`, then `change-password` to `admin-password`), seeds the demo fleet, Geofence and Alert Rules, and the demo Scenario plays on the dashboard within five minutes. On later restarts the temporary password no longer signs in and the simulator signs in with `admin-password`; that success resets the failed-attempt count, so restarts never lock the Admin out. If neither password signs in, it logs why and waits instead of exiting, because every restart would cost two more failed sign-ins.
+Nothing is manual. The API seeds the first Admin with `admin-temporary-password`, which must be replaced before the Admin can sign in (#61). The simulator does that at its first start (`FIELDTRACK_ADMIN_TEMPORARY_PASSWORD`, then `change-password` to `admin-password`), seeds the demo fleet, Geofence and Alert Rules, and the demo Scenario plays on the dashboard within five minutes. On later restarts the temporary password no longer signs in and the simulator signs in with `admin-password`; that success resets the failed-attempt count, so restarts never lock the Admin out. If neither password signs in (for example after someone locked the Admin out with wrong passwords), it logs why and retries after 16 minutes, past the API's 15-minute lockout, then backs off to hourly, instead of exiting, because every restart would cost two more failed sign-ins.
 
 Visitors sign in as the Demo Operator, whose email and password the login page shows. To sign in as the Admin yourself, read `admin-password` from the vault; that needs a Key Vault data role you grant yourself (`az role assignment create --role "Key Vault Secrets User" …`) and remove again before destroy, since this stack does not own it.
 
@@ -113,3 +114,5 @@ CI's `terraform` job runs, for every stack under `infra/terraform`: `terraform f
 **Pull-request plans while a session is live.** Planning this stack against its live state needs Key Vault data access twice: refreshing the secrets (`-refresh=false` avoids that) and opening the ephemeral `db-password` read, which `-refresh=false` does not avoid. The read-only plan identity deliberately has no Key Vault data role, so the pull-request plan (`.github/workflows/terraform-plan.yml`, job `plan-demo`) runs `plan -lock=false -refresh=false` and skips this stack while a session is applied, where `-refresh=false` alone would still fail. "Applied" means `terraform state list` shows any managed resource (not `data.`): destroy leaves the state file behind, empty, so the file's existence is not the signal, and nobody has to remember to flip a variable. The job reads state with the plan identity's Storage Blob Data Reader and notes the skip in its summary. Do not grant the plan identity secret read to make it pass.
 
 **Pull-request plans before the first Apply demo.** Until Apply demo first runs there is no `demo.tfstate`, and `terraform init` would create it: when the state blob is missing, the azurerm backend leases it and writes an empty state, even with `-lock=false`, which Storage Blob Data Reader cannot do. So `plan-demo` first checks for the blob (`az storage blob exists --auth-mode login`, a read the plan identity has) and, when it is missing, skips the plan with a notice instead of failing. After a destroy the empty state file stays, so plans run again.
+
+**So `plan-demo` rarely runs, by design.** With one session (#51) and the bootstrap applied just before it and destroyed just after, the only window where the job plans is between Destroy demo and the bootstrap teardown; the configuration is not planned against the real subscription before the one Apply that counts. That is accepted: CI's offline `validate` and `terraform test` check the configuration on every pull request, and Apply demo itself is the first real plan. Planning from empty with a local-backend override (the way `plan-bootstrap` does) would run every time, but was not needed for one session.

@@ -90,7 +90,7 @@ terraform output
 | `TF_STATE_STORAGE_ACCOUNT` | `TF_STATE_STORAGE_ACCOUNT` |
 | `TF_STATE_CONTAINER` | `TF_STATE_CONTAINER` |
 
-One more repository variable is not an output: `DEMO_ADMIN_EMAIL`, the first Admin's email, which the demo stack's `admin_email` needs (the Apply, Destroy and plan workflows pass it). It is a sign-in name only (the API sends no mail), and run logs of this public repository show it, so an address you don't mind being public, or a made-up one, is the right choice.
+One value is not an output and goes under **Secrets** instead: the repository secret `DEMO_ADMIN_EMAIL`, the first Admin's email, which the demo stack's `admin_email` needs. Only Apply demo reads it (Destroy demo and the plan pass a placeholder). It is a sign-in name only (the API sends no mail), but half of the Admin's sign-in: anyone who knows it can lock the Admin out with wrong passwords. As a secret, GitHub masks it in this public repository's run logs, and `admin_email` is a sensitive Terraform variable, so plan and apply output hide it too.
 
 Do not paste these values into files in the repository; workflows read them as `${{ vars.AZURE_CLIENT_ID }}` and so on.
 
@@ -98,12 +98,12 @@ The workflows in `.github/workflows` that use them (#157):
 
 | Workflow | Runs | Identity |
 |---|---|---|
-| `images.yml` (Images) | every push to `main`: builds the four demo images and pushes them to GHCR | none (the job's `GITHUB_TOKEN`, `packages: write`) |
-| `terraform-plan.yml` (Terraform plan) | pull requests touching `infra/`: `plan -lock=false -refresh=false` for both stacks; skipped for forks and while `AZURE_PLAN_CLIENT_ID` is unset | plan |
+| `images.yml` (Images) | after CI passes on a push to `main`: builds the four demo images and pushes them to GHCR | none (the job's `GITHUB_TOKEN`, `packages: write`) |
+| `terraform-plan.yml` (Terraform plan) | pull requests touching `infra/`: `plan -lock=false -refresh=false` for both stacks; skipped for forks and while `AZURE_PLAN_CLIENT_ID` is unset. `plan-demo` also skips before the first Apply demo and while a session is applied, so it rarely runs (demo README: Checks) | plan |
 | `demo-apply.yml` (Apply demo) | by hand on `main` | apply |
 | `demo-destroy.yml` (Destroy demo) | by hand on `main` | apply |
 
-The bootstrap plan starts from empty state (the real state is the local file), so it checks the configuration against the subscription rather than showing a diff. Apply demo and Destroy demo share one concurrency group, so they never overlap.
+The bootstrap plan starts from empty state (the real state is the local file), so it checks the configuration against the subscription rather than showing a diff. Apply demo and Destroy demo have separate concurrency groups (`demo-apply`, `demo-destroy`), so an Apply can never drop a waiting Destroy; the state blob's lease keeps them from changing the stack at once (demo README: Destroy).
 
 GHCR makes a new package private. After the first Images run on `main`, open each of `fieldtrack-api`, `fieldtrack-dashboard`, `fieldtrack-mosquitto` and `fieldtrack-simulator` under your GitHub profile's **Packages**, then **Package settings → Change visibility → Public**: Container Apps pulls them without credentials, and Apply demo refuses to start while one cannot be pulled anonymously.
 
@@ -131,7 +131,7 @@ One session only (#51): apply the demo stack, record the results, destroy the de
 
    The azurerm provider refuses to delete a resource group that still holds resources, so a demo resource left behind stops this step instead of being deleted unseen. This destroy also removes the state account, the identities, the budget and the role assignments, which live at subscription scope outside both resource groups.
 
-4. Delete the repository variables (GitHub → Settings → Secrets and variables → Actions → Variables), so the plan jobs skip instead of failing to sign in as an identity that no longer exists.
+4. Delete the repository variables and the `DEMO_ADMIN_EMAIL` secret (GitHub → Settings → Secrets and variables → Actions), so the plan jobs skip instead of failing to sign in as an identity that no longer exists.
 
 5. Confirm nothing is left:
 

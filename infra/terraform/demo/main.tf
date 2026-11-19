@@ -43,6 +43,8 @@ locals {
 
   # The broker reads only these.
   broker_secrets = ["mqtt-ingest-password", "mqtt-simulator-password"]
+  # The simulator reads only these.
+  simulator_secrets = ["admin-temporary-password", "admin-password", "mqtt-simulator-password"]
 }
 
 # --- Secrets ---------------------------------------------------------------------------------------------------------
@@ -80,7 +82,7 @@ resource "azurerm_key_vault" "demo" {
   soft_delete_retention_days = 7
 }
 
-# The API's and simulator's identity reads secrets; Container Apps resolves the Key Vault references with it.
+# The API's identity reads secrets; Container Apps resolves the API's Key Vault references with it.
 resource "azurerm_user_assigned_identity" "apps" {
   name                = "id-fieldtrack-apps"
   location            = local.location
@@ -157,10 +159,27 @@ resource "azurerm_role_assignment" "broker_reads_mqtt_secrets" {
   principal_type       = "ServicePrincipal"
 }
 
-# The broker's grants need the secrets, so they wait in a sleep of their own.
-resource "time_sleep" "broker_role_propagation" {
+# Likewise the simulator gets an identity that can read only the Admin's two passwords and its own MQTT password, not
+# the signing key, the connection string or the ingest password.
+resource "azurerm_user_assigned_identity" "simulator" {
+  name                = "id-fieldtrack-simulator"
+  location            = local.location
+  resource_group_name = data.azurerm_resource_group.demo.name
+}
+
+resource "azurerm_role_assignment" "simulator_reads_its_secrets" {
+  for_each = toset(local.simulator_secrets)
+
+  scope                = azurerm_key_vault_secret.demo[each.key].resource_versionless_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.simulator.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# Per-secret grants need the secrets, so they wait in a sleep of their own.
+resource "time_sleep" "per_secret_role_propagation" {
   create_duration = "60s"
-  depends_on      = [azurerm_role_assignment.broker_reads_mqtt_secrets]
+  depends_on      = [azurerm_role_assignment.broker_reads_mqtt_secrets, azurerm_role_assignment.simulator_reads_its_secrets]
 }
 
 # --- Database --------------------------------------------------------------------------------------------------------

@@ -6,7 +6,7 @@ The spec planned Azure for Students, which needs no card. The school account cou
 
 - **Processes:** one Container Apps environment on the Consumption profile only. The API runs with the ingest worker inside, at exactly 1 replica while deployed. The ingest worker must run as a single instance (ADR 0005), the MQTT subscriber stays connected, and SignalR needs no backplane. The simulator is its own Container App at demo rate.
 - **Broker:** Mosquitto as a Container App behind HTTPS ingress, reached with MQTT over WebSockets (`wss://…:443`) with password auth. It is the same broker as local, needs no VNet and adds no cost.
-- **Dashboard:** the nginx dashboard container as a Container App, proxying `/api` and `/hubs` to the API as docker-compose does. The browser sees one HTTPS address, so there is no CORS and no cross-site cookie question. Static Web Apps is not used.
+- **Dashboard:** the nginx dashboard container as a Container App, proxying `/api/` (REST and the SignalR hub) to the API as docker-compose does. The browser sees one HTTPS address, so there is no CORS and no cross-site cookie question. Static Web Apps is not used.
 - **Database:** PostgreSQL Flexible Server B1ms, PostgreSQL 16 with PostGIS, covered by the free account's 12-month hours.
 - **Secrets:** Key Vault, read through managed identity.
 - **Observability:** Application Insights through the Azure Monitor OpenTelemetry Distro, with sampling and a daily cap on.
@@ -36,3 +36,7 @@ The $0 rule stands: money is spent only from the free credit, and the account is
 - The cloud demo has a hard deadline, 2026-12-18. After it the free credit is gone and no further cloud runs are possible without paying.
 - Every session proves `terraform apply` from empty, and the provisioning time is recorded.
 - One API replica means the cloud demo cannot show horizontal scaling.
+
+## Update 2026-11-18: one session, then everything is destroyed (#51)
+
+The demo is recorded in a single session, so the `bootstrap` stack is no longer kept: it is applied from the laptop just before the session and destroyed right after `Destroy demo`, which leaves the subscription with no resources. This replaces "applied once from the laptop and kept" under Layout and "Only `bootstrap` stays" under Cost guardrails. A kept bootstrap would leave the state account, the identities with Contributor and the budget in place after the credit expires. The steps are in `infra/terraform/bootstrap/README.md` (Tear down).

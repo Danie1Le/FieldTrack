@@ -35,8 +35,9 @@ jobs:
       ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      # Required by the configuration even to destroy; the image variables keep their defaults.
-      TF_VAR_admin_email: ${{ vars.DEMO_ADMIN_EMAIL }}
+      # Required by the configuration even to destroy, which never uses it, so a placeholder keeps the real one (a secret
+      # only Apply demo reads) out of the logs. The image variables keep their defaults.
+      TF_VAR_admin_email: admin@example.invalid
       TF_VAR_resource_group_name: ${{ vars.DEMO_RESOURCE_GROUP }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
