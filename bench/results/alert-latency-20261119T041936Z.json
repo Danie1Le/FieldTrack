@@ -1,0 +1,62 @@
+{
+  "bench": "alert-latency",
+  "startedAt": "2026-11-19T04:19:36.6292966+00:00",
+  "pass": true,
+  "parameters": {
+    "devices": 10,
+    "alertsPerDevice": 20,
+    "thresholdC": 105,
+    "hysteresisC": 5,
+    "faultReadingC": 120,
+    "p95LimitMs": 500
+  },
+  "results": {
+    "alertsExpected": 200,
+    "alertsReceived": 200,
+    "missed": 0,
+    "latencyMs": {
+      "total": {
+        "count": 200,
+        "p50Ms": 121.0293,
+        "p95Ms": 164.90628999999998,
+        "p99Ms": 187.671613,
+        "maxMs": 187.7391
+      },
+      "server": {
+        "count": 200,
+        "p50Ms": 72.4383,
+        "p95Ms": 117.61706999999998,
+        "p99Ms": 135.734362,
+        "maxMs": 135.8265
+      },
+      "push": {
+        "count": 200,
+        "p50Ms": 45.6184,
+        "p95Ms": 52.75565,
+        "p99Ms": 63.451999,
+        "maxMs": 63.5573
+      }
+    },
+    "clockOffsetMs": 14,
+    "basis": "publish starts before the PUBLISH is sent and includes broker, ingest batching, rule evaluation, commit, PUBACK and the SignalR push"
+  },
+  "environment": {
+    "gitSha": "3b646be9788096d8b97a04499e48baf33f4fba3f",
+    "gitDirty": true,
+    "os": "Microsoft Windows 10.0.26300",
+    "cpu": {
+      "model": "Intel64 Family 6 Model 158 Stepping 13, GenuineIntel",
+      "logicalCores": 8
+    },
+    "ramBytes": 17118646272,
+    "dotnet": ".NET 10.0.2",
+    "docker": {
+      "engineVersion": "29.9.2",
+      "cpus": 8,
+      "memoryBytes": 8298070016,
+      "operatingSystem": "Docker Desktop"
+    },
+    "containers": [],
+    "postgres": null
+  }
+}
