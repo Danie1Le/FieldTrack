@@ -59,6 +59,23 @@ mock_provider "azurerm" {
 # No real 60 s wait for role propagation in tests.
 mock_provider "time" {}
 
+# Every mocked identity would share one id, and the identity checks could not tell them apart.
+override_resource {
+  target = azurerm_user_assigned_identity.simulator
+  values = {
+    id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-fieldtrack-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-fieldtrack-simulator"
+    principal_id = "33333333-3333-3333-3333-333333333333"
+  }
+}
+
+override_resource {
+  target = azurerm_user_assigned_identity.broker
+  values = {
+    id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-fieldtrack-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-fieldtrack-broker"
+    principal_id = "44444444-4444-4444-4444-444444444444"
+  }
+}
+
 variables {
   admin_email = "admin@example.com"
 }
@@ -214,5 +231,26 @@ run "grants_only_the_roles_the_bootstrap_allows" {
       azurerm_container_app.mosquitto.identity[0].identity_ids == toset([azurerm_user_assigned_identity.broker.id])
     )
     error_message = "The internet-facing broker reads only the two MQTT passwords, with an identity of its own."
+  }
+
+  assert {
+    condition = (
+      toset(keys(azurerm_role_assignment.simulator_reads_its_secrets)) == toset(["admin-temporary-password", "admin-password", "mqtt-simulator-password"]) &&
+      alltrue([for grant in azurerm_role_assignment.simulator_reads_its_secrets : grant.principal_type == "ServicePrincipal" && grant.role_definition_name == "Key Vault Secrets User"]) &&
+      azurerm_container_app.simulator.identity[0].identity_ids == toset([azurerm_user_assigned_identity.simulator.id])
+    )
+    error_message = "The simulator reads only the Admin's passwords and its MQTT password, with an identity of its own (#169)."
+  }
+}
+
+run "believes_x_forwarded_for_only_from_inside_the_environment" {
+  command = plan
+
+  assert {
+    condition = (
+      [for env in azurerm_container_app.api.template[0].container[0].env : env.value if startswith(env.name, "ForwardedHeaders__TrustedNetworks__")]
+      == ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"]
+    )
+    error_message = "The API must trust the private networks its ingress and the dashboard's nginx connect from, and no others (#169)."
   }
 }
