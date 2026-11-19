@@ -7,6 +7,8 @@ variable "resource_group_name" {
 variable "admin_email" {
   description = "Email of the first Admin, whose temporary password the simulator replaces with admin-password at its first start. Set it in terraform.tfvars (gitignored) or the workflow, never in a committed file."
   type        = string
+  # Half of the Admin's sign-in, so plan and apply output in public run logs never show it (#169).
+  sensitive = true
 }
 
 variable "demo_email" {

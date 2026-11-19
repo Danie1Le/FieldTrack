@@ -74,7 +74,7 @@ resource "azurerm_container_app" "mosquitto" {
     }
   }
 
-  depends_on = [time_sleep.broker_role_propagation]
+  depends_on = [time_sleep.per_secret_role_propagation]
 }
 
 resource "azurerm_container_app" "api" {
@@ -190,6 +190,16 @@ resource "azurerm_container_app" "api" {
         name  = "AzureMonitor__SamplingRatio"
         value = tostring(var.app_insights_sampling_ratio)
       }
+      # Ingress and the dashboard's nginx reach the API from private addresses inside the environment; it believes
+      # X-Forwarded-For only from them, so the sign-in rate limit is per visitor (Program.TrustedProxyNetworksKey, #169).
+      # Keep equal to set_real_ip_from in web/nginx.conf.template.
+      dynamic "env" {
+        for_each = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"]
+        content {
+          name  = "ForwardedHeaders__TrustedNetworks__${env.key}"
+          value = env.value
+        }
+      }
     }
   }
 
@@ -237,23 +247,24 @@ resource "azurerm_container_app" "dashboard" {
 
 # Seeds the demo fleet, Geofence and Alert Rules as the Admin, then publishes the demo Scenario at demo rate over wss.
 # At its first start it replaces the Admin's temporary password with admin-password (#61), so no step is manual; if
-# neither password signs in, it waits instead of restarting into a lockout.
+# neither password signs in, it retries after the lockout instead of restarting into another one.
 resource "azurerm_container_app" "simulator" {
   name                         = "fieldtrack-simulator"
   container_app_environment_id = azurerm_container_app_environment.demo.id
   resource_group_name          = data.azurerm_resource_group.demo.name
   revision_mode                = "Single"
 
+  # Its own identity, which can read only its three secrets (main.tf).
   identity {
     type         = "UserAssigned"
-    identity_ids = [local.identity_id]
+    identity_ids = [azurerm_user_assigned_identity.simulator.id]
   }
 
   dynamic "secret" {
-    for_each = toset(["admin-temporary-password", "admin-password", "mqtt-simulator-password"])
+    for_each = toset(local.simulator_secrets)
     content {
       name                = secret.key
-      identity            = local.identity_id
+      identity            = azurerm_user_assigned_identity.simulator.id
       key_vault_secret_id = azurerm_key_vault_secret.demo[secret.key].versionless_id
     }
   }
@@ -301,4 +312,6 @@ resource "azurerm_container_app" "simulator" {
       }
     }
   }
+
+  depends_on = [time_sleep.per_secret_role_propagation]
 }

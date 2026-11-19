@@ -9,14 +9,15 @@ All in the bootstrap's resource group `rg-fieldtrack-demo`, which this stack rea
 | Resource | Name | Notes |
 |---|---|---|
 | Container Apps environment | `cae-fieldtrack-demo` | Consumption only (no workload profile), logs to Log Analytics |
-| Container App: API | `fieldtrack-api` | Ingest worker inside, exactly 1 replica (ADR 0005), internal ingress only, migrates the database at startup (`Database__MigrateOnStartup`; EF Core's migration lock covers a revision rollover's second replica) |
-| Container App: broker | `fieldtrack-mosquitto` | `docker/mosquitto/cloud`, external HTTPS ingress, MQTT over `wss://…/mqtt`, users `ingest` and `simulator`, exactly 1 replica |
+| Container App: API | `fieldtrack-api` | Ingest worker inside, exactly 1 replica (ADR 0005), internal ingress only, migrates the database at startup (`Database__MigrateOnStartup`; EF Core's migration lock covers a revision rollover's second replica), believes `X-Forwarded-For` only from private addresses (ingress and nginx), so the sign-in rate limit is per visitor |
+| Container App: broker | `fieldtrack-mosquitto` | `docker/mosquitto/cloud`, external HTTPS ingress, MQTT over `wss://…/mqtt`, users `ingest` (reads telemetry) and `simulator` (only publishes it), exactly 1 replica |
 | Container App: dashboard | `fieldtrack-dashboard` | nginx, the one public web address; proxies `/api/` (REST and the SignalR hub) to the API's internal address |
 | Container App: simulator | `fieldtrack-simulator` | `demo` at 5 Readings/s over `wss`; replaces the Admin's temporary password at its first start; `--first-boot clock`, because its state file does not survive a restart |
 | PostgreSQL Flexible Server | `psql-fieldtrack-<suffix>` | B1ms (1 vCore, 2 GiB), PostgreSQL 16, 32 GiB, `azure.extensions = POSTGIS`, public access from any Azure IP address (every tenant's, not only this environment's: the 24-character password and TLS protect it); no HA, geo-redundant backup or maintenance window |
 | Key Vault | `kv-fieldtrack-<suffix>` | RBAC mode, purged on destroy; holds every generated secret |
-| User-assigned identity | `id-fieldtrack-apps` | Key Vault Secrets User on the vault; the API and simulator resolve their Key Vault references with it |
+| User-assigned identity | `id-fieldtrack-apps` | Key Vault Secrets User on the vault; the API resolves its Key Vault references with it |
 | User-assigned identity | `id-fieldtrack-broker` | Key Vault Secrets User on the two MQTT passwords only: the internet-facing broker cannot read the other secrets |
+| User-assigned identity | `id-fieldtrack-simulator` | Key Vault Secrets User on `admin-temporary-password`, `admin-password` and `mqtt-simulator-password` only: the simulator cannot read the signing key, the connection string or the ingest password |
 | Log Analytics workspace | `log-fieldtrack-demo` | 30-day retention, daily cap (`log_daily_cap_gb`, default 0.5 GB) |
 | Application Insights | `appi-fieldtrack-demo` | Workspace-based, same daily cap; the API gets its connection string and `AzureMonitor__SamplingRatio` |
 
@@ -75,7 +76,7 @@ The `<...>` values are the bootstrap outputs. `admin_email` has no default, so n
 
 ## After apply
 
-Nothing is manual. The API seeds the first Admin with `admin-temporary-password`, which must be replaced before the Admin can sign in (#61). The simulator does that at its first start (`FIELDTRACK_ADMIN_TEMPORARY_PASSWORD`, then `change-password` to `admin-password`), seeds the demo fleet, Geofence and Alert Rules, and the demo Scenario plays on the dashboard within five minutes. On later restarts the temporary password no longer signs in and the simulator signs in with `admin-password`; that success resets the failed-attempt count, so restarts never lock the Admin out. If neither password signs in, it logs why and waits instead of exiting, because every restart would cost two more failed sign-ins.
+Nothing is manual. The API seeds the first Admin with `admin-temporary-password`, which must be replaced before the Admin can sign in (#61). The simulator does that at its first start (`FIELDTRACK_ADMIN_TEMPORARY_PASSWORD`, then `change-password` to `admin-password`), seeds the demo fleet, Geofence and Alert Rules, and the demo Scenario plays on the dashboard within five minutes. On later restarts the temporary password no longer signs in and the simulator signs in with `admin-password`; that success resets the failed-attempt count, so restarts never lock the Admin out. If neither password signs in (for example after someone locked the Admin out with wrong passwords), it logs why and retries after 16 minutes, past the API's 15-minute lockout, then backs off to hourly, instead of exiting, because every restart would cost two more failed sign-ins.
 
 Visitors sign in as the Demo Operator, whose email and password the login page shows. To sign in as the Admin yourself, read `admin-password` from the vault; that needs a Key Vault data role you grant yourself (`az role assignment create --role "Key Vault Secrets User" …`) and remove again before destroy, since this stack does not own it.
 
