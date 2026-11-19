@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FieldTrack.Simulator;
+using Microsoft.Extensions.Time.Testing;
 
 namespace FieldTrack.IntegrationTests;
 
@@ -162,22 +163,64 @@ public sealed class SimulatorSeedTests(FieldTrackFixture fixture) : IntegrationT
     }
 
     [Fact]
-    public async Task An_unattended_simulator_whose_sign_in_is_refused_waits_until_stopped_instead_of_exiting()
+    public async Task An_unattended_simulator_whose_Admin_is_locked_out_signs_in_once_the_lockout_ends()
+    {
+        var environment = new Dictionary<string, string>
+        {
+            ["FIELDTRACK_ADMIN_PASSWORD"] = FieldTrackApiFactory.AdminPassword,
+            ["FIELDTRACK_ADMIN_TEMPORARY_PASSWORD"] = "Old-temporary-1!",
+        };
+        await WithUsersAsync(async users => (await users.SetLockoutEndDateAsync(
+            (await users.FindByEmailAsync(FieldTrackApiFactory.AdminEmail)).ShouldNotBeNull(), DateTimeOffset.MaxValue)).Succeeded.ShouldBeTrue());
+        var time = new FakeTimeProvider();
+        var error = new StringWriter();
+
+        // A container platform restarts a simulator that exits, and each restart's failed sign-ins count towards a lockout,
+        // so the simulator retries in-process: never sooner than the 15-minute lockout, and never gives up.
+        var signIn = SimulatorCli.SignInAsync(
+            Fixture.Api.CreateClient(), Options.Parse(["--email", FieldTrackApiFactory.AdminEmail]), error, CancellationToken, environment.GetValueOrDefault, time);
+        (await EventuallyAsync(() => Task.FromResult(error.ToString()), log => log.Contains("Retrying in 16 minutes"))).ShouldContain("Retrying in 16 minutes");
+        // The retry timer is armed just after the log line is written, so advance a minute at a time: an advance that
+        // lands before the timer exists is not lost, the timer still fires once 16 minutes have passed in all.
+        for (var minute = 0; minute < 15; minute++)
+        {
+            time.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        await Task.Delay(200, CancellationToken);
+        signIn.IsCompleted.ShouldBeFalse();
+
+        await WithUsersAsync(async users => (await users.SetLockoutEndDateAsync(
+            (await users.FindByEmailAsync(FieldTrackApiFactory.AdminEmail)).ShouldNotBeNull(), null)).Succeeded.ShouldBeTrue());
+        await EventuallyAsync(() => { time.Advance(TimeSpan.FromMinutes(1)); return Task.FromResult(signIn.IsCompleted); }, completed => completed);
+
+        var api = await signIn.WaitAsync(TimeSpan.FromSeconds(30), CancellationToken);
+        (await api.ListAssetsAsync(CancellationToken)).ShouldBeEmpty();
+        error.ToString().ShouldNotContain(FieldTrackApiFactory.AdminEmail);
+    }
+
+    [Fact]
+    public async Task An_unattended_simulator_backs_off_while_its_sign_in_stays_refused()
     {
         var environment = new Dictionary<string, string>
         {
             ["FIELDTRACK_ADMIN_PASSWORD"] = "Wrong-password-1",
             ["FIELDTRACK_ADMIN_TEMPORARY_PASSWORD"] = "Wrong-password-2",
         };
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
-        stop.CancelAfter(TimeSpan.FromSeconds(3));
+        var time = new FakeTimeProvider();
         var error = new StringWriter();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
 
-        // A container platform restarts a simulator that exits, and each restart's failed sign-ins count towards a lockout.
-        await Should.ThrowAsync<OperationCanceledException>(() => SimulatorCli.SignInAsync(
-            Fixture.Api.CreateClient(), Options.Parse(["--email", FieldTrackApiFactory.AdminEmail]), error, stop.Token, environment.GetValueOrDefault));
+        var signIn = SimulatorCli.SignInAsync(
+            Fixture.Api.CreateClient(), Options.Parse(["--email", FieldTrackApiFactory.AdminEmail]), error, stop.Token, environment.GetValueOrDefault, time);
+        await EventuallyAsync(() => Task.FromResult(error.ToString()), log => log.Contains("Retrying in 16 minutes"));
 
-        error.ToString().ShouldContain("waiting until stopped");
+        // The retry timer is armed just after the log line is written; advancing a minute per poll cannot miss it.
+        (await EventuallyAsync(
+            () => { time.Advance(TimeSpan.FromMinutes(1)); return Task.FromResult(error.ToString()); },
+            log => log.Contains("Retrying in 32 minutes"))).ShouldContain("Retrying in 32 minutes");
+        await stop.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(() => signIn);
     }
 
     [Fact]

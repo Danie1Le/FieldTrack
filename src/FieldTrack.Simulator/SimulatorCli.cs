@@ -27,11 +27,12 @@ internal static class SimulatorCli
               injections. Each start raises every Device's Boot (kept in --state) and restarts its Sequence numbers
               at 0. A Device --state does not know starts at Boot 1, or with --first-boot clock at the seconds since 2026,
               so a simulator whose --state does not survive a restart (a container) still starts above every earlier Boot.
-              --scenario injects the Faults, Power offs, Coverage gaps and clock problems a file scripts (seconds from the start); the three rates (events per Device-hour) inject them at random, dropping a draw that
-              would overlap one already running, so long windows at high rates come in under their rate. Only paced
-              runs inject. The Manifest lists what was published and every injection window the run applied. MQTT is plain TCP by
-              default; ws and wss are MQTT over WebSockets at --mqtt-path (port 80 or 443 unless --mqtt-port is given), wss with TLS,
-              as the Container Apps broker needs. With --mqtt-username the password is read from FIELDTRACK_MQTT_PASSWORD, and
+              --scenario injects the Faults, Power offs, Coverage gaps and clock problems a file scripts (seconds from the start);
+              the three rates (events per Device-hour) inject them at random, dropping a draw that would overlap one already
+              running, so long windows at high rates come in under their rate. Only paced runs inject. The Manifest lists
+              what was published and every injection window the run applied. MQTT is plain TCP by default; ws and wss are
+              MQTT over WebSockets at --mqtt-path (port 80 or 443 unless --mqtt-port is given), wss with TLS, as the
+              Container Apps broker needs. With --mqtt-username the password is read from FIELDTRACK_MQTT_PASSWORD, and
               only wss may carry it beyond this machine.
 
           demo --fleet fleets/demo.json --scenario fleets/demo-scenario.json --rate 5 [--duration 300] [run's other options]
@@ -82,7 +83,8 @@ internal static class SimulatorCli
         Credentials: the Admin's password is read from FIELDTRACK_ADMIN_PASSWORD and the email from
         FIELDTRACK_ADMIN_EMAIL unless --email is given. A first Admin must have replaced its temporary password, unless
         FIELDTRACK_ADMIN_TEMPORARY_PASSWORD holds it: then the simulator replaces it with FIELDTRACK_ADMIN_PASSWORD itself, and
-        when neither signs in it waits until stopped instead of exiting (a restart loop would lock the Admin out).
+        when neither signs in it retries after 16 minutes, backing off to hourly, instead of exiting (a restart loop would lock
+        the Admin out).
         """;
 
     public static async Task<int> Main(string[] args)
@@ -156,12 +158,14 @@ internal static class SimulatorCli
 
     /// <summary>
     /// Signs in as the Admin. With FIELDTRACK_ADMIN_TEMPORARY_PASSWORD set, as in the Azure demo, an Admin still on that
-    /// password is first moved to FIELDTRACK_ADMIN_PASSWORD (#61), and a refused sign-in waits until stopped instead of
-    /// exiting: the platform restarts a simulator that exits, and every restart's failed sign-ins count towards locking
-    /// the Admin out. Secrets come from <paramref name="environment"/> (the process environment by default).
+    /// password is first moved to FIELDTRACK_ADMIN_PASSWORD (#61), and a refused sign-in is retried in-process until it
+    /// succeeds or is stopped: the platform restarts a simulator that exits, and every restart's failed sign-ins count
+    /// towards locking the Admin out. The first retry waits out the API's 15-minute lockout, later ones back off.
+    /// Secrets come from <paramref name="environment"/> (the process environment by default).
     /// </summary>
     internal static async Task<FieldTrackApi> SignInAsync(
-        HttpClient http, Options options, TextWriter error, CancellationToken cancellationToken, Func<string, string?>? environment = null)
+        HttpClient http, Options options, TextWriter error, CancellationToken cancellationToken, Func<string, string?>? environment = null,
+        TimeProvider? time = null)
     {
         var email = Credential("email", "FIELDTRACK_ADMIN_EMAIL", options, environment);
         var password = Credential(null, "FIELDTRACK_ADMIN_PASSWORD", options, environment);
@@ -170,17 +174,20 @@ internal static class SimulatorCli
             return await FieldTrackApi.SignInAsync(http, email, password, cancellationToken);
         }
 
-        try
+        // Lockout (AuthServiceCollectionExtensions) lasts 15 minutes; doubling up to 64 keeps wrong passwords from locking it again and again.
+        for (var minutes = 16; ; minutes = Math.Min(minutes * 2, 64))
         {
-            return await FieldTrackApi.SignInReplacingTemporaryPasswordAsync(http, email, temporary, password, cancellationToken);
-        }
-        catch (SignInRefusedException exception)
-        {
-            await error.WriteLineAsync(
-                $"{exception.Message} Neither FIELDTRACK_ADMIN_TEMPORARY_PASSWORD nor FIELDTRACK_ADMIN_PASSWORD signs in; waiting until stopped, "
-                + "because restarting would lock the Admin out.");
-            await Task.Delay(Timeout.Infinite, cancellationToken);
-            throw;
+            try
+            {
+                return await FieldTrackApi.SignInReplacingTemporaryPasswordAsync(http, email, temporary, password, cancellationToken);
+            }
+            catch (SignInRefusedException exception)
+            {
+                await error.WriteLineAsync(
+                    $"{exception.Message} Neither FIELDTRACK_ADMIN_TEMPORARY_PASSWORD nor FIELDTRACK_ADMIN_PASSWORD signs in. Retrying in {minutes} minutes "
+                    + "rather than exiting, because restarting would lock the Admin out.");
+                await Task.Delay(TimeSpan.FromMinutes(minutes), time ?? TimeProvider.System, cancellationToken);
+            }
         }
     }
 
@@ -258,6 +265,8 @@ internal static class SimulatorCli
             return new MqttBroker(address);
         }
 
+        // The same rule as BrokerOptions.Validate in the API, minus its compose host: the simulator runs on the host,
+        // where "mosquitto" names nothing local, and references only Domain.
         if (scheme != "wss" && !address.IsLoopback)
         {
             throw new SimulatorException($"The broker password goes only over wss to a host other than this machine; got {address}.");
