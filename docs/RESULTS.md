@@ -82,7 +82,7 @@ It ran the demo Scenario, was measured for about 11 minutes, and was destroyed. 
 the problems we hit are in [DEPLOY-AZURE.md](DEPLOY-AZURE.md). Every measurement ran from the laptop above over a
 residential internet connection.
 
-| Measured | Result | | Run |
+| Measured | Result | Status | Run |
 |---|---|---|---|
 | Alert latency (publish over `wss` to SignalR receive, through ingress and nginx) | 200 of 200 Alerts, 0 missed: p50 121.0 ms, p95 164.9 ms, p99 187.7 ms (server p95 117.6 ms, push p95 52.8 ms). The local run gives p95 97 ms | **Pass** (p95 < 500 ms) | [alert-latency](../bench/results/alert-latency-20261119T041936Z.json) |
 | Provisioning time | Apply demo workflow 13 min 01 s; `terraform apply` 12 min 19 s for 31 resources; dashboard and `/api/health` healthy 11 s after the apply | Recorded | Apply demo job summary |

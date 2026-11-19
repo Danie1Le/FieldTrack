@@ -203,13 +203,13 @@ Each of these happened during the session or in the days before it.
 
 ### Free accounts can't create Flexible Server in most US regions
 
-The first Apply, in westus2, failed after about 12 minutes with `ParameterOutOfRange: The value of the 'Version' should be in: []`: the free account is
-offered no server versions there. The second, in westus3, failed with `SkuNotAvailable`, although
-`az postgres flexible-server list-skus` listed B1ms there. The list is not proof for a free account; only a real create
-is. We then created throwaway servers in a throwaway resource group to probe regions, and only northcentralus and
-canadacentral reached Ready with B1ms. The demo stack now defaults to northcentralus. The demo README's
-[Region](../infra/terraform/demo/README.md#region) section lists what each region returned. Each failed Apply left a
-partial stack, so run Destroy demo after a failed Apply before trying again.
+The first Apply, in westus2, failed after about 12 minutes with `ParameterOutOfRange: The value of the 'Version' should
+be in: []`: the free account is offered no server versions there. The second, in westus3, failed with `SkuNotAvailable`,
+although `az postgres flexible-server list-skus` listed B1ms there. The list is not proof for a free account; only a
+real create is. We then created throwaway servers in a throwaway resource group to probe regions, and only
+northcentralus and canadacentral reached Ready with B1ms. The demo stack now defaults to northcentralus. The demo
+README's [Region](../infra/terraform/demo/README.md#region) section lists what each region returned. Each failed Apply
+left a partial stack, so run Destroy demo after a failed Apply before trying again.
 
 ### The GitHub OIDC subject uses the immutable format
 
@@ -221,13 +221,15 @@ bootstrap README's [Who can sign in](../infra/terraform/bootstrap/README.md#who-
 
 ### Git Bash rewrites Azure resource ids on Windows
 
-An argument that starts with `/subscriptions/...` looks like a Unix path to Git Bash, which turns it into a Windows path before `az` sees it. We hit this deleting the leftover action
-group by id from the laptop; deleting it by name worked. Prefix the command with `MSYS_NO_PATHCONV=1`, or use names or
-PowerShell. The workflows run on Linux, so only commands you run locally are affected.
+An argument that starts with `/subscriptions/...` looks like a Unix path to Git Bash, which turns it into a Windows path
+before `az` sees it. We hit this deleting the leftover action group by id from the laptop; deleting it by name worked.
+Prefix the command with `MSYS_NO_PATHCONV=1`, or use names or PowerShell. The workflows run on Linux, so only commands
+you run locally are affected.
 
 ### The first Destroy left an action group behind
 
-The id of the "Application Insights Smart Detection" action group has spaces in it, and the cleanup step split the unquoted list of ids on them. The step quotes them now (#177).
+The id of the "Application Insights Smart Detection" action group has spaces in it, and the cleanup step split the
+unquoted list of ids on them. The step quotes them now (#177).
 
 ### `az login` on Windows can pick the wrong account
 
