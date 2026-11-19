@@ -61,6 +61,10 @@ jobs:
           terraform init
           terraform plan -lock=false -refresh=false
 
+  # By design this plans only between Destroy demo and the bootstrap teardown: it skips before the first Apply demo (no
+  # state) and while a session is applied (Key Vault reads), and #51 has one session. So it rarely runs; the offline
+  # validate and terraform test in CI are what check the demo configuration on every pull request
+  # (infra/terraform/demo README: Checks).
   plan-demo:
     if: github.event.pull_request.head.repo.full_name == github.repository && vars.AZURE_PLAN_CLIENT_ID != ''
     runs-on: ubuntu-24.04
@@ -69,7 +73,8 @@ jobs:
       run:
         working-directory: infra/terraform/demo
     env:
-      TF_VAR_admin_email: ${{ vars.DEMO_ADMIN_EMAIL }}
+      # A placeholder, like the bootstrap's budget address: the real one is a secret only Apply demo reads.
+      TF_VAR_admin_email: admin@example.invalid
       TF_VAR_resource_group_name: ${{ vars.DEMO_RESOURCE_GROUP }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
