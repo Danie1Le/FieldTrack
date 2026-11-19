@@ -13,10 +13,12 @@ This stack keeps its state in a local `terraform.tfstate` (it creates the remote
 
 | Identity | Federated credential | Subject | Used by |
 |---|---|---|---|
-| `id-fieldtrack-github-plan` | `github-pull-request` | `repo:Danie1Le/FieldTrack:pull_request` | `terraform plan` on pull requests |
-| `id-fieldtrack-github` | `github-main` | `repo:Danie1Le/FieldTrack:ref:refs/heads/main` | manual apply / destroy runs on `main` |
+| `id-fieldtrack-github-plan` | `github-pull-request` | `repo:Danie1Le@157658847/FieldTrack@1458260786:pull_request` | `terraform plan` on pull requests |
+| `id-fieldtrack-github` | `github-main` | `repo:Danie1Le@157658847/FieldTrack@1458260786:ref:refs/heads/main` | manual apply / destroy runs on `main` |
 
-No GitHub environment is used. A job that sets `environment:` gets the subject `repo:Danie1Le/FieldTrack:environment:<name>` instead, which needs its own credential in `main.tf`.
+GitHub issues tokens for this repository with the [immutable subject format](https://docs.github.com/en/actions/reference/security/oidc), which embeds the numeric owner and repository ids (variables `github_owner_id` and `github_repository_id`, public values). A credential without them fails with `AADSTS700213`.
+
+No GitHub environment is used. A job that sets `environment:` gets the subject `repo:Danie1Le@157658847/FieldTrack@1458260786:environment:<name>` instead, which needs its own credential in `main.tf`.
 
 Pull requests from forks never receive an OIDC token from GitHub. A pull request from a branch in this repository runs branch code, so it signs in only as the read-only plan identity. The apply identity trusts only `main`, and `main` is protected by a repository ruleset: changes land only through a pull request with every review thread resolved and `build-and-test`, `web` and `smoke` passing; force-push and deletion are blocked.
 
