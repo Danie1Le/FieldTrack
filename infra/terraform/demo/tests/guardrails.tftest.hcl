@@ -129,8 +129,8 @@ run "deploys_where_flexible_server_is_offered" {
   command = plan
 
   assert {
-    condition     = azurerm_postgresql_flexible_server.demo.location == "westus3"
-    error_message = "The database must follow var.location, not the resource group's region (westus2 offers no Flexible Server on a free account)."
+    condition     = azurerm_postgresql_flexible_server.demo.location == "northcentralus"
+    error_message = "The database must follow var.location, not the resource group's region (westus2 offers no Flexible Server and westus3 refuses to create one on a free account)."
   }
 }
 

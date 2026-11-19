@@ -59,7 +59,7 @@ The broker keeps its persistence file on the replica's own ephemeral storage, no
 
 ## Region
 
-Every resource is created in `var.location` (default `westus3`), not in the resource group's region: the bootstrap's group is in westus2, and a group's location does not constrain its resources. Some regions offer a free-account subscription no PostgreSQL Flexible Server at all (westus2, eastus, eastus2 and southcentralus did, and Apply failed with `ParameterOutOfRange: The value of the 'Version' should be in: []`). Before changing the region, check that `az postgres flexible-server list-skus --location <region>` lists server versions and `Standard_B1ms`. westus3, westus, centralus, northcentralus and canadacentral did.
+Every resource is created in `var.location` (default `northcentralus`), not in the resource group's region: the bootstrap's group is in westus2, and a group's location does not constrain its resources. On a free-account subscription `az postgres flexible-server list-skus` is not proof that a region works: it lists `Standard_B1ms` in many regions where creating the server fails. Only a real create is proof. With PostgreSQL 16 and B1ms, a create succeeded (server reached Ready) in northcentralus and canadacentral; it failed with `SkuNotAvailable` in westus3 (B1ms and B2s), westus and centralus; and westus2, eastus, eastus2 and southcentralus offered no server versions at all (`ParameterOutOfRange: The value of the 'Version' should be in: []`). To probe another region before changing the default, create a throwaway Flexible Server in a throwaway resource group there, then delete the group.
 
 ## Apply
 
