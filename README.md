@@ -12,10 +12,23 @@ Devices) inside the same transaction, and pushes Asset Status and Alerts live to
 Every Device here is simulated. The simulator also drives the benchmarks behind the numbers on the
 [results page](docs/RESULTS.md).
 
-The vocabulary (Asset, Device, Reading, Boot, Coverage gap, ...) is defined in [GLOSSARY.md](GLOSSARY.md); the
+The vocabulary (Asset, Device, Reading, Boot, Coverage gap, ...) is defined in [GLOSSARY.md](GLOSSARY.md), and the
 decisions behind the design are in [docs/adr](docs/adr). The current spec is
 [issue #21](https://github.com/Danie1Le/FieldTrack/issues/21); [docs/SPEC.md](docs/SPEC.md) is the original proposal it
 replaced.
+
+## Cloud demo
+
+The whole stack ran once on Azure: Container Apps for the API, broker, dashboard and simulator, PostgreSQL Flexible
+Server, Key Vault and Application Insights. Terraform built it from empty from a GitHub Actions button and destroyed it
+afterwards. `terraform apply` took 12 min 19 s for 31 resources, and the dashboard was healthy 11 s later. From a laptop
+publishing over MQTT on `wss`, 200 of 200 Alerts reached the browser's SignalR connection with p95 165 ms, against 97 ms
+on the local stack.
+
+[![The control room on Azure during the demo Scenario, with three Alerting Assets and their Alerts in the feed](docs/media/azure-control-room.png)](docs/DEPLOY-AZURE.md#what-it-looked-like)
+
+The stack no longer exists. [docs/DEPLOY-AZURE.md](docs/DEPLOY-AZURE.md) explains how to run the session again on your
+own subscription, and [docs/RESULTS.md](docs/RESULTS.md#azure-demo) has the numbers and what was not measured.
 
 ## Architecture
 
@@ -173,33 +186,9 @@ at remapped ports.
 Use a fresh stack (`down -v`) between the telemetry, query and alert groups: insert cost grows with the table, the query
 benches need an empty `readings` table, and alert benches leave their rules behind.
 
-**Alert latency against the Azure demo.** `bench alert-latency` also runs against the deployed demo (#51) from this
-machine. It publishes over wss as broker user `simulator`, reaches the API and the SignalR hub through the dashboard's
-proxy under `/api`, and takes the clock offset as an option, because the Flexible Server is out of reach. The other
-benchmarks need the local broker and database and refuse these options. Take the URLs and the vault name from the
-`dashboard_url`, `mqtt_url` and `key_vault_name` outputs of `infra/terraform/demo`; reading the secrets needs the Key
-Vault Secrets User role on the vault.
-
-```sh
-export FIELDTRACK_ADMIN_EMAIL=<the demo's admin_email>
-export FIELDTRACK_ADMIN_PASSWORD="$(az keyvault secret show --vault-name <key_vault_name> -n admin-password --query value -o tsv)"
-export FIELDTRACK_MQTT_PASSWORD="$(az keyvault secret show --vault-name <key_vault_name> -n mqtt-simulator-password --query value -o tsv)"
-dotnet run --project src/FieldTrack.Simulator -c Release -- bench alert-latency \
-  --fleet src/FieldTrack.Simulator/fleets/alerts.json \
-  --api <dashboard_url>/api \
-  --mqtt-transport wss --mqtt-host <host of mqtt_url> --mqtt-username simulator \
-  --clock-offset-ms <ms this machine's clock is behind NTP>
-```
-
-- The total (publish to receive) is on this machine's clock only, so it is exact. The server and push split assumes the
-  Azure hosts keep NTP time: measure this machine against NTP just before the run (on Windows,
-  `w32tm /stripchart /computer:time.windows.com /samples:5`) and pass how far it is behind, in milliseconds (negative
-  when ahead). The result records `clockOffsetSource: "--clock-offset-ms"`; the committed `bench/results/alert-latency-20261119T041936Z.json` is the
-  run made before that field existed (its offset was passed by hand), kept byte for byte.
-- A `--api` that is not on this machine makes the bench treat the platform as remote: no `--compose-project` or `--db`, and the
-  result has `environment.target: "remote"` with no containers, Postgres settings or Docker description (only this machine).
-  `--clock-offset-ms` is then required, as there is no database to measure it on.
-- The run leaves its 10 Assets (Alert bench 001-010), Threshold rules, resolved Alerts and a bench Operator in the demo.
+`bench alert-latency` can also run against a deployed Azure demo, publishing over `wss` and listening through the
+dashboard's proxy. The other benches need the local broker and database. The steps are in
+[DEPLOY-AZURE.md](docs/DEPLOY-AZURE.md#5-measure).
 
 **API load test (k6).** 50 Operators for 5 minutes against the dashboard API while the simulator runs at demo rate; bar
 p95 < 150 ms and < 0.1% failed. The steps are at the top of [`bench/k6/dashboard.js`](bench/k6/dashboard.js); the stack
