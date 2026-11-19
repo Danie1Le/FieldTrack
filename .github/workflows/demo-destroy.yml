@@ -63,9 +63,7 @@ jobs:
 
       - name: Destroy
         run: |
-          echo "### Destroy demo" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Step | Seconds | Result |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          { echo "### Destroy demo"; echo "| Step | Seconds | Result |"; echo "|---|---|---|"; } >> "$GITHUB_STEP_SUMMARY"
           start=$(date +%s)
           status=0
           # Waits for the lease of an Apply that is still running (its job limit is 60 minutes) instead of failing.
@@ -86,12 +84,13 @@ jobs:
         env:
           RESOURCE_GROUP: ${{ vars.DEMO_RESOURCE_GROUP }}
         run: |
-          ids=$(az monitor action-group list --resource-group "$RESOURCE_GROUP" \
-            --query "[?name=='Application Insights Smart Detection'].id" --output tsv)
-          if [ -n "$ids" ]; then
-            az monitor action-group delete --ids $ids
+          # The id contains spaces (the group's name), so each one is read whole and quoted, never word-split.
+          az monitor action-group list --resource-group "$RESOURCE_GROUP" \
+            --query "[?name=='Application Insights Smart Detection'].id" --output tsv |
+          while IFS= read -r id; do
+            az monitor action-group delete --ids "$id"
             echo "Deleted the action group Application Insights Smart Detection." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          done
           left=$(az resource list --resource-group "$RESOURCE_GROUP" --query "[].[type, name]" --output tsv)
           if [ -n "$left" ]; then
             { echo "Still in $RESOURCE_GROUP:"; echo '```'; echo "$left"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
