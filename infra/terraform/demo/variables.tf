@@ -7,10 +7,13 @@ variable "resource_group_name" {
 variable "location" {
   description = "Azure region for every demo resource. Independent of the resource group's location, which does not constrain its resources."
   type        = string
-  # Free-account subscriptions get no PostgreSQL Flexible Server offer in some regions (westus2, eastus, eastus2 and
-  # southcentralus returned none: "ParameterOutOfRange ... 'Version' should be in: []"). Check a region before
-  # changing this: `az postgres flexible-server list-skus --location <region>` must list server versions and Standard_B1ms.
-  default = "westus3"
+  # `az postgres flexible-server list-skus` is not proof on a free account: it lists Standard_B1ms in many regions where
+  # creating the server fails with SkuNotAvailable. Only a real create is proof. Probed with PostgreSQL 16, B1ms:
+  # - created (server reached Ready): northcentralus, canadacentral.
+  # - SkuNotAvailable: westus3 (B1ms and B2s), westus, centralus.
+  # - no server versions offered at all: westus2, eastus, eastus2, southcentralus.
+  # To probe a region, create a throwaway server in a throwaway resource group there, then delete the group.
+  default = "northcentralus"
 }
 
 variable "admin_email" {
