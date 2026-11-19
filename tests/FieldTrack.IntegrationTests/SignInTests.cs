@@ -107,6 +107,8 @@ public sealed class SignInTests(FieldTrackFixture fixture) : IntegrationTest(fix
     [InlineData("198.51.100.9", "{0}")]
     // A trusted peer, but the varying address sits beyond the two proxy hops: a client's own claim.
     [InlineData("10.0.0.5", "{0}, 203.0.113.50, 10.0.0.7")]
+    // Every hop is trusted, so only ForwardLimit = 2 stops the walk at 10.0.0.8; without it the varying address is believed.
+    [InlineData("10.0.0.5", "{0}, 10.0.0.8, 10.0.0.7")]
     public async Task X_Forwarded_For_that_no_trusted_proxy_vouches_for_does_not_escape_the_sign_in_rate_limit(string peer, string chain)
     {
         await using var api = BehindProxy();
