@@ -1,6 +1,6 @@
 # Terraform demo stack
 
-Everything the Azure demo runs, applied from empty for one recorded session and destroyed afterwards (issue #156, layout in [ADR 0006](../../../docs/adr/0006-demo-on-azure-free-account.md), session in #51). The [bootstrap stack](../bootstrap/README.md) must be applied first: it owns the resource group, the state storage and the identity that applies this stack.
+Everything the Azure demo runs. It was applied from empty for one recorded session and destroyed afterwards (issue #156, layout in [ADR 0006](../../../docs/adr/0006-demo-on-azure-free-account.md), session in #51). The [bootstrap stack](../bootstrap/README.md) must be applied first: it owns the resource group, the state storage and the identity that applies this stack.
 
 ## What it creates
 
@@ -86,12 +86,12 @@ Visitors sign in as the Demo Operator, whose email and password the login page s
 
 ## The session (#51)
 
-One session only:
-
-1. Check the remaining credit, apply the bootstrap stack, then **Apply demo**. Record the time from apply until the dashboard answers.
-2. Run the demo and record the evidence. On this first deploy also check: the WebSocket idle behaviour of MQTT and SignalR through ingress (request timeout 240 s), a 31-day CSV export through ingress, that migrations ran (`SELECT * FROM "__EFMigrationsHistory"`, `SELECT extversion FROM pg_extension WHERE extname = 'postgis'`, expect 3.6.x), and the Postgres memory against the Reading key index (`SHOW shared_buffers`, `pg_relation_size` of the key table's index).
-3. **Destroy demo**, record the time, and check for leftovers as in [Destroy](#destroy).
-4. Destroy the bootstrap stack (its README: Tear down).
+The one session ran on 2026-11-19. [docs/DEPLOY-AZURE.md](../../../docs/DEPLOY-AZURE.md) has the whole sequence, from
+checking the credit and applying the bootstrap stack to confirming the subscription is empty, plus what was measured,
+what it cost and what went wrong. It also lists the checks that session could not make: the PostGIS version, a long CSV
+export against the 240 s ingress request timeout, and whether the Reading key index stays cached on B1ms. On a rerun,
+check them from a machine that can reach the server (`SELECT extversion FROM pg_extension WHERE extname = 'postgis'`,
+`SHOW shared_buffers`, and `pg_relation_size` of the key table's index).
 
 ## Destroy
 

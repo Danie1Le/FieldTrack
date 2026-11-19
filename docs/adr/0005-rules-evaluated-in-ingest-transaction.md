@@ -24,7 +24,7 @@ Readings drive rules per Asset in (Boot, Sequence number) order, and only when t
 - **Lock order**, on every path that takes more than one: Device, then Asset (`FOR KEY SHARE` or stronger), then the Alert Rule version, then the Asset Group, then Alert Rules, Alerts and rule state. An Asset Group delete bumps the version before it locks the group `FOR UPDATE`, and a rule change takes the group through its foreign key check after its bump. A rule change locks its target Asset before it checks that the Asset is not Archived and before it bumps the version, so the rule's foreign key check never takes the Asset after the version.
 - **Manual against platform resolve:** both use a conditional update (only when not yet Resolved); the first wins and the other is a no-op.
 
-## Considered Options
+## Considered options
 
 - **Evaluate after commit, in a separate step:** keeps the ingest transaction short, but a crash between the two steps loses evaluations unless an outbox replays them. Redelivered Readings are dropped as duplicates, so they would never be evaluated again.
 - **`ST_Contains` in the database per batch:** matches the spec's wording, but adds a spatial query to every batch, when the handful of Geofences fits in memory.

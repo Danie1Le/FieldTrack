@@ -23,7 +23,7 @@ The $0 rule stands: money is spent only from the free credit, and the account is
 - Before anything is applied, check the account plan (free, not pay-as-you-go) and the remaining credit.
 - Load benchmarks stay local, so numbers never depend on cloud capacity.
 
-## Considered Options
+## Considered options
 
 - **Azure for Students:** no card needed and renews yearly, but the school account could not be verified.
 - **AWS (ECS Fargate, RDS, IoT Core, CloudFront):** chosen briefly (#12) and dropped once the Azure free account was available. IoT Core caps one subscriber connection at 100 msg/s and uses X.509 certificates, so the cloud broker would differ from local Mosquitto. It would also add a second cloud to learn and wire up, while the spec and résumé target Azure.
@@ -40,3 +40,12 @@ The $0 rule stands: money is spent only from the free credit, and the account is
 ## Update 2026-11-18: one session, then everything is destroyed (#51)
 
 The demo is recorded in a single session, so the `bootstrap` stack is no longer kept: it is applied from the laptop just before the session and destroyed right after `Destroy demo`, which leaves the subscription with no resources. This replaces "applied once from the laptop and kept" under Layout and "Only `bootstrap` stays" under Cost guardrails. A kept bootstrap would leave the state account, the identities with Contributor and the budget in place after the credit expires. The steps are in `infra/terraform/bootstrap/README.md` (Tear down).
+
+## Update 2026-11-19: the session ran in northcentralus (#51)
+
+The free account could not create the Flexible Server in westus2 (no server versions offered) or westus3
+(`SkuNotAvailable` for B1ms), so the demo stack's resources now default to northcentralus, where a throwaway B1ms server
+reached Ready. The bootstrap's resource groups stay in westus2, since a group's location does not constrain its
+resources. The layout and guardrails above are unchanged. The session ran once, both stacks were destroyed, and the
+subscription was left with no resource groups and no budgets. The steps are in `docs/DEPLOY-AZURE.md` and the numbers in
+`docs/RESULTS.md`.

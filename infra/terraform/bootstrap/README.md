@@ -1,6 +1,6 @@
 # Terraform bootstrap stack
 
-Applied once from your laptop for the one demo session, then destroyed after the demo stack (see [Tear down](#tear-down-end-of-the-session)). It creates what the `demo` stack and its GitHub Actions workflows need before they can run (issue #155, deployment decision in #12, lifecycle in #51):
+Applied once from your laptop for the one demo session and destroyed after the demo stack (see [Tear down](#tear-down-end-of-the-session)). It creates what the `demo` stack and its GitHub Actions workflows need before they can run (issue #155, deployment decision in #12, lifecycle in #51):
 
 - **State storage:** resource group `rg-fieldtrack-bootstrap`, a Storage account (TLS 1.2, no public blob access, blob versioning, shared-key access off) and container `tfstate`. The demo stack's `azurerm` backend reaches it with `use_azuread_auth = true`.
 - **Demo resource group:** `rg-fieldtrack-demo` (variable `demo_resource_group_name`). The demo stack deploys into it and must use the same name; it reads the group and never creates or deletes it. Destroying the demo stack leaves the group empty, which costs nothing.
@@ -105,7 +105,7 @@ The workflows in `.github/workflows` that use them (#157):
 
 The bootstrap plan starts from empty state (the real state is the local file), so it checks the configuration against the subscription rather than showing a diff. Apply demo and Destroy demo have separate concurrency groups (`demo-apply`, `demo-destroy`), so an Apply can never drop a waiting Destroy; the state blob's lease keeps them from changing the stack at once (demo README: Destroy).
 
-GHCR makes a new package private. After the first Images run on `main`, open each of `fieldtrack-api`, `fieldtrack-dashboard`, `fieldtrack-mosquitto` and `fieldtrack-simulator` under your GitHub profile's **Packages**, then **Package settings → Change visibility → Public**: Container Apps pulls them without credentials, and Apply demo refuses to start while one cannot be pulled anonymously.
+Container Apps pulls the four images (`fieldtrack-api`, `fieldtrack-dashboard`, `fieldtrack-mosquitto` and `fieldtrack-simulator`) without credentials, and Apply demo refuses to start while one cannot be pulled anonymously. In this repository the packages took the public repository's visibility. GHCR can also create a package as private, for example on a fork: then open each one under your GitHub profile's **Packages** and choose **Package settings → Change visibility → Public**.
 
 ## Running the demo stack from the laptop
 
