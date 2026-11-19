@@ -188,17 +188,17 @@ dotnet run --project src/FieldTrack.Simulator -c Release -- bench alert-latency 
   --fleet src/FieldTrack.Simulator/fleets/alerts.json \
   --api <dashboard_url>/api \
   --mqtt-transport wss --mqtt-host <host of mqtt_url> --mqtt-username simulator \
-  --clock-offset-ms <ms this machine's clock is behind NTP> \
-  --compose-project none --db "Host=localhost;Port=1"
+  --clock-offset-ms <ms this machine's clock is behind NTP>
 ```
 
 - The total (publish to receive) is on this machine's clock only, so it is exact. The server and push split assumes the
   Azure hosts keep NTP time: measure this machine against NTP just before the run (on Windows,
   `w32tm /stripchart /computer:time.windows.com /samples:5`) and pass how far it is behind, in milliseconds (negative
-  when ahead). The result records `clockOffsetSource: "--clock-offset-ms"`.
-- `--compose-project none` and a closed `--db` port keep the result's `containers` and `postgres` empty instead of
-  describing a local stack. With `--clock-offset-ms` the bench needs no database. `environment.docker`
-  still describes this machine's Docker Desktop.
+  when ahead). The result records `clockOffsetSource: "--clock-offset-ms"`; the committed `bench/results/alert-latency-20261119T041936Z.json` is the
+  run made before that field existed (its offset was passed by hand), kept byte for byte.
+- A `--api` that is not on this machine makes the bench treat the platform as remote: no `--compose-project` or `--db`, and the
+  result has `environment.target: "remote"` with no containers, Postgres settings or Docker description (only this machine).
+  `--clock-offset-ms` is then required, as there is no database to measure it on.
 - The run leaves its 10 Assets (Alert bench 001-010), Threshold rules, resolved Alerts and a bench Operator in the demo.
 
 **API load test (k6).** 50 Operators for 5 minutes against the dashboard API while the simulator runs at demo rate; bar
